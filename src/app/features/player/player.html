@@ -1,0 +1,8 @@
+<div class="player-page">
+  <video class="video" controls autoplay playsinline [src]="src()"></video>
+
+  <div class="hud">
+    <a routerLink="/" class="btn">← Home</a>
+    <a [routerLink]="['/details', type(), id()]" class="btn">Detalles</a>
+  </div>
+</div>

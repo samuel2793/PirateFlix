@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
+import { Router } from '@angular/router';
 
 type MediaType = 'movie' | 'tv';
 
@@ -16,6 +17,7 @@ type MediaType = 'movie' | 'tv';
 export class DetailsComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly tmdb = inject(TmdbService);
+  private readonly router = inject(Router);
 
   loading = signal(true);
   error = signal<string | null>(null);
@@ -58,5 +60,13 @@ export class DetailsComponent {
 
   overview() {
     return this.item()?.overview ?? '';
+  }
+
+  play() {
+    this.router.navigate([
+      '/play',
+      this.route.snapshot.paramMap.get('type'),
+      this.route.snapshot.paramMap.get('id'),
+    ]);
   }
 }
