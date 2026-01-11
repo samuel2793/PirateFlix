@@ -10,6 +10,25 @@ interface TorrentFile {
   index: number;
   name: string;
   length: number;
+  type?: string;
+}
+
+interface SubtitleTrack {
+  index: number;
+  name: string;
+  language: string;
+  url: string;
+  isEmbedded?: boolean;
+  streamIndex?: number;
+}
+
+interface EmbeddedSubtitle {
+  index: number;
+  codec: string;
+  language: string;
+  title: string;
+  forced: boolean;
+  default: boolean;
 }
 
 interface TorrentInfo {
@@ -45,6 +64,7 @@ export class PlayerComponent implements OnDestroy {
   loadingProgress = signal<number>(0);
   errorMessage = signal<string>('');
   videoSrc = signal<string>('');
+  subtitleTracks = signal<SubtitleTrack[]>([]);
 
   private readonly API_URL = 'http://localhost:3001/api';
   private currentTorrentHash: string | null = null;
@@ -147,11 +167,64 @@ export class PlayerComponent implements OnDestroy {
 
       console.log('Archivo seleccionado:', videoFile.name);
 
+      // Buscar archivos de subtítulos externos
+      const subtitleFiles = torrentInfo.files.filter((file) => {
+        const ext = file.name.toLowerCase();
+        return ext.endsWith('.srt') || ext.endsWith('.vtt') || ext.endsWith('.sub');
+      });
+
+      console.log('Subtítulos externos encontrados:', subtitleFiles.length);
+
+      // Procesar subtítulos externos
+      const subtitles: SubtitleTrack[] = subtitleFiles.map((file, idx) => {
+        const language = this.detectLanguageFromFilename(file.name);
+        return {
+          index: idx, // Usar índice secuencial único
+          name: file.name,
+          language: language,
+          url: `${this.API_URL}/subtitle/${torrentInfo.infoHash}/${file.index}`,
+          isEmbedded: false,
+        };
+      });
+
+      // Detectar subtítulos embebidos en el video
+      try {
+        const embeddedResponse = await fetch(
+          `${this.API_URL}/embedded-subtitles/${torrentInfo.infoHash}/${videoFile.index}`
+        );
+
+        if (embeddedResponse.ok) {
+          const embeddedSubs: EmbeddedSubtitle[] = await embeddedResponse.json();
+          console.log('Subtítulos embebidos encontrados:', embeddedSubs.length);
+
+          // Agregar subtítulos embebidos a la lista
+          embeddedSubs.forEach((sub) => {
+            const langName = this.getLanguageName(sub.language);
+            subtitles.push({
+              index: subtitles.length, // Usar índice secuencial único
+              name: sub.title || `Embedded ${langName}`,
+              language: langName,
+              url: `${this.API_URL}/embedded-subtitle/${torrentInfo.infoHash}/${videoFile.index}/${sub.index}`,
+              isEmbedded: true,
+              streamIndex: sub.index,
+            });
+          });
+        }
+      } catch (error) {
+        console.error('Error al detectar subtítulos embebidos:', error);
+      }
+
+      this.subtitleTracks.set(subtitles);
+
       // Construir URL de streaming
       const streamUrl = `${this.API_URL}/stream/${torrentInfo.infoHash}/${videoFile.index}`;
       this.videoSrc.set(streamUrl);
 
       console.log('URL de streaming:', streamUrl);
+      if (subtitles.length > 0) {
+        console.log('Total de subtítulos disponibles:', subtitles.length);
+        console.log('Subtítulos:', subtitles.map(s => `${s.language} (${s.isEmbedded ? 'embebido' : 'externo'})`).join(', '));
+      }
 
       // Iniciar monitoreo de progreso
       this.startProgressMonitoring();
@@ -185,6 +258,129 @@ export class PlayerComponent implements OnDestroy {
         console.error('Error al obtener progreso:', error);
       }
     }, 1000);
+  }
+
+  getLanguageName(code: string): string {
+    const languageMap: { [key: string]: string } = {
+      'spa': 'Español',
+      'es': 'Español',
+      'eng': 'English',
+      'en': 'English',
+      'fra': 'Français',
+      'fre': 'Français',
+      'fr': 'Français',
+      'deu': 'Deutsch',
+      'ger': 'Deutsch',
+      'de': 'Deutsch',
+      'ita': 'Italiano',
+      'it': 'Italiano',
+      'por': 'Português',
+      'pt': 'Português',
+      'jpn': '日本語',
+      'ja': '日本語',
+      'kor': '한국어',
+      'ko': '한국어',
+      'chi': '中文',
+      'zh': '中文',
+      'rus': 'Русский',
+      'ru': 'Русский',
+      'ara': 'العربية',
+      'ar': 'العربية',
+      'und': 'Desconocido',
+    };
+
+    return languageMap[code.toLowerCase()] || code.toUpperCase();
+  }
+
+  getLanguageCode(languageNameOrCode: string): string {
+    const codeMap: { [key: string]: string } = {
+      'español': 'es',
+      'spanish': 'es',
+      'spa': 'es',
+      'es': 'es',
+      'english': 'en',
+      'inglés': 'en',
+      'eng': 'en',
+      'en': 'en',
+      'français': 'fr',
+      'french': 'fr',
+      'francés': 'fr',
+      'fra': 'fr',
+      'fre': 'fr',
+      'fr': 'fr',
+      'deutsch': 'de',
+      'german': 'de',
+      'alemán': 'de',
+      'deu': 'de',
+      'ger': 'de',
+      'de': 'de',
+      'italiano': 'it',
+      'italian': 'it',
+      'ita': 'it',
+      'it': 'it',
+      'português': 'pt',
+      'portuguese': 'pt',
+      'portugués': 'pt',
+      'por': 'pt',
+      'pt': 'pt',
+      '日本語': 'ja',
+      'japanese': 'ja',
+      'japonés': 'ja',
+      'jpn': 'ja',
+      'ja': 'ja',
+      '한국어': 'ko',
+      'korean': 'ko',
+      'coreano': 'ko',
+      'kor': 'ko',
+      'ko': 'ko',
+      '中文': 'zh',
+      'chinese': 'zh',
+      'chino': 'zh',
+      'chi': 'zh',
+      'zh': 'zh',
+      'русский': 'ru',
+      'russian': 'ru',
+      'ruso': 'ru',
+      'rus': 'ru',
+      'ru': 'ru',
+      'العربية': 'ar',
+      'arabic': 'ar',
+      'árabe': 'ar',
+      'ara': 'ar',
+      'ar': 'ar',
+      'desconocido': 'und',
+      'unknown': 'und',
+      'und': 'und',
+    };
+
+    return codeMap[languageNameOrCode.toLowerCase()] || 'und';
+  }
+
+  detectLanguageFromFilename(filename: string): string {
+    const lower = filename.toLowerCase();
+
+    // Patrones comunes de idiomas en nombres de archivos
+    if (lower.includes('spanish') || lower.includes('español') || lower.includes('spa') || lower.includes('.es.')) {
+      return 'Español';
+    }
+    if (lower.includes('english') || lower.includes('eng') || lower.includes('.en.')) {
+      return 'English';
+    }
+    if (lower.includes('french') || lower.includes('français') || lower.includes('fra') || lower.includes('.fr.')) {
+      return 'Français';
+    }
+    if (lower.includes('german') || lower.includes('deutsch') || lower.includes('ger') || lower.includes('.de.')) {
+      return 'Deutsch';
+    }
+    if (lower.includes('italian') || lower.includes('italiano') || lower.includes('ita') || lower.includes('.it.')) {
+      return 'Italiano';
+    }
+    if (lower.includes('portuguese') || lower.includes('português') || lower.includes('por') || lower.includes('.pt.')) {
+      return 'Português';
+    }
+
+    // Si no se detecta, usar el nombre del archivo
+    return filename.split('.').slice(0, -1).pop() || 'Desconocido';
   }
 
   ngOnDestroy() {

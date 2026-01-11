@@ -19,7 +19,16 @@
     }
 
     @if (videoSrc()) {
-      <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()"></video>
+      <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()" crossorigin="anonymous">
+        @for (subtitle of subtitleTracks(); track subtitle.index) {
+          <track
+            [label]="subtitle.language"
+            kind="subtitles"
+            [srclang]="getLanguageCode(subtitle.language)"
+            [src]="subtitle.url"
+            [default]="$index === 0">
+        }
+      </video>
     }
   }
 
