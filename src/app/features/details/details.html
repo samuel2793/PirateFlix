@@ -1,0 +1,27 @@
+<div class="page" *ngIf="!loading(); else loadingTpl">
+  <p class="error" *ngIf="error()">{{ error() }}</p>
+
+  <ng-container *ngIf="!error() && item() as it">
+    <div class="hero">
+      <div class="bg" [style.backgroundImage]="'url(' + backdrop() + ')'"></div>
+      <div class="overlay"></div>
+
+      <div class="content">
+        <img class="poster" [src]="poster()" [alt]="title()" />
+        <div class="meta">
+          <h1>{{ title() }}</h1>
+          <p class="overview">{{ overview() }}</p>
+
+          <div class="actions">
+            <button class="primary" type="button">Reproducir</button>
+            <button class="secondary" type="button">Mi lista</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </ng-container>
+</div>
+
+<ng-template #loadingTpl>
+  <div class="page"><p>Cargando…</p></div>
+</ng-template>

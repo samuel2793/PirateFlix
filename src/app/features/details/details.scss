@@ -1,0 +1,85 @@
+.page {
+  min-height: 100vh;
+  background: #0b0b0f;
+  color: #fff;
+  padding: 16px;
+}
+
+.error {
+  color: #ff7b7b;
+}
+
+.hero {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 420px;
+}
+
+.bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(0px);
+  transform: scale(1.05);
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(11, 11, 15, 0.95) 0%,
+    rgba(11, 11, 15, 0.75) 45%,
+    rgba(11, 11, 15, 0.25) 100%
+  );
+}
+
+.content {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  align-items: flex-start;
+}
+
+.poster {
+  width: 160px;
+  height: 240px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #222;
+  flex: 0 0 auto;
+}
+
+.meta {
+  max-width: 720px;
+}
+
+.overview {
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 600;
+}
+
+.primary {
+  background: #fff;
+  color: #000;
+}
+.secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}

@@ -1,0 +1,32 @@
+.page {
+  padding: 16px;
+  color: #fff;
+  background: #0b0b0f;
+  min-height: 100vh;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 8px 0 16px;
+}
+
+.card {
+  flex: 0 0 auto;
+  width: 120px;
+}
+
+img {
+  width: 120px;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #222;
+}
+
+.name {
+  font-size: 12px;
+  margin-top: 6px;
+  opacity: 0.9;
+}

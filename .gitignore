@@ -94,3 +94,5 @@ www/
 # Logs
 *.log
 logs/
+
+src/app/core/config/app-config.ts
