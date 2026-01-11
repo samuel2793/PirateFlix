@@ -1,5 +1,27 @@
 <div class="player-page">
-  <video class="video" controls autoplay playsinline [src]="src()"></video>
+  @if (showPlayer()) {
+    @if (loading()) {
+      <div class="loading-overlay">
+        <div class="loading-content">
+          <h2>Cargando torrent...</h2>
+          <p>Progreso: {{ loadingProgress() }}%</p>
+          <div class="progress-bar">
+            <div class="progress-fill" [style.width.%]="loadingProgress()"></div>
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (errorMessage()) {
+      <div class="error-message">
+        <p>{{ errorMessage() }}</p>
+      </div>
+    }
+
+    @if (videoSrc()) {
+      <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()"></video>
+    }
+  }
 
   <div class="hud">
     <a routerLink="/" class="btn">← Home</a>

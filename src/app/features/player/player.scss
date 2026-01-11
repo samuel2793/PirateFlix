@@ -16,6 +16,7 @@
   left: 12px;
   display: flex;
   gap: 8px;
+  z-index: 10;
 }
 
 .btn {
@@ -25,4 +26,58 @@
   padding: 8px 10px;
   border-radius: 10px;
   font-weight: 600;
+}
+
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 5;
+}
+
+.loading-content {
+  text-align: center;
+  color: #fff;
+  padding: 20px;
+
+  h2 {
+    margin-bottom: 16px;
+    font-size: 24px;
+  }
+
+  p {
+    margin-bottom: 16px;
+    font-size: 18px;
+  }
+}
+
+.progress-bar {
+  width: 300px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #4caf50;
+  transition: width 0.3s ease;
+}
+
+.error-message {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 0, 0, 0.8);
+  color: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  z-index: 5;
+  max-width: 80%;
+  text-align: center;
 }
