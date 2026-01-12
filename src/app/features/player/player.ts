@@ -3,6 +3,8 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { AlertController } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
+import { TmdbService } from '../../core/services/tmdb';
+import { firstValueFrom } from 'rxjs';
 
 type MediaType = 'movie' | 'tv';
 
@@ -51,6 +53,7 @@ export class PlayerComponent implements OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly alertController = inject(AlertController);
   private readonly http = inject(HttpClient);
+  private readonly tmdb = inject(TmdbService);
 
   @ViewChild('videoPlayer', { static: false }) videoPlayer!: ElementRef<HTMLVideoElement>;
 
@@ -81,12 +84,187 @@ export class PlayerComponent implements OnDestroy {
     if (seasonStr) this.season.set(Number(seasonStr));
     if (episodeStr) this.episode.set(Number(episodeStr));
 
-    await this.promptForMagnetLink();
+    await this.searchAndPlayTorrent();
   }
-  async promptForMagnetLink() {
+
+  async searchAndPlayTorrent() {
+    const type = this.type();
+    const id = this.id();
+
+    this.loading.set(true);
+    this.errorMessage.set('');
+    this.showPlayer.set(true);
+
+    try {
+      // Obtener información de la película/serie desde TMDB usando el servicio
+      console.log(`Obteniendo datos de TMDB: ${type}/${id}`);
+      const movieData = await firstValueFrom(this.tmdb.details(type, id));
+
+      const title = movieData.title || movieData.name;
+      const year = (movieData.release_date || movieData.first_air_date || '').substring(0, 4);
+
+      console.log(`Buscando torrent para: ${title} (${year})`);
+
+      if (!title) {
+        throw new Error('No se pudo obtener el título de la película');
+      }
+
+      // Intentar diferentes queries si no se encuentran resultados
+      // Simplificar búsquedas para evitar timeouts
+      const searchQueries = [
+        `${title} ${year} 1080p`,
+        `${title} ${year}`,
+        title
+      ];
+
+      let searchResults: any = null;
+      let attempts = 0;
+      const maxAttempts = 3; // Limitar intentos para evitar timeouts múltiples
+
+      for (const searchQuery of searchQueries) {
+        if (attempts >= maxAttempts) {
+          console.log('⚠️ Alcanzado límite de intentos de búsqueda');
+          break;
+        }
+
+        attempts++;
+        console.log(`Intentando búsqueda ${attempts}/${maxAttempts}: ${searchQuery}`);
+
+        try {
+          const searchResponse = await fetch(`${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=207`);
+
+          if (!searchResponse.ok) {
+            console.log(`❌ Error HTTP ${searchResponse.status}`);
+            continue;
+          }
+
+          const results = await searchResponse.json();
+
+          if (results.results && results.results.length > 0) {
+            searchResults = results;
+            console.log(`✓ Encontrados ${results.results.length} torrents con query: ${searchQuery}`);
+            break;
+          }
+        } catch (fetchError) {
+          console.error(`❌ Error en búsqueda: ${fetchError}`);
+          continue;
+        }
+      }
+
+      if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
+        throw new Error('No se encontraron torrents para esta película');
+      }
+
+      // Preferir torrents con formatos compatibles con navegadores
+      const torrents = searchResults.results;
+
+      console.log(`📋 Torrents disponibles:`);
+      torrents.forEach((t: any, i: number) => {
+        console.log(`  ${i + 1}. ${t.name}`);
+      });
+
+      // Filtros en orden de preferencia:
+      // 1. YTS (siempre H.264 MP4 con audio AAC)
+      // 2. WEB-DL/WEBRip H.264 de calidad
+      // 3. Cualquier H.264 de calidad
+      // 4. Lo que sea (probablemente no funcionará)
+      const ytsTorrents = torrents.filter((t: any) =>
+        t.name.toLowerCase().includes('yts')
+      );
+
+      const lowQuality = (name: string) => {
+        const lower = name.toLowerCase();
+        // Formatos de baja calidad (grabaciones de cine, etc)
+        return lower.includes('ts ') || // TeleSync
+          lower.includes('cam') || // CAMRip
+          lower.includes('hdcam') ||
+          lower.includes('tc ') || // TeleCine
+          lower.includes('hdtc') ||
+          lower.includes('r5') ||
+          lower.includes('screener');
+      };
+
+      const incompatibleCodec = (name: string) => {
+        const lower = name.toLowerCase();
+        // Video codecs no soportados por navegadores
+        return lower.includes('hevc') ||
+          lower.includes('x265') ||
+          lower.includes('h.265') ||
+          lower.includes('h265') ||
+          lower.includes('av1');
+      };
+
+      const incompatibleAudio = (name: string) => {
+        const lower = name.toLowerCase();
+        return lower.includes('atmos') ||
+          lower.includes('ddp') ||
+          lower.includes('dd+') ||
+          lower.includes('eac3') ||
+          lower.includes('truehd');
+      };
+
+      // Torrents con codecs compatibles (H.264/x264) y calidad decente
+      const h264Quality = torrents.filter((t: any) =>
+        !incompatibleCodec(t.name) && !lowQuality(t.name)
+      );
+
+      // Torrents con audio compatible
+      const h264QualityGoodAudio = h264Quality.filter((t: any) =>
+        !incompatibleAudio(t.name)
+      );
+
+      // Fallback: cualquier H.264 aunque sea baja calidad
+      const h264Any = torrents.filter((t: any) =>
+        !incompatibleCodec(t.name)
+      );
+
+      const bestTorrent =
+        ytsTorrents.length > 0 ? ytsTorrents[0] :
+        h264QualityGoodAudio.length > 0 ? h264QualityGoodAudio[0] :
+        h264Quality.length > 0 ? h264Quality[0] :
+        h264Any.length > 0 ? h264Any[0] :
+        torrents[0];
+
+      if (ytsTorrents.length > 0) {
+        console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);
+      } else if (h264QualityGoodAudio.length > 0 && h264QualityGoodAudio[0] === bestTorrent) {
+        console.log(`✅ Seleccionado H.264 de calidad con audio compatible`);
+      } else if (h264Quality.length > 0 && h264Quality[0] === bestTorrent) {
+        console.log(`⚠️ H.264 de calidad pero con audio avanzado (video OK, audio puede fallar)`);
+      } else if (h264Any.length > 0 && h264Any[0] === bestTorrent) {
+        console.log(`⚠️ H.264 pero BAJA CALIDAD (TS/CAM)`);
+      } else {
+        console.log(`❌ ADVERTENCIA: Video HEVC/x265 - NO compatible con navegadores`);
+        console.log(`   El video NO se verá. Busca manualmente un torrent con H.264 o x264`);
+      }
+      console.log(`Torrent seleccionado: ${bestTorrent.name}`);
+      console.log(`Seeders: ${bestTorrent.seeders}, Tamaño: ${bestTorrent.size}`);
+
+      // Cargar el magnet link
+      await this.loadMagnetLink(bestTorrent.magnetLink);
+
+    } catch (error: any) {
+      console.error('Error al buscar torrent:', error);
+
+      // Mensaje más claro según el tipo de error
+      let errorMsg = 'No se pudo encontrar el torrent automáticamente';
+      if (error.message?.includes('No se encontraron torrents')) {
+        errorMsg = 'No se encontraron torrents disponibles';
+      } else if (error.message?.includes('timeout')) {
+        errorMsg = 'La búsqueda tardó demasiado (timeout)';
+      }
+
+      this.errorMessage.set(errorMsg);
+      this.loading.set(false);
+
+      // Fallback: preguntar por magnet link manual
+      console.log('🔄 Cambiando a entrada manual de magnet link');
+      await this.promptForMagnetLink();
+    }
+  }  async promptForMagnetLink() {
     const alert = await this.alertController.create({
-      header: 'Magnet Link',
-      message: 'Introduce el magnet link para reproducir el video:',
+      header: 'Búsqueda manual',
+      message: 'No se encontró torrent automáticamente.<br><br><b>Tip:</b> Busca en The Pirate Bay y pega el magnet link aquí.',
       inputs: [
         {
           name: 'magnetLink',
@@ -101,6 +279,9 @@ export class PlayerComponent implements OnDestroy {
         {
           text: 'Cancelar',
           role: 'cancel',
+          handler: () => {
+            this.showPlayer.set(false);
+          }
         },
         {
           text: 'Reproducir',
@@ -167,6 +348,15 @@ export class PlayerComponent implements OnDestroy {
 
       console.log('Archivo seleccionado:', videoFile.name);
 
+      // ✅ TRANSCODIFICACIÓN AUTOMÁTICA: El backend detecta y transcodifica automáticamente
+      // Ya no necesitamos deshabilitar transcodificación, el backend maneja todos los codecs
+      const needsTranscode = false; // No se usa, backend decide automáticamente
+      const transcodeParam = ''; // No se envía parámetro, backend es inteligente
+
+      if (videoFile.name.toLowerCase().endsWith('.mkv')) {
+        console.log('📦 Archivo MKV detectado - backend transcodificará audio automáticamente');
+      }
+
       // Buscar archivos de subtítulos externos
       const subtitleFiles = torrentInfo.files.filter((file) => {
         const ext = file.name.toLowerCase();
@@ -216,8 +406,8 @@ export class PlayerComponent implements OnDestroy {
 
       this.subtitleTracks.set(subtitles);
 
-      // Construir URL de streaming
-      const streamUrl = `${this.API_URL}/stream/${torrentInfo.infoHash}/${videoFile.index}`;
+      // Construir URL de streaming (con transcodificación si es necesario)
+      const streamUrl = `${this.API_URL}/stream/${torrentInfo.infoHash}/${videoFile.index}${transcodeParam}`;
       this.videoSrc.set(streamUrl);
 
       console.log('URL de streaming:', streamUrl);
