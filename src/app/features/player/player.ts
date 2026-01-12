@@ -88,6 +88,15 @@ export class PlayerComponent implements OnDestroy {
   }
 
   async searchAndPlayTorrent() {
+    // Intentar un reset suave del backend antes de cada búsqueda para evitar
+    // estados residuales que provoquen timeouts/errores al cambiar de película.
+    // No bloqueamos más de 4s esperando al reset: si falla, seguimos con la búsqueda.
+    try {
+      await this.callResetState(4000);
+    } catch (e) {
+      console.warn('Reset backend no completado/timeout, continuando con búsqueda');
+    }
+
     const type = this.type();
     const id = this.id();
 
@@ -298,6 +307,25 @@ export class PlayerComponent implements OnDestroy {
     });
 
     await alert.present();
+  }
+
+  // Llama al endpoint `/api/reset-state` con timeout configurable.
+  private async callResetState(timeoutMs = 4000) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      await fetch(`${this.API_URL}/reset-state`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+      console.log('Reset backend solicitado correctamente');
+    } catch (err) {
+      // No fallar la experiencia si el reset no es exitoso
+      throw err;
+    }
   }
 
   async loadMagnetLink(magnetUri: string) {
