@@ -38,6 +38,39 @@ if (!fs.existsSync(CACHE_DIR)) {
   console.log('📁 Directorio de cache creado:', CACHE_DIR);
 }
 
+// Helper: esperar hasta que el archivo exista en disco y tenga al menos `minBytes` bytes
+async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15000) {
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      try {
+        // Priorizar descarga de inicio del archivo
+        try {
+          file.select(0, Math.min(minBytes, file.length));
+        } catch (e) {
+          // ignorar si no se puede seleccionar
+        }
+
+        if (fs.existsSync(filePath)) {
+          const stat = fs.statSync(filePath);
+          if (stat.size >= Math.min(minBytes, file.length) || file.downloaded > 0) {
+            return resolve();
+          }
+        }
+
+        if (Date.now() - start > timeoutMs) {
+          return reject(new Error('Timeout waiting for file on disk'));
+        }
+      } catch (err) {
+        // Si ocurre cualquier error, terminar con reject
+        return reject(err);
+      }
+      setTimeout(check, 150);
+    };
+    check();
+  });
+}
+
 // Endpoint para buscar torrents en The Pirate Bay
 app.get('/api/search-torrent', async (req, res) => {
   const { query, category = '207' } = req.query; // 207 = HD Movies
@@ -61,7 +94,7 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     // Probar varios mirrors/proxies en orden hasta obtener respuesta
-    const timeoutMs = 10000;
+    const timeoutMs = 15000; // aumentar timeout a 15s
     const mirrors = [
       'https://thepibay.site',
       'https://tpb.party',
@@ -88,38 +121,48 @@ app.get('/api/search-torrent', async (req, res) => {
       };
 
       let lastError = null;
+      const retriesPerMirror = 2;
 
       for (const base of mirrors) {
         const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
         console.log(`Probando mirror: ${url}`);
-        try {
-          // Create a fresh agent per request to avoid socket pool exhaustion
-          const httpsAgent = new https.Agent({ keepAlive: false, maxSockets: 10 });
-          const resp = await axios.get(url, {
-            headers,
-            timeout: timeoutMs,
-            maxRedirects: 5,
-            responseType: 'text',
-            validateStatus: (s) => s >= 200 && s < 400,
-            httpsAgent,
-          });
 
-          if (resp && resp.data && resp.data.length > 0) {
-            console.log(`HTML recibido desde ${base}: ${resp.data.length} bytes`);
-            return resp.data;
+        for (let attempt = 0; attempt < retriesPerMirror; attempt++) {
+          try {
+            // Create a fresh agent per request to avoid socket pool exhaustion
+            const httpsAgent = new https.Agent({ keepAlive: false, maxSockets: 10 });
+            const resp = await axios.get(url, {
+              headers,
+              timeout: timeoutMs,
+              maxRedirects: 5,
+              responseType: 'text',
+              validateStatus: (s) => s >= 200 && s < 400,
+              httpsAgent,
+            });
+
+            if (resp && resp.data && resp.data.length > 0) {
+              console.log(`HTML recibido desde ${base}: ${resp.data.length} bytes`);
+              return resp.data;
+            }
+
+            lastError = new Error(`Empty response from ${base}`);
+            console.warn(lastError.message);
+          } catch (err) {
+            lastError = err;
+            const code = err.code || (err.response && err.response.status) || 'unknown';
+            console.warn(`Error al solicitar ${base} (attempt ${attempt + 1}/${retriesPerMirror}): code=${code} message=${err.message}`);
+            // backoff exponencial antes de reintentar en el mismo mirror
+            const backoff = 250 * Math.pow(2, attempt);
+            await new Promise(r => setTimeout(r, backoff));
+            // Si no es el último intento, continuará reintentando el mismo mirror
+            continue;
           }
-          lastError = new Error(`Empty response from ${base}`);
-          console.warn(lastError.message);
-        } catch (err) {
-          lastError = err;
-          console.warn(`Error al solicitar ${base}: ${err.message}`);
-          // pequeño backoff entre mirrors para evitar bloqueos por rate limiting
-          await new Promise(r => setTimeout(r, 250));
-          // Intentar siguiente mirror
         }
+
+        // Intentar siguiente mirror si todos los intentos en este mirror fallaron
       }
 
-      // Si todos fallaron, lanzar el último error
+      // Si todos fallaron, lanzar el último error con mensaje más claro
       throw lastError || new Error('All mirrors failed');
     }
 
@@ -331,23 +374,13 @@ app.get('/api/embedded-subtitles/:infoHash/:fileIndex', async (req, res) => {
 
     console.log('Analizando subtítulos embebidos en:', filePath);
 
-    // Esperar a que el archivo tenga al menos algunos bytes descargados
-    // Esto es necesario para que ffprobe pueda leerlo
-    const waitForFile = () => new Promise((resolve) => {
-      const checkSize = () => {
-        // Priorizar la descarga del inicio del archivo
-        file.select(0, Math.min(10 * 1024 * 1024, file.length));
-
-        if (file.downloaded > 0) {
-          resolve();
-        } else {
-          setTimeout(checkSize, 100);
-        }
-      };
-      checkSize();
-    });
-
-    await waitForFile();
+    // Esperar a que el archivo exista en disco y tenga datos suficientes para ffprobe
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(10 * 1024 * 1024, file.length), 20000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló:', err.message);
+      // Continuar y dejar que ffprobe intente de todos modos
+    }
 
     // Usar ffprobe con la ruta del archivo directamente
     const subtitles = await new Promise((resolve, reject) => {
@@ -390,7 +423,7 @@ app.get('/api/embedded-subtitles/:infoHash/:fileIndex', async (req, res) => {
 });
 
 // Endpoint para streamear un archivo de video
-app.get('/api/stream/:infoHash/:fileIndex', (req, res) => {
+app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const { infoHash, fileIndex } = req.params;
   const torrent = client.get(infoHash);
 
@@ -438,6 +471,14 @@ app.get('/api/stream/:infoHash/:fileIndex', (req, res) => {
     }
 
     console.log('🎬 Transcodificación en tiempo real:', file.name);
+
+    // Esperar a que el archivo exista en disco (o que tenga algunos bytes) antes de ffprobe
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de ffprobe:', err.message);
+      // permitimos que ffprobe lo intente igualmente
+    }
 
     // Obtener duración del video original
     ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -644,21 +685,13 @@ app.get('/api/embedded-subtitle/:infoHash/:fileIndex/:streamIndex', async (req, 
       }
     });
 
-    // Esperar a que el archivo tenga datos disponibles
-    const waitForFile = () => new Promise((resolve) => {
-      const checkSize = () => {
-        file.select(); // Seleccionar todo el archivo para descarga
-
-        if (file.downloaded > 0) {
-          resolve();
-        } else {
-          setTimeout(checkSize, 100);
-        }
-      };
-      checkSize();
-    });
-
-    await waitForFile();
+    // Esperar a que el archivo exista en disco y tenga algunos bytes
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de extraer subtítulo:', err.message);
+      // Continuar y permitir que ffmpeg intente igualmente
+    }
 
     // Configurar headers
     res.writeHead(200, {
