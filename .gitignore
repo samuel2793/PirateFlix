@@ -96,3 +96,4 @@ www/
 logs/
 
 src/app/core/config/app-config.ts
+dump_project.sh

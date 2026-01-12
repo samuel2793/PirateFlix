@@ -3,11 +3,19 @@
     @if (loading()) {
       <div class="loading-overlay">
         <div class="loading-content">
-          <h2>Cargando torrent...</h2>
-          <p>Progreso: {{ loadingProgress() }}%</p>
-          <div class="progress-bar">
-            <div class="progress-fill" [style.width.%]="loadingProgress()"></div>
-          </div>
+          @if (loadingPhase() === 'resetting') {
+            <h2>Preparando el servidor para el siguiente streaming...</h2>
+            <p>Reiniciando conexiones, limpiando torrents y calentando mirrors.</p>
+          } @else if (loadingPhase() === 'searching') {
+            <h2>Buscando torrents disponibles...</h2>
+            <p>Consultando mirrors y fuentes externas.</p>
+          } @else {
+            <h2>Cargando torrent...</h2>
+            <p>Progreso: {{ loadingProgress() }}%</p>
+            <div class="progress-bar">
+              <div class="progress-fill" [style.width.%]="loadingProgress()"></div>
+            </div>
+          }
         </div>
       </div>
     }

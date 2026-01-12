@@ -65,6 +65,7 @@ export class PlayerComponent implements OnDestroy {
   showPlayer = signal<boolean>(false);
   loading = signal<boolean>(false);
   loadingProgress = signal<number>(0);
+  loadingPhase = signal<'idle'|'resetting'|'searching'|'streaming'>('idle');
   errorMessage = signal<string>('');
   videoSrc = signal<string>('');
   subtitleTracks = signal<SubtitleTrack[]>([]);
@@ -87,22 +88,33 @@ export class PlayerComponent implements OnDestroy {
     await this.searchAndPlayTorrent();
   }
 
-  async searchAndPlayTorrent() {
-    // Intentar un reset suave del backend antes de cada búsqueda para evitar
-    // estados residuales que provoquen timeouts/errores al cambiar de película.
-    // No bloqueamos más de 4s esperando al reset: si falla, seguimos con la búsqueda.
-    try {
-      await this.callResetState(4000);
-    } catch (e) {
-      console.warn('Reset backend no completado/timeout, continuando con búsqueda');
+  private stopPlaybackAndPolling() {
+    if (this.progressInterval) {
+      clearInterval(this.progressInterval);
+      this.progressInterval = null;
     }
+
+    // Cierra de verdad la conexión de vídeo y range-requests
+    const v = this.videoPlayer?.nativeElement;
+    if (v) {
+      try {
+        v.pause();
+      } catch {}
+      v.removeAttribute('src');
+      v.load();
+    }
+  }
+
+  async searchAndPlayTorrent() {
+    this.stopPlaybackAndPolling();
+    this.loadingPhase.set('resetting');
+    this.loading.set(true);
+    this.loadingProgress.set(0);
+    this.errorMessage.set('');
+    this.showPlayer.set(true);
 
     const type = this.type();
     const id = this.id();
-
-    this.loading.set(true);
-    this.errorMessage.set('');
-    this.showPlayer.set(true);
 
     try {
       // Obtener información de la película/serie desde TMDB usando el servicio
@@ -114,17 +126,26 @@ export class PlayerComponent implements OnDestroy {
 
       console.log(`Buscando torrent para: ${title} (${year})`);
 
+      // Mostrar fase de reset
+      this.loadingPhase.set('resetting');
+      // Solicitar al backend que haga un prefetch de la búsqueda durante el reset
+      try {
+        const prefetchQ = `${title} ${year} 1080p`.trim();
+        await this.callResetState(4000, prefetchQ, '207');
+        console.log('Reset backend completado (prefetch solicitado)');
+      } catch (err) {
+        console.warn('Reset/pre-fetch no completado/timeout, continuando con búsqueda');
+      }
+
       if (!title) {
         throw new Error('No se pudo obtener el título de la película');
       }
 
+      // Mostrar fase de búsqueda
+      this.loadingPhase.set('searching');
       // Intentar diferentes queries si no se encuentran resultados
       // Simplificar búsquedas para evitar timeouts
-      const searchQueries = [
-        `${title} ${year} 1080p`,
-        `${title} ${year}`,
-        title
-      ];
+      const searchQueries = [`${title} ${year} 1080p`, `${title} ${year}`, title];
 
       let searchResults: any = null;
       let attempts = 0;
@@ -140,7 +161,9 @@ export class PlayerComponent implements OnDestroy {
         console.log(`Intentando búsqueda ${attempts}/${maxAttempts}: ${searchQuery}`);
 
         try {
-          const searchResponse = await fetch(`${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=207`);
+          const searchResponse = await fetch(
+            `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=207`
+          );
 
           if (!searchResponse.ok) {
             console.log(`❌ Error HTTP ${searchResponse.status}`);
@@ -151,7 +174,9 @@ export class PlayerComponent implements OnDestroy {
 
           if (results.results && results.results.length > 0) {
             searchResults = results;
-            console.log(`✓ Encontrados ${results.results.length} torrents con query: ${searchQuery}`);
+            console.log(
+              `✓ Encontrados ${results.results.length} torrents con query: ${searchQuery}`
+            );
             break;
           }
         } catch (fetchError) {
@@ -177,62 +202,66 @@ export class PlayerComponent implements OnDestroy {
       // 2. WEB-DL/WEBRip H.264 de calidad
       // 3. Cualquier H.264 de calidad
       // 4. Lo que sea (probablemente no funcionará)
-      const ytsTorrents = torrents.filter((t: any) =>
-        t.name.toLowerCase().includes('yts')
-      );
+      const ytsTorrents = torrents.filter((t: any) => t.name.toLowerCase().includes('yts'));
 
       const lowQuality = (name: string) => {
         const lower = name.toLowerCase();
         // Formatos de baja calidad (grabaciones de cine, etc)
-        return lower.includes('ts ') || // TeleSync
+        return (
+          lower.includes('ts ') || // TeleSync
           lower.includes('cam') || // CAMRip
           lower.includes('hdcam') ||
           lower.includes('tc ') || // TeleCine
           lower.includes('hdtc') ||
           lower.includes('r5') ||
-          lower.includes('screener');
+          lower.includes('screener')
+        );
       };
 
       const incompatibleCodec = (name: string) => {
         const lower = name.toLowerCase();
         // Video codecs no soportados por navegadores
-        return lower.includes('hevc') ||
+        return (
+          lower.includes('hevc') ||
           lower.includes('x265') ||
           lower.includes('h.265') ||
           lower.includes('h265') ||
-          lower.includes('av1');
+          lower.includes('av1')
+        );
       };
 
       const incompatibleAudio = (name: string) => {
         const lower = name.toLowerCase();
-        return lower.includes('atmos') ||
+        return (
+          lower.includes('atmos') ||
           lower.includes('ddp') ||
           lower.includes('dd+') ||
           lower.includes('eac3') ||
-          lower.includes('truehd');
+          lower.includes('truehd')
+        );
       };
 
       // Torrents con codecs compatibles (H.264/x264) y calidad decente
-      const h264Quality = torrents.filter((t: any) =>
-        !incompatibleCodec(t.name) && !lowQuality(t.name)
+      const h264Quality = torrents.filter(
+        (t: any) => !incompatibleCodec(t.name) && !lowQuality(t.name)
       );
 
       // Torrents con audio compatible
-      const h264QualityGoodAudio = h264Quality.filter((t: any) =>
-        !incompatibleAudio(t.name)
-      );
+      const h264QualityGoodAudio = h264Quality.filter((t: any) => !incompatibleAudio(t.name));
 
       // Fallback: cualquier H.264 aunque sea baja calidad
-      const h264Any = torrents.filter((t: any) =>
-        !incompatibleCodec(t.name)
-      );
+      const h264Any = torrents.filter((t: any) => !incompatibleCodec(t.name));
 
       const bestTorrent =
-        ytsTorrents.length > 0 ? ytsTorrents[0] :
-        h264QualityGoodAudio.length > 0 ? h264QualityGoodAudio[0] :
-        h264Quality.length > 0 ? h264Quality[0] :
-        h264Any.length > 0 ? h264Any[0] :
-        torrents[0];
+        ytsTorrents.length > 0
+          ? ytsTorrents[0]
+          : h264QualityGoodAudio.length > 0
+          ? h264QualityGoodAudio[0]
+          : h264Quality.length > 0
+          ? h264Quality[0]
+          : h264Any.length > 0
+          ? h264Any[0]
+          : torrents[0];
 
       if (ytsTorrents.length > 0) {
         console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);
@@ -249,9 +278,10 @@ export class PlayerComponent implements OnDestroy {
       console.log(`Torrent seleccionado: ${bestTorrent.name}`);
       console.log(`Seeders: ${bestTorrent.seeders}, Tamaño: ${bestTorrent.size}`);
 
+      // Mostrar fase de streaming
+      this.loadingPhase.set('streaming');
       // Cargar el magnet link
       await this.loadMagnetLink(bestTorrent.magnetLink);
-
     } catch (error: any) {
       console.error('Error al buscar torrent:', error);
 
@@ -270,10 +300,12 @@ export class PlayerComponent implements OnDestroy {
       console.log('🔄 Cambiando a entrada manual de magnet link');
       await this.promptForMagnetLink();
     }
-  }  async promptForMagnetLink() {
+  }
+  async promptForMagnetLink() {
     const alert = await this.alertController.create({
       header: 'Búsqueda manual',
-      message: 'No se encontró torrent automáticamente.<br><br><b>Tip:</b> Busca en The Pirate Bay y pega el magnet link aquí.',
+      message:
+        'No se encontró torrent automáticamente.<br><br><b>Tip:</b> Busca en The Pirate Bay y pega el magnet link aquí.',
       inputs: [
         {
           name: 'magnetLink',
@@ -290,7 +322,7 @@ export class PlayerComponent implements OnDestroy {
           role: 'cancel',
           handler: () => {
             this.showPlayer.set(false);
-          }
+          },
         },
         {
           text: 'Reproducir',
@@ -310,20 +342,28 @@ export class PlayerComponent implements OnDestroy {
   }
 
   // Llama al endpoint `/api/reset-state` con timeout configurable.
-  private async callResetState(timeoutMs = 4000) {
+  // Ahora admite un `prefetchQuery` opcional para que el backend haga
+  // un prefetch/cache de resultados durante el reset (mejora instant switching).
+  private async callResetState(timeoutMs = 4000, prefetchQuery?: string, category?: string) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+      const body: any = {};
+      if (prefetchQuery) body.prefetchQuery = prefetchQuery;
+      if (category) body.category = category;
+
       await fetch(`${this.API_URL}/reset-state`, {
         method: 'POST',
         signal: controller.signal,
+        headers: Object.keys(body).length ? { 'Content-Type': 'application/json' } : undefined,
+        body: Object.keys(body).length ? JSON.stringify(body) : undefined,
       });
 
       clearTimeout(timer);
       console.log('Reset backend solicitado correctamente');
     } catch (err) {
-      // No fallar la experiencia si el reset no es exitoso
+      // Propagar para que el caller pueda decidir continuar si timeout
       throw err;
     }
   }
@@ -357,18 +397,20 @@ export class PlayerComponent implements OnDestroy {
       console.log('Archivos:', torrentInfo.files.length);
 
       // Buscar el archivo de video más grande
-      const videoFile = torrentInfo.files.find((file) => {
-        const ext = file.name.toLowerCase();
-        return (
-          ext.endsWith('.mp4') ||
-          ext.endsWith('.mkv') ||
-          ext.endsWith('.avi') ||
-          ext.endsWith('.webm') ||
-          ext.endsWith('.mov')
+      const videoFile =
+        torrentInfo.files.find((file) => {
+          const ext = file.name.toLowerCase();
+          return (
+            ext.endsWith('.mp4') ||
+            ext.endsWith('.mkv') ||
+            ext.endsWith('.avi') ||
+            ext.endsWith('.webm') ||
+            ext.endsWith('.mov')
+          );
+        }) ||
+        torrentInfo.files.reduce((prev, current) =>
+          prev.length > current.length ? prev : current
         );
-      }) || torrentInfo.files.reduce((prev, current) =>
-        (prev.length > current.length ? prev : current)
-      );
 
       if (!videoFile) {
         throw new Error('No se encontró archivo de video en el torrent');
@@ -441,14 +483,18 @@ export class PlayerComponent implements OnDestroy {
       console.log('URL de streaming:', streamUrl);
       if (subtitles.length > 0) {
         console.log('Total de subtítulos disponibles:', subtitles.length);
-        console.log('Subtítulos:', subtitles.map(s => `${s.language} (${s.isEmbedded ? 'embebido' : 'externo'})`).join(', '));
+        console.log(
+          'Subtítulos:',
+          subtitles
+            .map((s) => `${s.language} (${s.isEmbedded ? 'embebido' : 'externo'})`)
+            .join(', ')
+        );
       }
 
       // Iniciar monitoreo de progreso
       this.startProgressMonitoring();
 
       this.loading.set(false);
-
     } catch (error: any) {
       console.error('Error al cargar magnet link:', error);
       this.errorMessage.set(`Error: ${error.message || 'Error desconocido'}`);
@@ -457,6 +503,12 @@ export class PlayerComponent implements OnDestroy {
   }
 
   startProgressMonitoring() {
+    // ✅ mata el anterior SIEMPRE
+    if (this.progressInterval) {
+      clearInterval(this.progressInterval);
+      this.progressInterval = null;
+    }
+
     if (!this.currentTorrentHash) return;
 
     // Actualizar progreso cada segundo
@@ -469,7 +521,11 @@ export class PlayerComponent implements OnDestroy {
           this.loadingProgress.set(progress);
 
           if (progress % 10 === 0 && progress > 0) {
-            console.log(`Progreso: ${progress}% | Peers: ${info.numPeers} | Velocidad: ${Math.round((info.downloadSpeed || 0) / 1024)} KB/s`);
+            console.log(
+              `Progreso: ${progress}% | Peers: ${info.numPeers} | Velocidad: ${Math.round(
+                (info.downloadSpeed || 0) / 1024
+              )} KB/s`
+            );
           }
         }
       } catch (error) {
@@ -480,31 +536,31 @@ export class PlayerComponent implements OnDestroy {
 
   getLanguageName(code: string): string {
     const languageMap: { [key: string]: string } = {
-      'spa': 'Español',
-      'es': 'Español',
-      'eng': 'English',
-      'en': 'English',
-      'fra': 'Français',
-      'fre': 'Français',
-      'fr': 'Français',
-      'deu': 'Deutsch',
-      'ger': 'Deutsch',
-      'de': 'Deutsch',
-      'ita': 'Italiano',
-      'it': 'Italiano',
-      'por': 'Português',
-      'pt': 'Português',
-      'jpn': '日本語',
-      'ja': '日本語',
-      'kor': '한국어',
-      'ko': '한국어',
-      'chi': '中文',
-      'zh': '中文',
-      'rus': 'Русский',
-      'ru': 'Русский',
-      'ara': 'العربية',
-      'ar': 'العربية',
-      'und': 'Desconocido',
+      spa: 'Español',
+      es: 'Español',
+      eng: 'English',
+      en: 'English',
+      fra: 'Français',
+      fre: 'Français',
+      fr: 'Français',
+      deu: 'Deutsch',
+      ger: 'Deutsch',
+      de: 'Deutsch',
+      ita: 'Italiano',
+      it: 'Italiano',
+      por: 'Português',
+      pt: 'Português',
+      jpn: '日本語',
+      ja: '日本語',
+      kor: '한국어',
+      ko: '한국어',
+      chi: '中文',
+      zh: '中文',
+      rus: 'Русский',
+      ru: 'Русский',
+      ara: 'العربية',
+      ar: 'العربية',
+      und: 'Desconocido',
     };
 
     return languageMap[code.toLowerCase()] || code.toUpperCase();
@@ -512,63 +568,63 @@ export class PlayerComponent implements OnDestroy {
 
   getLanguageCode(languageNameOrCode: string): string {
     const codeMap: { [key: string]: string } = {
-      'español': 'es',
-      'spanish': 'es',
-      'spa': 'es',
-      'es': 'es',
-      'english': 'en',
-      'inglés': 'en',
-      'eng': 'en',
-      'en': 'en',
-      'français': 'fr',
-      'french': 'fr',
-      'francés': 'fr',
-      'fra': 'fr',
-      'fre': 'fr',
-      'fr': 'fr',
-      'deutsch': 'de',
-      'german': 'de',
-      'alemán': 'de',
-      'deu': 'de',
-      'ger': 'de',
-      'de': 'de',
-      'italiano': 'it',
-      'italian': 'it',
-      'ita': 'it',
-      'it': 'it',
-      'português': 'pt',
-      'portuguese': 'pt',
-      'portugués': 'pt',
-      'por': 'pt',
-      'pt': 'pt',
-      '日本語': 'ja',
-      'japanese': 'ja',
-      'japonés': 'ja',
-      'jpn': 'ja',
-      'ja': 'ja',
-      '한국어': 'ko',
-      'korean': 'ko',
-      'coreano': 'ko',
-      'kor': 'ko',
-      'ko': 'ko',
-      '中文': 'zh',
-      'chinese': 'zh',
-      'chino': 'zh',
-      'chi': 'zh',
-      'zh': 'zh',
-      'русский': 'ru',
-      'russian': 'ru',
-      'ruso': 'ru',
-      'rus': 'ru',
-      'ru': 'ru',
-      'العربية': 'ar',
-      'arabic': 'ar',
-      'árabe': 'ar',
-      'ara': 'ar',
-      'ar': 'ar',
-      'desconocido': 'und',
-      'unknown': 'und',
-      'und': 'und',
+      español: 'es',
+      spanish: 'es',
+      spa: 'es',
+      es: 'es',
+      english: 'en',
+      inglés: 'en',
+      eng: 'en',
+      en: 'en',
+      français: 'fr',
+      french: 'fr',
+      francés: 'fr',
+      fra: 'fr',
+      fre: 'fr',
+      fr: 'fr',
+      deutsch: 'de',
+      german: 'de',
+      alemán: 'de',
+      deu: 'de',
+      ger: 'de',
+      de: 'de',
+      italiano: 'it',
+      italian: 'it',
+      ita: 'it',
+      it: 'it',
+      português: 'pt',
+      portuguese: 'pt',
+      portugués: 'pt',
+      por: 'pt',
+      pt: 'pt',
+      日本語: 'ja',
+      japanese: 'ja',
+      japonés: 'ja',
+      jpn: 'ja',
+      ja: 'ja',
+      한국어: 'ko',
+      korean: 'ko',
+      coreano: 'ko',
+      kor: 'ko',
+      ko: 'ko',
+      中文: 'zh',
+      chinese: 'zh',
+      chino: 'zh',
+      chi: 'zh',
+      zh: 'zh',
+      русский: 'ru',
+      russian: 'ru',
+      ruso: 'ru',
+      rus: 'ru',
+      ru: 'ru',
+      العربية: 'ar',
+      arabic: 'ar',
+      árabe: 'ar',
+      ara: 'ar',
+      ar: 'ar',
+      desconocido: 'und',
+      unknown: 'und',
+      und: 'und',
     };
 
     return codeMap[languageNameOrCode.toLowerCase()] || 'und';
@@ -578,22 +634,47 @@ export class PlayerComponent implements OnDestroy {
     const lower = filename.toLowerCase();
 
     // Patrones comunes de idiomas en nombres de archivos
-    if (lower.includes('spanish') || lower.includes('español') || lower.includes('spa') || lower.includes('.es.')) {
+    if (
+      lower.includes('spanish') ||
+      lower.includes('español') ||
+      lower.includes('spa') ||
+      lower.includes('.es.')
+    ) {
       return 'Español';
     }
     if (lower.includes('english') || lower.includes('eng') || lower.includes('.en.')) {
       return 'English';
     }
-    if (lower.includes('french') || lower.includes('français') || lower.includes('fra') || lower.includes('.fr.')) {
+    if (
+      lower.includes('french') ||
+      lower.includes('français') ||
+      lower.includes('fra') ||
+      lower.includes('.fr.')
+    ) {
       return 'Français';
     }
-    if (lower.includes('german') || lower.includes('deutsch') || lower.includes('ger') || lower.includes('.de.')) {
+    if (
+      lower.includes('german') ||
+      lower.includes('deutsch') ||
+      lower.includes('ger') ||
+      lower.includes('.de.')
+    ) {
       return 'Deutsch';
     }
-    if (lower.includes('italian') || lower.includes('italiano') || lower.includes('ita') || lower.includes('.it.')) {
+    if (
+      lower.includes('italian') ||
+      lower.includes('italiano') ||
+      lower.includes('ita') ||
+      lower.includes('.it.')
+    ) {
       return 'Italiano';
     }
-    if (lower.includes('portuguese') || lower.includes('português') || lower.includes('por') || lower.includes('.pt.')) {
+    if (
+      lower.includes('portuguese') ||
+      lower.includes('português') ||
+      lower.includes('por') ||
+      lower.includes('.pt.')
+    ) {
       return 'Português';
     }
 
@@ -611,7 +692,7 @@ export class PlayerComponent implements OnDestroy {
     if (this.currentTorrentHash) {
       fetch(`${this.API_URL}/torrent/${this.currentTorrentHash}`, {
         method: 'DELETE',
-      }).catch(err => console.error('Error al eliminar torrent:', err));
+      }).catch((err) => console.error('Error al eliminar torrent:', err));
     }
   }
 }
