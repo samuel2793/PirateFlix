@@ -1,10 +1,32 @@
 <div class="page">
   <h1>PirateFlix</h1>
+  <div class="search-bar">
+    <input
+      type="search"
+      placeholder="Buscar película o serie..."
+      [(ngModel)]="query"
+      (keydown.enter)="doSearch()"
+      (input)="onInput()"
+    />
+    <button (click)="doSearch()">Buscar</button>
+  </div>
 
   <p *ngIf="loading()">Cargando…</p>
   <p *ngIf="error()">{{ error() }}</p>
 
   <section *ngIf="!loading() && !error()">
+    <div *ngIf="hasSearch()">
+      <h2>Resultados de búsqueda</h2>
+      <div *ngIf="searchLoading()">Buscando…</div>
+      <div *ngIf="searchError()" class="search-error">{{ searchError() }}</div>
+      <div class="row">
+        <div class="card" *ngFor="let item of searchResults()" (click)="openDetailsForResult(item)">
+          <img [src]="poster(item.poster_path || item.profile_path)" [alt]="title(item)" />
+          <div class="name">{{ title(item) }}</div>
+        </div>
+      </div>
+    </div>
+
     <h2>Tendencias (Películas)</h2>
     <div class="row">
       <div class="card" *ngFor="let item of movies()" (click)="openDetails('movie', item.id)">
