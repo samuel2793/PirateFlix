@@ -1326,197 +1326,117 @@ app.get('/api/mirror-stats', (req, res) => {
 });
 
 // =====================
-// Reset-state "REAL": recrea WebTorrent client y cierra sockets keep-alive
-// (equivale a reiniciar el proceso, sin reiniciar el proceso)
-// - aborta búsquedas
-// - mata ffmpeg
-// - destruye el client completo (cierra trackers/sockets)
-// - recrea client y agentes
-// - limpia caches
-// IMPORTANTE: NO hacemos warmup síncrono ni prefetch aquí (eso te metía congestión).
+// Quick-switch: Endpoint LIGERO para cambiar de película rápido
+// Solo mata FFmpeg y streams activos, NO destruye el cliente WebTorrent
 // =====================
-app.post('/api/reset-state', async (req, res) => {
+app.post('/api/quick-switch', async (req, res) => {
+  const startTime = Date.now();
+  console.log('⚡ Quick-switch solicitado');
+
   try {
-    console.log('🔁 Reset de estado solicitado');
-
-    // Forzar cierre de todas las respuestas/streams activos para liberar recursos
-    async function forceCloseAllStreams() {
-      try {
-        console.log('🧯 Forzando cierre de respuestas HTTP activas...');
-        for (const [infoHash, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
-          for (const r of Array.from(resSet)) {
-            try {
-              // Intentar terminar la respuesta de forma amable
-              if (!r.headersSent) {
-                try { r.write && r.write(''); } catch (_) {}
-              }
-              try { r.end && r.end(); } catch (_) {}
-              try { r.destroy && r.destroy(); } catch (_) {}
-            } catch (err) {
-              /* ignore individual failures */
-            }
-          }
-        }
-
-        // Esperar un tick para que eventos 'close' se propaguen y counters se actualicen
-        await new Promise((r) => setTimeout(r, 50));
-        console.log('🧯 Cierre forzado de respuestas completado');
-      } catch (err) {
-        console.warn('Error forzando cierre de streams:', err && err.message ? err.message : err);
-      }
-    }
-
-    await forceCloseAllStreams();
-
-    // Loguear estado inmediato tras forzar cierre para diagnóstico
-    try {
-      console.log(
-        `🔍 Estado tras cierre forzado: activeStreams=${activeStreamsByInfoHash.size}, activeResponses=${activeResponsesByInfoHash.size}, activeFFmpeg=${activeFFmpegProcesses.size}, clientTorrents=${client?.torrents?.length ?? 0}`
-      );
-    } catch (e) {
-      /* ignore */
-    }
-
-    // Pequeña espera para permitir que los eventos 'close' y destructores se propaguen
-    await new Promise((r) => setTimeout(r, parseInt(process.env.PIRATEFLIX_RESET_GRACE_MS || '250', 10)));
-
-    // Abort active search controllers
+    // 1. Abortar búsquedas activas inmediatamente
     for (const ctrl of Array.from(activeSearchControllers)) {
-      try {
-        ctrl.abort();
-      } catch (_) {}
-      try {
-        activeSearchControllers.delete(ctrl);
-      } catch (_) {}
+      try { ctrl.abort(); } catch (_) {}
+      activeSearchControllers.delete(ctrl);
     }
 
-    // Kill FFmpeg processes
+    // 2. Matar todos los procesos FFmpeg
     for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try {
-        proc.kill && proc.kill('SIGKILL');
-      } catch (_) {}
+      try { proc.kill && proc.kill('SIGKILL'); } catch (_) {}
       activeFFmpegProcesses.delete(key);
       transcodedCache.delete(key);
     }
 
-    // Intentar destruir torrents activos de forma explícita antes de destruir client
-    try {
-      console.log('🧹 Destruyendo torrents activos...');
-      const torrentsSnapshot = client && client.torrents ? client.torrents.slice() : [];
-      for (const t of torrentsSnapshot) {
-        try {
-          const ih = t.infoHash || (t && t.infoHash);
-          await new Promise((resolve) => {
-            try {
-              t.destroy(() => {
-                try { activeTorrents.delete(ih); } catch (_) {}
-                resolve();
-              });
-            } catch (e) {
-              resolve();
-            }
-          });
-        } catch (e) {
-          /* ignore per-torrent destroy errors */
-        }
+    // 3. Cerrar streams HTTP activos (sin esperar)
+    for (const [infoHash, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
+      for (const r of Array.from(resSet)) {
+        try { r.destroy && r.destroy(); } catch (_) {}
       }
-      console.log('🧹 Destrucción explícita de torrents completada');
-    } catch (e) {
-      console.warn('Error destruyendo torrents explícitamente:', e && e.message ? e.message : e);
     }
-
-    // Estado tras destrucción explícita de torrents
-    try {
-      console.log(
-        `🔍 Estado tras destruir torrents: activeStreams=${activeStreamsByInfoHash.size}, activeResponses=${activeResponsesByInfoHash.size}, activeFFmpeg=${activeFFmpegProcesses.size}, clientTorrents=${client?.torrents?.length ?? 0}`
-      );
-    } catch (e) {
-      /* ignore */
-    }
-
-    // Marcar todos los torrents para destroy (y luego reventamos client entero igualmente)
-    pendingDestroy.clear();
+    activeResponsesByInfoHash.clear();
     activeStreamsByInfoHash.clear();
 
-    // Destroy WebTorrent client COMPLETO y recrearlo
-    try {
-      if (client) {
-        await new Promise((resolve) => {
-          try {
-            client.destroy(resolve);
-          } catch (_) {
-            resolve();
-          }
-        });
+    // 4. Destruir torrents activos en background (no esperar)
+    const torrentsToDestroy = client?.torrents?.slice() || [];
+    for (const t of torrentsToDestroy) {
+      try {
+        const ih = t.infoHash;
+        activeTorrents.delete(ih);
+        clearEmbeddedCacheForInfoHash(ih);
+        t.destroy(() => {});
+      } catch (_) {}
+    }
+
+    // 5. Limpiar caches de subtítulos
+    embeddedSubtitlesCache.clear();
+    pendingDestroy.clear();
+
+    console.log(`⚡ Quick-switch completado en ${Date.now() - startTime}ms`);
+    res.json({ success: true, time: Date.now() - startTime });
+  } catch (err) {
+    console.error('Error en quick-switch:', err);
+    res.json({ success: true, time: Date.now() - startTime }); // No fallar, seguir
+  }
+});
+
+// =====================
+// Reset-state COMPLETO: Solo usar si quick-switch no funciona
+// =====================
+app.post('/api/reset-state', async (req, res) => {
+  const startTime = Date.now();
+  console.log('🔁 Reset completo solicitado');
+
+  try {
+    // 1. Abortar búsquedas
+    for (const ctrl of Array.from(activeSearchControllers)) {
+      try { ctrl.abort(); } catch (_) {}
+      activeSearchControllers.delete(ctrl);
+    }
+
+    // 2. Matar FFmpeg
+    for (const [key, proc] of activeFFmpegProcesses.entries()) {
+      try { proc.kill && proc.kill('SIGKILL'); } catch (_) {}
+      activeFFmpegProcesses.delete(key);
+      transcodedCache.delete(key);
+    }
+
+    // 3. Cerrar streams
+    for (const [, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
+      for (const r of Array.from(resSet)) {
+        try { r.destroy && r.destroy(); } catch (_) {}
       }
-    } catch (e) {
-      console.warn('Error destruyendo WebTorrent client en reset:', e && e.message ? e.message : e);
+    }
+    activeResponsesByInfoHash.clear();
+    activeStreamsByInfoHash.clear();
+    pendingDestroy.clear();
+
+    // 4. Destruir cliente WebTorrent y recrearlo
+    if (client) {
+      try {
+        await new Promise((resolve) => {
+          const timeout = setTimeout(resolve, 2000); // Max 2s
+          client.destroy(() => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
+      } catch (_) {}
     }
 
     client = createWebTorrentClient();
-    console.log('🔄 WebTorrent client recreado');
 
-    // Clear maps/caches
+    // 5. Limpiar caches
     activeTorrents.clear();
     embeddedSubtitlesCache.clear();
     transcodedCache.clear();
-    if (global.__pirateflix_search_cache) global.__pirateflix_search_cache.clear();
 
-    // Forzar que la próxima búsqueda pueda hacer warmup si hace falta
-    lastWarmupAt = Date.now();
-
-    // Recrear agentes globales (cierra sockets keep-alive)
-    try {
-      console.log('🔄 Forzando destroy de agentes HTTP/HTTPS antes de recrear...');
-      try {
-        if (httpAgentGlobal && typeof httpAgentGlobal.destroy === 'function') {
-          httpAgentGlobal.destroy();
-          console.log('🔄 httpAgentGlobal.destroy() ejecutado');
-          // Forzar cierre de sockets residuales
-          if (httpAgentGlobal.sockets) {
-            for (const name of Object.keys(httpAgentGlobal.sockets)) {
-              for (const sock of httpAgentGlobal.sockets[name]) {
-                try { sock.destroy(); } catch (_) {}
-              }
-            }
-            console.log('🔄 Sockets HTTP residuales destruidos');
-          }
-        }
-        if (httpsAgentGlobal && typeof httpsAgentGlobal.destroy === 'function') {
-          httpsAgentGlobal.destroy();
-          console.log('🔄 httpsAgentGlobal.destroy() ejecutado');
-          // Forzar cierre de sockets residuales
-          if (httpsAgentGlobal.sockets) {
-            for (const name of Object.keys(httpsAgentGlobal.sockets)) {
-              for (const sock of httpsAgentGlobal.sockets[name]) {
-                try { sock.destroy(); } catch (_) {}
-              }
-            }
-            console.log('🔄 Sockets HTTPS residuales destruidos');
-          }
-        }
-      } catch (e) {
-        console.warn('Error forzando destroy en agentes:', e && e.message ? e.message : e);
-      }
-      // Espera breve para que los sockets se cierren
-      await new Promise((r) => setTimeout(r, parseInt(process.env.PIRATEFLIX_AGENT_GRACE_MS || '350', 10)));
-      console.log('🔄 Recreando agentes HTTP/HTTPS tras reset');
-      createAgents();
-      // Loguear handles y requests tras recrear agentes
-      try {
-        const handles = typeof process._getActiveHandles === 'function' ? process._getActiveHandles().length : 'unknown';
-        const requests = typeof process._getActiveRequests === 'function' ? process._getActiveRequests().length : 'unknown';
-        console.log(`🔍 Handles tras recrear agentes: handles=${handles}, requests=${requests}`);
-      } catch (e) { /* ignore */ }
-    } catch (e) {
-      console.warn('Fallo al recrear agentes tras reset:', e && e.message ? e.message : e);
-    }
-
-    console.log('✅ Reset completado');
-    res.json({ success: true });
+    console.log(`✅ Reset completo en ${Date.now() - startTime}ms`);
+    res.json({ success: true, time: Date.now() - startTime });
   } catch (err) {
-    console.error('Error durante reset:', err);
-    res.status(500).json({ error: 'failed to reset state', message: err && err.message });
+    console.error('Error en reset:', err);
+    // Recrear cliente de todas formas
+    try { client = createWebTorrentClient(); } catch (_) {}
+    res.json({ success: true, time: Date.now() - startTime });
   }
 });
 

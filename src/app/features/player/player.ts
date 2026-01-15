@@ -117,31 +117,23 @@ export class PlayerComponent implements OnDestroy {
     const id = this.id();
 
     try {
-      // Obtener información de la película/serie desde TMDB usando el servicio
+      // 1. Quick-switch: limpiar streams/ffmpeg anteriores (muy rápido, ~50ms)
+      await this.callQuickSwitch(1500);
+
+      // 2. Obtener información de la película/serie desde TMDB
       console.log(`Obteniendo datos de TMDB: ${type}/${id}`);
       const movieData = await firstValueFrom(this.tmdb.details(type, id));
 
       const title = movieData.title || movieData.name;
       const year = (movieData.release_date || movieData.first_air_date || '').substring(0, 4);
 
-      console.log(`Buscando torrent para: ${title} (${year})`);
-
-      // Mostrar fase de reset
-      this.loadingPhase.set('resetting');
-      // Solicitar al backend que haga un prefetch de la búsqueda durante el reset
-      try {
-        const prefetchQ = `${title} ${year} 1080p`.trim();
-        await this.callResetState(4000, prefetchQ, '207');
-        console.log('Reset backend completado (prefetch solicitado)');
-      } catch (err) {
-        console.warn('Reset/pre-fetch no completado/timeout, continuando con búsqueda');
-      }
-
       if (!title) {
         throw new Error('No se pudo obtener el título de la película');
       }
 
-      // Mostrar fase de búsqueda
+      console.log(`Buscando torrent para: ${title} (${year})`);
+
+      // 3. Mostrar fase de búsqueda inmediatamente
       this.loadingPhase.set('searching');
       // Intentar diferentes queries si no se encuentran resultados
       // Simplificar búsquedas para evitar timeouts
@@ -341,30 +333,54 @@ export class PlayerComponent implements OnDestroy {
     await alert.present();
   }
 
-  // Llama al endpoint `/api/reset-state` con timeout configurable.
-  // Ahora admite un `prefetchQuery` opcional para que el backend haga
-  // un prefetch/cache de resultados durante el reset (mejora instant switching).
-  private async callResetState(timeoutMs = 4000, prefetchQuery?: string, category?: string) {
+  // Quick-switch: endpoint LIGERO para cambiar de película rápido
+  // No destruye el cliente WebTorrent, solo limpia streams/ffmpeg
+  private async callQuickSwitch(timeoutMs = 1500): Promise<boolean> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-      const body: any = {};
-      if (prefetchQuery) body.prefetchQuery = prefetchQuery;
-      if (category) body.category = category;
-
-      await fetch(`${this.API_URL}/reset-state`, {
+      const response = await fetch(`${this.API_URL}/quick-switch`, {
         method: 'POST',
         signal: controller.signal,
-        headers: Object.keys(body).length ? { 'Content-Type': 'application/json' } : undefined,
-        body: Object.keys(body).length ? JSON.stringify(body) : undefined,
       });
 
       clearTimeout(timer);
-      console.log('Reset backend solicitado correctamente');
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`⚡ Quick-switch completado en ${result.time}ms`);
+        return true;
+      }
+      return false;
     } catch (err) {
-      // Propagar para que el caller pueda decidir continuar si timeout
-      throw err;
+      console.warn('Quick-switch falló, continuando:', err);
+      return false;
+    }
+  }
+
+  // Reset completo: solo usar si quick-switch no es suficiente
+  private async callResetState(timeoutMs = 2000): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      const response = await fetch(`${this.API_URL}/reset-state`, {
+        method: 'POST',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log(`🔁 Reset completo en ${result.time}ms`);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.warn('Reset falló:', err);
+      return false;
     }
   }
 
@@ -686,13 +702,14 @@ export class PlayerComponent implements OnDestroy {
     // Limpiar interval de progreso
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
+      this.progressInterval = null;
     }
 
-    // Opcional: eliminar torrent del backend al salir
-    if (this.currentTorrentHash) {
-      fetch(`${this.API_URL}/torrent/${this.currentTorrentHash}`, {
-        method: 'DELETE',
-      }).catch((err) => console.error('Error al eliminar torrent:', err));
-    }
+    // Parar el video completamente
+    this.stopPlaybackAndPolling();
+
+    // Quick-switch para limpiar recursos en el backend (no esperar)
+    fetch(`${this.API_URL}/quick-switch`, { method: 'POST' })
+      .catch(() => {}); // Ignorar errores, el usuario ya se fue
   }
 }
