@@ -1004,7 +1004,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
         'Content-Type': 'video/mp4',
         'Transfer-Encoding': 'chunked',
         'Cache-Control': 'no-cache',
-        'Accept-Ranges': 'none',
+        'Accept-Ranges': 'bytes',
       });
 
       transcodedCache.set(cacheKey, 'transcoding');
