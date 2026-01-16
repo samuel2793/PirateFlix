@@ -87,6 +87,7 @@ export class PlayerComponent implements OnDestroy {
   private progressInterval: any = null;
   private pendingSeekTime: number | null = null;
   private pendingWasPlaying = false;
+  private playbackSession = Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
   async ngOnInit() {
     const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
@@ -424,6 +425,8 @@ export class PlayerComponent implements OnDestroy {
       const response = await fetch(`${this.API_URL}/quick-switch`, {
         method: 'POST',
         signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.playbackSession }),
       });
 
       clearTimeout(timer);
@@ -449,6 +452,8 @@ export class PlayerComponent implements OnDestroy {
       const response = await fetch(`${this.API_URL}/reset-state`, {
         method: 'POST',
         signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.playbackSession }),
       });
 
       clearTimeout(timer);
@@ -496,18 +501,37 @@ export class PlayerComponent implements OnDestroy {
       console.log('InfoHash:', torrentInfo.infoHash);
       console.log('Archivos:', torrentInfo.files.length);
 
-      // Buscar el archivo de video más grande
+      const isVideoFile = (file: TorrentFile) => {
+        if (file.type === 'video') return true;
+        const ext = file.name.toLowerCase();
+        return (
+          ext.endsWith('.mp4') ||
+          ext.endsWith('.mkv') ||
+          ext.endsWith('.avi') ||
+          ext.endsWith('.webm') ||
+          ext.endsWith('.mov')
+        );
+      };
+
+      const isLikelySample = (name: string) => {
+        const lower = name.toLowerCase();
+        return (
+          lower.includes('sample') ||
+          lower.includes('trailer') ||
+          lower.includes('preview') ||
+          lower.includes('extras') ||
+          lower.includes('bonus') ||
+          lower.includes('featurette') ||
+          lower.includes('bts')
+        );
+      };
+
+      const videoCandidates = torrentInfo.files.filter(isVideoFile);
+      const filteredVideos = videoCandidates.filter((file) => !isLikelySample(file.name));
+      const pickFrom = filteredVideos.length > 0 ? filteredVideos : videoCandidates;
+
       const videoFile =
-        torrentInfo.files.find((file) => {
-          const ext = file.name.toLowerCase();
-          return (
-            ext.endsWith('.mp4') ||
-            ext.endsWith('.mkv') ||
-            ext.endsWith('.avi') ||
-            ext.endsWith('.webm') ||
-            ext.endsWith('.mov')
-          );
-        }) ||
+        pickFrom.slice().sort((a, b) => b.length - a.length)[0] ||
         torrentInfo.files.reduce((prev, current) =>
           prev.length > current.length ? prev : current
         );
@@ -894,7 +918,11 @@ export class PlayerComponent implements OnDestroy {
     this.stopPlaybackAndPolling();
 
     // Quick-switch para limpiar recursos en el backend (no esperar)
-    fetch(`${this.API_URL}/quick-switch`, { method: 'POST' })
+    fetch(`${this.API_URL}/quick-switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: this.playbackSession }),
+    })
       .catch(() => {}); // Ignorar errores, el usuario ya se fue
   }
 }

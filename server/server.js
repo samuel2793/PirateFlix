@@ -111,6 +111,7 @@ createAgents();
 
 // Track active search AbortControllers so we can abort searches on-demand
 const activeSearchControllers = new Set();
+let latestQuickSwitchSession = 0;
 
 // Configurar CORS
 app.use(cors());
@@ -283,6 +284,50 @@ async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15
     };
     check();
   });
+}
+
+const MP4_FASTSTART_SCAN_BYTES = 1024 * 1024;
+const MP4_FASTSTART_MIN_BYTES = 64 * 1024;
+const MP4_ATOM_MOOV = Buffer.from('moov');
+const MP4_ATOM_MDAT = Buffer.from('mdat');
+
+async function isLikelyFaststartMp4(file, filePath) {
+  try {
+    await waitForFileOnDisk(file, filePath, Math.min(256 * 1024, file.length), 3000);
+  } catch (_) {
+    return false;
+  }
+
+  let stat = null;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    return false;
+  }
+
+  const readBytes = Math.min(stat.size, MP4_FASTSTART_SCAN_BYTES);
+  if (readBytes < MP4_FASTSTART_MIN_BYTES) return false;
+
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(readBytes);
+    fs.readSync(fd, buf, 0, readBytes, 0);
+
+    const moovIndex = buf.indexOf(MP4_ATOM_MOOV);
+    if (moovIndex === -1) return false;
+    const mdatIndex = buf.indexOf(MP4_ATOM_MDAT);
+    if (mdatIndex === -1) return true;
+    return moovIndex < mdatIndex;
+  } catch (_) {
+    return false;
+  } finally {
+    if (fd) {
+      try {
+        fs.closeSync(fd);
+      } catch (_) {}
+    }
+  }
 }
 
 // Warmup: hacer peticiones HEAD/GET rápidas a mirrors
@@ -1073,12 +1118,31 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const filePath = path.join(torrent.path, file.path);
   const fileName = file.name.toLowerCase();
 
-  const needsTranscode =
+  let needsTranscode =
     forceTranscode ||
     fileName.endsWith('.mkv') ||
     fileName.includes('hevc') ||
     fileName.includes('x265') ||
     fileName.includes('h265');
+
+  const isMp4Like = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
+  if (!needsTranscode && isMp4Like) {
+    const fileDownloaded = Number(file.downloaded || 0);
+    const fileLength = Number(file.length || 0);
+    const fullyDownloaded = fileLength > 0 && fileDownloaded >= fileLength;
+
+    if (!fullyDownloaded) {
+      const faststart = await isLikelyFaststartMp4(file, filePath);
+      if (!faststart) {
+        try {
+          const tailBytes = Math.min(2 * 1024 * 1024, fileLength);
+          const start = Math.max(0, fileLength - tailBytes);
+          if (fileLength > 0) file.select(start, fileLength - 1);
+        } catch (_) {}
+        console.log('⚠️ MP4 sin faststart detectado, priorizando cola para moov');
+      }
+    }
+  }
 
   console.log(
     'Streaming archivo:',
@@ -1481,6 +1545,27 @@ app.post('/api/quick-switch', async (req, res) => {
   console.log('⚡ Quick-switch solicitado');
 
   try {
+    const rawSession = req?.body?.sessionId;
+    const sessionId = Number(rawSession);
+    if (Number.isFinite(sessionId)) {
+      if (sessionId < latestQuickSwitchSession) {
+        console.log(
+          '⚠️ Quick-switch ignorado por sesión antigua:',
+          sessionId,
+          '(latest=',
+          latestQuickSwitchSession,
+          ')'
+        );
+        return res.json({
+          success: true,
+          skipped: true,
+          time: Date.now() - startTime,
+          reason: 'stale-session',
+        });
+      }
+      latestQuickSwitchSession = sessionId;
+    }
+
     // 1. Abortar búsquedas activas inmediatamente
     for (const ctrl of Array.from(activeSearchControllers)) {
       try { ctrl.abort(); } catch (_) {}
@@ -1535,6 +1620,27 @@ app.post('/api/reset-state', async (req, res) => {
   console.log('🔁 Reset completo solicitado');
 
   try {
+    const rawSession = req?.body?.sessionId;
+    const sessionId = Number(rawSession);
+    if (Number.isFinite(sessionId)) {
+      if (sessionId < latestQuickSwitchSession) {
+        console.log(
+          '⚠️ Reset ignorado por sesión antigua:',
+          sessionId,
+          '(latest=',
+          latestQuickSwitchSession,
+          ')'
+        );
+        return res.json({
+          success: true,
+          skipped: true,
+          time: Date.now() - startTime,
+          reason: 'stale-session',
+        });
+      }
+      latestQuickSwitchSession = sessionId;
+    }
+
     // 1. Abortar búsquedas
     for (const ctrl of Array.from(activeSearchControllers)) {
       try { ctrl.abort(); } catch (_) {}
