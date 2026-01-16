@@ -59,6 +59,12 @@ interface TorrentInfo {
   styleUrl: './player.scss',
 })
 export class PlayerComponent implements OnDestroy {
+  private static readonly SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+  private static readonly searchCache = new Map<
+    string,
+    { ts: number; results: any[]; sawSeeded: boolean }
+  >();
+
   private readonly route = inject(ActivatedRoute);
   private readonly alertController = inject(AlertController);
   private readonly http = inject(HttpClient);
@@ -87,7 +93,30 @@ export class PlayerComponent implements OnDestroy {
   private progressInterval: any = null;
   private pendingSeekTime: number | null = null;
   private pendingWasPlaying = false;
-  private playbackSession = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  private playbackSession = 0;
+  private playbackSessionSeed = 0;
+  private searchAbortController: AbortController | null = null;
+
+  private startNewPlaybackSession() {
+    this.playbackSessionSeed += 1;
+    const next = Date.now() * 1000 + this.playbackSessionSeed;
+    this.playbackSession = Math.max(this.playbackSession, next);
+    return this.playbackSession;
+  }
+
+  private isSessionActive(sessionId?: number) {
+    return typeof sessionId !== 'number' || sessionId === this.playbackSession;
+  }
+
+  private newSearchAbortController() {
+    if (this.searchAbortController) {
+      try {
+        this.searchAbortController.abort();
+      } catch {}
+    }
+    this.searchAbortController = new AbortController();
+    return this.searchAbortController;
+  }
 
   async ngOnInit() {
     const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
@@ -109,6 +138,14 @@ export class PlayerComponent implements OnDestroy {
       this.progressInterval = null;
     }
 
+    // Clear bound src so Angular does not re-attach the old stream.
+    this.videoSrc.set('');
+    this.subtitleTracks.set([]);
+    this.audioTracks.set([]);
+    this.selectedAudioTrack.set('auto');
+    this.currentTorrentHash = null;
+    this.currentVideoFileIndex = null;
+
     // Cierra de verdad la conexión de vídeo y range-requests
     const v = this.videoPlayer?.nativeElement;
     if (v) {
@@ -121,6 +158,10 @@ export class PlayerComponent implements OnDestroy {
   }
 
   async searchAndPlayTorrent() {
+    const sessionId = this.startNewPlaybackSession();
+    const searchController = this.newSearchAbortController();
+    const searchSignal = searchController.signal;
+
     this.stopPlaybackAndPolling();
     this.loadingPhase.set('resetting');
     this.loading.set(true);
@@ -134,10 +175,12 @@ export class PlayerComponent implements OnDestroy {
     try {
       // 1. Quick-switch: limpiar streams/ffmpeg anteriores (muy rápido, ~50ms)
       await this.callQuickSwitch(1500);
+      if (!this.isSessionActive(sessionId)) return;
 
       // 2. Obtener información de la película/serie desde TMDB
       console.log(`Obteniendo datos de TMDB: ${type}/${id}`);
       const movieData = await firstValueFrom(this.tmdb.details(type, id));
+      if (!this.isSessionActive(sessionId)) return;
 
       const title = movieData.title || movieData.name;
       const year = (movieData.release_date || movieData.first_air_date || '').substring(0, 4);
@@ -163,6 +206,15 @@ export class PlayerComponent implements OnDestroy {
 
       const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
 
+      const searchStartTime = Date.now();
+      const overallTimeoutMs = 35000;
+      let timedOut = false;
+      let didSearch = false;
+      const cacheKey = `${type}:${id}`;
+      const cachedSearch = PlayerComponent.searchCache.get(cacheKey);
+      const cacheFresh =
+        cachedSearch && Date.now() - cachedSearch.ts < PlayerComponent.SEARCH_CACHE_TTL_MS;
+
       const aggregatedResults: any[] = [];
       const seenMagnets = new Set<string>();
       let sawSeeded = false;
@@ -179,7 +231,23 @@ export class PlayerComponent implements OnDestroy {
         }
       };
 
+      if (cacheFresh && cachedSearch) {
+        console.log('✅ Usando resultados en cache para esta película');
+        aggregatedResults.push(...cachedSearch.results);
+        sawSeeded = cachedSearch.sawSeeded;
+      }
+
       for (const searchQuery of searchQueries) {
+        if (cacheFresh) break;
+        if (!this.isSessionActive(sessionId)) return;
+        if (Date.now() - searchStartTime > overallTimeoutMs) {
+          if (aggregatedResults.length > 0) {
+            console.warn('⚠️ Timeout global alcanzado, usando resultados parciales');
+            break;
+          }
+          timedOut = true;
+          break;
+        }
         if (attempts >= maxAttempts) {
           console.log('⚠️ Alcanzado límite de intentos de búsqueda');
           break;
@@ -189,16 +257,28 @@ export class PlayerComponent implements OnDestroy {
         console.log(`Intentando búsqueda ${attempts}/${maxAttempts}: ${searchQuery}`);
 
         try {
+          didSearch = true;
           const searchResponse = await fetch(
-            `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=207`
+            `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=207`,
+            { signal: searchSignal }
           );
 
+          if (!this.isSessionActive(sessionId)) return;
           if (!searchResponse.ok) {
             console.log(`❌ Error HTTP ${searchResponse.status}`);
+            if (searchResponse.status === 504) {
+              if (aggregatedResults.length > 0) {
+                console.warn('⚠️ Timeout en búsqueda, usando resultados parciales');
+                break;
+              }
+              timedOut = true;
+              break;
+            }
             continue;
           }
 
           const results = await searchResponse.json();
+          if (!this.isSessionActive(sessionId)) return;
 
           if (results.results && results.results.length > 0) {
             mergeResults(results);
@@ -209,19 +289,30 @@ export class PlayerComponent implements OnDestroy {
               console.log(
                 `✓ Encontrados ${results.results.length} torrents con seeders: ${searchQuery}`
               );
+              break;
             } else {
               console.log(
                 `⚠️ Resultados sin seeders para: ${searchQuery} (probando menos restrictivo)`
               );
             }
           }
-        } catch (fetchError) {
+        } catch (fetchError: any) {
+          if (searchSignal.aborted || fetchError?.name === 'AbortError') return;
           console.error(`❌ Error en búsqueda: ${fetchError}`);
           continue;
         }
       }
 
+      if (aggregatedResults.length === 0 && cachedSearch && !cacheFresh) {
+        console.warn('⚠️ Usando cache expirado por timeout');
+        aggregatedResults.push(...cachedSearch.results);
+        sawSeeded = cachedSearch.sawSeeded;
+      }
+
       if (aggregatedResults.length === 0) {
+        if (timedOut) {
+          throw new Error('timeout');
+        }
         throw new Error('No se encontraron torrents para esta película');
       }
 
@@ -231,6 +322,14 @@ export class PlayerComponent implements OnDestroy {
 
       // Preferir torrents con formatos compatibles con navegadores
       const torrents = aggregatedResults;
+
+      if (didSearch || !cacheFresh) {
+        PlayerComponent.searchCache.set(cacheKey, {
+          ts: Date.now(),
+          results: torrents,
+          sawSeeded,
+        });
+      }
 
       console.log(`📋 Torrents disponibles:`);
       torrents.forEach((t: any, i: number) => {
@@ -355,8 +454,10 @@ export class PlayerComponent implements OnDestroy {
       // Mostrar fase de streaming
       this.loadingPhase.set('streaming');
       // Cargar el magnet link
-      await this.loadMagnetLink(bestTorrent.magnetLink);
+      if (!this.isSessionActive(sessionId)) return;
+      await this.loadMagnetLink(bestTorrent.magnetLink, sessionId);
     } catch (error: any) {
+      if (searchSignal.aborted || !this.isSessionActive(sessionId)) return;
       console.error('Error al buscar torrent:', error);
 
       // Mensaje más claro según el tipo de error
@@ -402,7 +503,7 @@ export class PlayerComponent implements OnDestroy {
           text: 'Reproducir',
           handler: (data) => {
             if (data.magnetLink && data.magnetLink.trim()) {
-              this.loadMagnetLink(data.magnetLink.trim());
+              this.loadMagnetLink(data.magnetLink.trim(), this.playbackSession);
               return true;
             }
             return false;
@@ -470,7 +571,8 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
-  async loadMagnetLink(magnetUri: string) {
+  async loadMagnetLink(magnetUri: string, sessionId: number = this.playbackSession) {
+    if (!this.isSessionActive(sessionId)) return;
     this.loading.set(true);
     this.errorMessage.set('');
     this.showPlayer.set(true);
@@ -495,6 +597,7 @@ export class PlayerComponent implements OnDestroy {
       }
 
       const torrentInfo: TorrentInfo = await response.json();
+      if (!this.isSessionActive(sessionId)) return;
       this.currentTorrentHash = torrentInfo.infoHash;
 
       console.log('Torrent agregado:', torrentInfo.name);
@@ -571,13 +674,14 @@ export class PlayerComponent implements OnDestroy {
 
       // Detectar subtítulos embebidos en el video
       try {
-        const embeddedResponse = await fetch(
-          `${this.API_URL}/embedded-subtitles/${torrentInfo.infoHash}/${videoFile.index}`
-        );
+      const embeddedResponse = await fetch(
+        `${this.API_URL}/embedded-subtitles/${torrentInfo.infoHash}/${videoFile.index}`
+      );
 
-        if (embeddedResponse.ok) {
-          const embeddedSubs: EmbeddedSubtitle[] = await embeddedResponse.json();
-          console.log('Subtítulos embebidos encontrados:', embeddedSubs.length);
+      if (embeddedResponse.ok) {
+        const embeddedSubs: EmbeddedSubtitle[] = await embeddedResponse.json();
+        if (!this.isSessionActive(sessionId)) return;
+        console.log('Subtítulos embebidos encontrados:', embeddedSubs.length);
 
           // Agregar subtítulos embebidos a la lista
           embeddedSubs.forEach((sub) => {
@@ -619,8 +723,10 @@ export class PlayerComponent implements OnDestroy {
       // Iniciar monitoreo de progreso
       this.startProgressMonitoring();
 
+      if (!this.isSessionActive(sessionId)) return;
       this.loading.set(false);
     } catch (error: any) {
+      if (!this.isSessionActive(sessionId)) return;
       console.error('Error al cargar magnet link:', error);
       this.errorMessage.set(`Error: ${error.message || 'Error desconocido'}`);
       this.loading.set(false);
@@ -916,6 +1022,13 @@ export class PlayerComponent implements OnDestroy {
 
     // Parar el video completamente
     this.stopPlaybackAndPolling();
+
+    if (this.searchAbortController) {
+      try {
+        this.searchAbortController.abort();
+      } catch {}
+      this.searchAbortController = null;
+    }
 
     // Quick-switch para limpiar recursos en el backend (no esperar)
     fetch(`${this.API_URL}/quick-switch`, {

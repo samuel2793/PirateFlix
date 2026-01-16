@@ -374,6 +374,51 @@ app.get('/api/search-torrent', async (req, res) => {
   const { query, category = '207' } = req.query; // 207 = HD Movies
   if (!query) return res.status(400).json({ error: 'query es requerido' });
 
+  const perMirrorTimeoutMs = parseInt(process.env.PIRATEFLIX_MIRROR_TIMEOUT_MS || '20000', 10);
+  const stage2TimeoutMs = Math.max(
+    Math.floor(perMirrorTimeoutMs * 1.3),
+    Math.floor(perMirrorTimeoutMs + 3000)
+  );
+  const baseTimeoutMs = parseInt(process.env.PIRATEFLIX_SEARCH_TIMEOUT_MS || '30000', 10);
+  const timeoutMs = Math.max(baseTimeoutMs, stage2TimeoutMs + 2000);
+  const requestAbortController = new AbortController();
+  const requestAbortSignal = requestAbortController.signal;
+  activeSearchControllers.add(requestAbortController);
+  const requestTimeout = setTimeout(() => {
+    try {
+      requestAbortController.abort();
+    } catch (_) {}
+  }, timeoutMs);
+
+  const onClientClose = () => {
+    try {
+      if (!requestAbortSignal.aborted) requestAbortController.abort();
+    } catch (_) {}
+  };
+  req.on('close', onClientClose);
+  req.on('aborted', onClientClose);
+
+  const cleanupSearch = () => {
+    clearTimeout(requestTimeout);
+    activeSearchControllers.delete(requestAbortController);
+    try {
+      req.removeListener('close', onClientClose);
+      req.removeListener('aborted', onClientClose);
+    } catch (_) {}
+  };
+
+  const isAbortLikeError = (err) => {
+    if (!err) return false;
+    const code = err.code || err.name;
+    const msg = String(err.message || '').toLowerCase();
+    return (
+      code === 'ERR_CANCELED' ||
+      code === 'AbortError' ||
+      msg.includes('canceled') ||
+      msg.includes('aborted')
+    );
+  };
+
   try {
     let cleanQuery = query
       .replace(/'/g, '')
@@ -385,7 +430,6 @@ app.get('/api/search-torrent', async (req, res) => {
     console.log(`Buscando torrent: ${query}`);
     if (cleanQuery !== query) console.log(`Query limpio: ${cleanQuery}`);
 
-    const timeoutMs = parseInt(process.env.PIRATEFLIX_SEARCH_TIMEOUT_MS || '30000', 10);
     const httpAgent = httpAgentGlobal;
     const httpsAgentShared = httpsAgentGlobal;
     const mirrors = MIRRORS.slice();
@@ -410,7 +454,7 @@ app.get('/api/search-torrent', async (req, res) => {
       console.warn('No se pudieron obtener diagnostics internos:', e.message);
     }
 
-    async function fetchSearchHtml(cleanQuery, category) {
+    async function fetchSearchHtml(cleanQuery, category, parentSignal) {
       const headers = {
         'User-Agent':
           'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
@@ -430,9 +474,63 @@ app.get('/api/search-torrent', async (req, res) => {
         return cached.html;
       }
 
+      const perMirrorTimeout = perMirrorTimeoutMs;
+      const controllers = new Set();
+      const overallSignal = parentSignal;
+
+      const makeAbortError = () => {
+        const err = new Error('Search aborted');
+        err.code = 'ERR_CANCELED';
+        return err;
+      };
+
+      const isAbortError = (err) => {
+        if (!err) return false;
+        const code = err.code || err.name;
+        const msg = String(err.message || '').toLowerCase();
+        return (
+          code === 'ERR_CANCELED' ||
+          code === 'AbortError' ||
+          msg.includes('canceled') ||
+          msg.includes('aborted')
+        );
+      };
+
+      const isAggregateAbort = (err) => {
+        const errs = err && err.errors;
+        return Array.isArray(errs) && errs.length > 0 && errs.every((e) => isAbortError(e));
+      };
+
+      const ensureNotAborted = () => {
+        if (overallSignal && overallSignal.aborted) throw makeAbortError();
+      };
+
+      const trackController = (controller) => {
+        if (!controllers.has(controller)) controllers.add(controller);
+        activeSearchControllers.add(controller);
+        if (overallSignal && overallSignal.aborted) {
+          try {
+            controller.abort();
+          } catch (_) {}
+        } else if (overallSignal) {
+          overallSignal.addEventListener(
+            'abort',
+            () => {
+              try {
+                controller.abort();
+              } catch (_) {}
+            },
+            { once: true }
+          );
+        }
+        return controller;
+      };
+
       const tryYtsFallback = async (q) => {
         if (String(process.env.PIRATEFLIX_USE_EXTERNAL_API || 'true').toLowerCase() !== 'true')
           return null;
+        ensureNotAborted();
+        let controller = null;
         try {
           const apiUrl = `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(
             q
@@ -443,12 +541,19 @@ app.get('/api/search-torrent', async (req, res) => {
             apiUrl,
             `(timeout ${ytsTimeout}ms)`
           );
+          controller = trackController(new AbortController());
           const resp = await axios.get(apiUrl, {
             timeout: ytsTimeout,
             responseType: 'json',
             httpsAgent: httpsAgentShared,
             httpAgent,
+            signal: controller.signal,
           });
+          try {
+            activeSearchControllers.delete(controller);
+          } catch (e) {
+            /* ignore */
+          }
           const movies = resp?.data?.data?.movies;
           if (!movies || movies.length === 0) return null;
 
@@ -465,24 +570,29 @@ app.get('/api/search-torrent', async (req, res) => {
           if (magnets.length === 0) return null;
           return magnets.map((m) => `<a href="${m}">download</a>`).join('\n');
         } catch (err) {
+          if (controller) {
+            try {
+              activeSearchControllers.delete(controller);
+            } catch (e) {
+              /* ignore */
+            }
+          }
+          if (isAbortError(err) || (overallSignal && overallSignal.aborted)) throw makeAbortError();
           console.warn('Fallback YTS falló:', err && err.message ? err.message : err);
           return null;
         }
       };
 
-      const perMirrorTimeout = parseInt(process.env.PIRATEFLIX_MIRROR_TIMEOUT_MS || '20000', 10);
-      const controllers = [];
-
-      try {
-        if (Date.now() - lastWarmupAt > WARMUP_INTERVAL_MS) {
-          console.log(
-            '🔧 Warmup previo detectado como antiguo. Ejecutando warmup corto antes de buscar...'
-          );
-          await warmupMirrors(3000);
-        }
-      } catch (e) {
-        console.warn('Warmup corto falló antes de buscar:', e && e.message ? e.message : e);
-      }
+      // try {
+      //   if (Date.now() - lastWarmupAt > WARMUP_INTERVAL_MS) {
+      //     console.log(
+      //       '🔧 Warmup previo detectado como antiguo. Ejecutando warmup corto antes de buscar...'
+      //     );
+      //     await warmupMirrors(3000);
+      //   }
+      // } catch (e) {
+      //   console.warn('Warmup corto falló antes de buscar:', e && e.message ? e.message : e);
+      // }
 
       const healthyMirrors = mirrors.filter((base) => {
         const s = mirrorStats.get(base);
@@ -511,8 +621,7 @@ app.get('/api/search-torrent', async (req, res) => {
       const makeRequestFor = (base, timeoutMs, signalController) => {
         const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
         const controller = signalController || new AbortController();
-        controllers.push({ controller, base, url });
-        activeSearchControllers.add(controller);
+        trackController(controller);
 
         console.log(`Lanzando petición a: ${url} (timeout ${timeoutMs}ms)`);
 
@@ -541,6 +650,19 @@ app.get('/api/search-torrent', async (req, res) => {
             throw new Error(`Empty response from ${base}`);
           })
           .catch((err) => {
+            if (
+              isAbortError(err) ||
+              controller.signal.aborted ||
+              (overallSignal && overallSignal.aborted)
+            ) {
+              try {
+                activeSearchControllers.delete(controller);
+              } catch (e) {
+                /* ignore */
+              }
+              throw makeAbortError();
+            }
+
             const msg = err && err.message ? String(err.message).toLowerCase() : '';
             if (
               msg.includes('certificate key too weak') ||
@@ -573,6 +695,7 @@ app.get('/api/search-torrent', async (req, res) => {
 
       let result = null;
       try {
+        ensureNotAborted();
         const topN = Math.max(1, Math.min(prioritized.length, FAST_PARALLEL_MIRRORS));
         const topList = prioritized.slice(0, topN);
         try {
@@ -581,6 +704,12 @@ app.get('/api/search-torrent', async (req, res) => {
           const winner = await Promise.any(requests);
           result = winner.html;
         } catch (stage1Err) {
+          if (
+            (overallSignal && overallSignal.aborted) ||
+            isAbortError(stage1Err) ||
+            isAggregateAbort(stage1Err)
+          )
+            throw makeAbortError();
           console.warn(
             'Stage1 falló:',
             stage1Err && stage1Err.errors
@@ -588,7 +717,7 @@ app.get('/api/search-torrent', async (req, res) => {
               : (stage1Err && stage1Err.message) || stage1Err
           );
 
-          for (const { controller } of controllers) {
+          for (const controller of controllers) {
             try {
               controller.abort();
             } catch (e) {
@@ -601,6 +730,7 @@ app.get('/api/search-torrent', async (req, res) => {
             }
           }
 
+          ensureNotAborted();
           const wideTimeout = Math.max(perMirrorTimeout * 2, Math.floor(perMirrorTimeout + 7000));
           const controllersStage2 = [];
           console.log(`Stage2: probando todos los mirrors en paralelo (timeout ${wideTimeout}ms)`);
@@ -611,8 +741,23 @@ app.get('/api/search-torrent', async (req, res) => {
               return makeRequestFor(m, wideTimeout, controller);
             });
             const winner2 = await Promise.any(requests2);
+            for (const { controller } of controllersStage2) {
+              try {
+                controller.abort();
+              } catch (e) {}
+              try {
+                activeSearchControllers.delete(controller);
+              } catch (e) {}
+            }
+
             result = winner2.html;
           } catch (stage2Err) {
+            if (
+              (overallSignal && overallSignal.aborted) ||
+              isAbortError(stage2Err) ||
+              isAggregateAbort(stage2Err)
+            )
+              throw makeAbortError();
             console.warn(
               'Stage2 falló:',
               stage2Err && stage2Err.errors
@@ -643,13 +788,17 @@ app.get('/api/search-torrent', async (req, res) => {
               console.warn('Error en fallback externo rápido:', e && e.message ? e.message : e);
             }
 
+            ensureNotAborted();
             if (!result) console.log('Intentando reintentos secuenciales con timeout extendido...');
             for (const base of mirrors) {
+              ensureNotAborted();
               const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
               console.log(
                 `Intentando secuencial a: ${url} (timeout ${EXTENDED_MIRROR_TIMEOUT_MS}ms)`
               );
+              let controller = null;
               try {
+                controller = trackController(new AbortController());
                 const resp = await axios.get(url, {
                   headers,
                   timeout: EXTENDED_MIRROR_TIMEOUT_MS,
@@ -658,7 +807,15 @@ app.get('/api/search-torrent', async (req, res) => {
                   validateStatus: (s) => s >= 200 && s < 400,
                   httpsAgent: httpsAgentShared,
                   httpAgent,
+                  signal: controller.signal,
                 });
+                if (controller) {
+                  try {
+                    activeSearchControllers.delete(controller);
+                  } catch (e) {
+                    /* ignore */
+                  }
+                }
 
                 if (resp && resp.data && resp.data.length > 0) {
                   console.log(
@@ -669,6 +826,15 @@ app.get('/api/search-torrent', async (req, res) => {
                   break;
                 }
               } catch (err) {
+                if (controller) {
+                  try {
+                    activeSearchControllers.delete(controller);
+                  } catch (e) {
+                    /* ignore */
+                  }
+                }
+                if (isAbortError(err) || (overallSignal && overallSignal.aborted))
+                  throw makeAbortError();
                 const prev = mirrorStats.get(base) || { fails: 0 };
                 prev.fails = (prev.fails || 0) + 1;
                 prev.lastFail = Date.now();
@@ -692,7 +858,7 @@ app.get('/api/search-torrent', async (req, res) => {
           }
         }
       } finally {
-        for (const { controller } of controllers) {
+        for (const controller of controllers) {
           try {
             controller.abort();
           } catch (e) {
@@ -714,9 +880,10 @@ app.get('/api/search-torrent', async (req, res) => {
 
     let html = null;
     try {
-      html = await fetchSearchHtml(cleanQuery, category);
+      html = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
       console.log(`Busqueda finalizada en ${Date.now() - searchStart} ms`);
     } catch (initialErr) {
+      if (isAbortLikeError(initialErr) || requestAbortSignal.aborted) throw initialErr;
       console.warn('Búsqueda inicial falló, intentando fallbacks de query:', initialErr.message);
 
       const fallbacks = [];
@@ -746,7 +913,7 @@ app.get('/api/search-torrent', async (req, res) => {
       for (const fq of fallbacks) {
         try {
           console.log(`Intentando fallback: '${fq}'`);
-          html = await fetchSearchHtml(fq, category);
+          html = await fetchSearchHtml(fq, category, requestAbortSignal);
           console.log(`Fallback exitoso con query: '${fq}'`);
           break;
         } catch (fbErr) {
@@ -877,6 +1044,10 @@ app.get('/api/search-torrent', async (req, res) => {
     if (
       msg.includes('timeout') ||
       error?.code === 'ECONNABORTED' ||
+      error?.code === 'ERR_CANCELED' ||
+      error?.name === 'AbortError' ||
+      msg.includes('canceled') ||
+      msg.includes('aborted') ||
       msg.includes('all mirrors failed') ||
       msg.includes('empty response') ||
       msg.includes('certificate key too weak') ||
@@ -884,20 +1055,18 @@ app.get('/api/search-torrent', async (req, res) => {
       msg.includes('request failed with status code 5') ||
       (error && error.response && error.response.status >= 500 && error.response.status < 600)
     ) {
-      return res
-        .status(504)
-        .json({
-          error: 'Timeout en búsqueda',
-          message: 'La búsqueda tardó demasiado o los mirrors no respondieron',
-        });
+      return res.status(504).json({
+        error: 'Timeout en búsqueda',
+        message: 'La búsqueda tardó demasiado o los mirrors no respondieron',
+      });
     }
 
-    res
-      .status(500)
-      .json({
-        error: 'Error al buscar torrent',
-        message: (error && error.message) || String(error),
-      });
+    res.status(500).json({
+      error: 'Error al buscar torrent',
+      message: (error && error.message) || String(error),
+    });
+  } finally {
+    cleanupSearch();
   }
 });
 
@@ -1185,9 +1354,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
 
       transcodedCache.set(cacheKey, 'transcoding');
 
-      const mapOptions = forceTranscode
-        ? ['-map', '0:v:0', '-map', `0:${audioStreamIndex}?`]
-        : [];
+      const mapOptions = forceTranscode ? ['-map', '0:v:0', '-map', `0:${audioStreamIndex}?`] : [];
 
       const ffmpegCommand = ffmpeg(inputStream || filePath)
         .videoCodec('libx264')
@@ -1568,13 +1735,17 @@ app.post('/api/quick-switch', async (req, res) => {
 
     // 1. Abortar búsquedas activas inmediatamente
     for (const ctrl of Array.from(activeSearchControllers)) {
-      try { ctrl.abort(); } catch (_) {}
+      try {
+        ctrl.abort();
+      } catch (_) {}
       activeSearchControllers.delete(ctrl);
     }
 
     // 2. Matar todos los procesos FFmpeg
     for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try { proc.kill && proc.kill('SIGKILL'); } catch (_) {}
+      try {
+        proc.kill && proc.kill('SIGKILL');
+      } catch (_) {}
       activeFFmpegProcesses.delete(key);
       transcodedCache.delete(key);
     }
@@ -1582,7 +1753,9 @@ app.post('/api/quick-switch', async (req, res) => {
     // 3. Cerrar streams HTTP activos (sin esperar)
     for (const [infoHash, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
       for (const r of Array.from(resSet)) {
-        try { r.destroy && r.destroy(); } catch (_) {}
+        try {
+          r.destroy && r.destroy();
+        } catch (_) {}
       }
     }
     activeResponsesByInfoHash.clear();
@@ -1643,13 +1816,17 @@ app.post('/api/reset-state', async (req, res) => {
 
     // 1. Abortar búsquedas
     for (const ctrl of Array.from(activeSearchControllers)) {
-      try { ctrl.abort(); } catch (_) {}
+      try {
+        ctrl.abort();
+      } catch (_) {}
       activeSearchControllers.delete(ctrl);
     }
 
     // 2. Matar FFmpeg
     for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try { proc.kill && proc.kill('SIGKILL'); } catch (_) {}
+      try {
+        proc.kill && proc.kill('SIGKILL');
+      } catch (_) {}
       activeFFmpegProcesses.delete(key);
       transcodedCache.delete(key);
     }
@@ -1657,7 +1834,9 @@ app.post('/api/reset-state', async (req, res) => {
     // 3. Cerrar streams
     for (const [, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
       for (const r of Array.from(resSet)) {
-        try { r.destroy && r.destroy(); } catch (_) {}
+        try {
+          r.destroy && r.destroy();
+        } catch (_) {}
       }
     }
     activeResponsesByInfoHash.clear();
@@ -1690,7 +1869,9 @@ app.post('/api/reset-state', async (req, res) => {
   } catch (err) {
     console.error('Error en reset:', err);
     // Recrear cliente de todas formas
-    try { client = createWebTorrentClient(); } catch (_) {}
+    try {
+      client = createWebTorrentClient();
+    } catch (_) {}
     res.json({ success: true, time: Date.now() - startTime });
   }
 });
