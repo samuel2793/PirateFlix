@@ -135,13 +135,34 @@ export class PlayerComponent implements OnDestroy {
 
       // 3. Mostrar fase de búsqueda inmediatamente
       this.loadingPhase.set('searching');
-      // Intentar diferentes queries si no se encuentran resultados
-      // Simplificar búsquedas para evitar timeouts
-      const searchQueries = [`${title} ${year} 1080p`, `${title} ${year}`, title];
+      // Intentar queries de más a menos específicas para ampliar resultados
+      const normalizeQuery = (value: string) => value.replace(/\s+/g, ' ').trim();
+      const normalizedTitle = normalizeQuery(title.replace(/[^\w\s]/g, ' '));
+      const queryTitle = normalizedTitle || title;
+      const searchQueries = [
+        normalizeQuery(`${queryTitle} ${year} 1080p`),
+        normalizeQuery(`${queryTitle} ${year} 720p`),
+        normalizeQuery(`${queryTitle} ${year}`),
+        normalizeQuery(`${queryTitle}`),
+      ].filter((q, index, arr) => q && arr.indexOf(q) === index);
 
-      let searchResults: any = null;
+      const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
+
+      const aggregatedResults: any[] = [];
+      const seenMagnets = new Set<string>();
+      let sawSeeded = false;
       let attempts = 0;
-      const maxAttempts = 3; // Limitar intentos para evitar timeouts múltiples
+      const maxAttempts = searchQueries.length; // Limitar intentos para evitar timeouts múltiples
+
+      const mergeResults = (results: any) => {
+        for (const torrent of results.results || []) {
+          const key = torrent.magnetLink || torrent.name;
+          if (key && !seenMagnets.has(key)) {
+            seenMagnets.add(key);
+            aggregatedResults.push(torrent);
+          }
+        }
+      };
 
       for (const searchQuery of searchQueries) {
         if (attempts >= maxAttempts) {
@@ -165,11 +186,19 @@ export class PlayerComponent implements OnDestroy {
           const results = await searchResponse.json();
 
           if (results.results && results.results.length > 0) {
-            searchResults = results;
-            console.log(
-              `✓ Encontrados ${results.results.length} torrents con query: ${searchQuery}`
-            );
-            break;
+            mergeResults(results);
+
+            const hasSeeders = results.results.some((t: any) => getSeeders(t) > 0);
+            if (hasSeeders) {
+              sawSeeded = true;
+              console.log(
+                `✓ Encontrados ${results.results.length} torrents con seeders: ${searchQuery}`
+              );
+            } else {
+              console.log(
+                `⚠️ Resultados sin seeders para: ${searchQuery} (probando menos restrictivo)`
+              );
+            }
           }
         } catch (fetchError) {
           console.error(`❌ Error en búsqueda: ${fetchError}`);
@@ -177,24 +206,57 @@ export class PlayerComponent implements OnDestroy {
         }
       }
 
-      if (!searchResults || !searchResults.results || searchResults.results.length === 0) {
+      if (aggregatedResults.length === 0) {
         throw new Error('No se encontraron torrents para esta película');
       }
 
+      if (!sawSeeded) {
+        console.warn('⚠️ No se encontraron torrents con seeders, usando el mejor disponible');
+      }
+
       // Preferir torrents con formatos compatibles con navegadores
-      const torrents = searchResults.results;
+      const torrents = aggregatedResults;
 
       console.log(`📋 Torrents disponibles:`);
       torrents.forEach((t: any, i: number) => {
         console.log(`  ${i + 1}. ${t.name}`);
       });
 
+      const sortBySeeders = (list: any[]) =>
+        list
+          .slice()
+          .sort(
+            (a, b) =>
+              getSeeders(b) - getSeeders(a) ||
+              (Number(b?.leechers) || 0) - (Number(a?.leechers) || 0)
+          );
+
+      const minSeedersPreferred = 2;
+      const strongSeededTorrents = torrents.filter((t: any) => getSeeders(t) >= minSeedersPreferred);
+      const unknownSeededTorrents = torrents.filter((t: any) => getSeeders(t) === 0);
+
+      let candidateTorrents =
+        strongSeededTorrents.length > 0 ? strongSeededTorrents : torrents;
+
+      if (strongSeededTorrents.length === 0) {
+        if (unknownSeededTorrents.length > 0) {
+          console.warn(
+            `⚠️ Seeders muy bajos (<${minSeedersPreferred}); probando torrents con seeders desconocidos`
+          );
+          candidateTorrents = unknownSeededTorrents;
+        } else {
+          console.warn('⚠️ No hay torrents con seeders suficientes, usando el mejor disponible');
+        }
+      }
+
       // Filtros en orden de preferencia:
       // 1. YTS (siempre H.264 MP4 con audio AAC)
       // 2. WEB-DL/WEBRip H.264 de calidad
       // 3. Cualquier H.264 de calidad
       // 4. Lo que sea (probablemente no funcionará)
-      const ytsTorrents = torrents.filter((t: any) => t.name.toLowerCase().includes('yts'));
+      const ytsTorrents = sortBySeeders(
+        candidateTorrents.filter((t: any) => t.name.toLowerCase().includes('yts'))
+      );
 
       const lowQuality = (name: string) => {
         const lower = name.toLowerCase();
@@ -234,26 +296,31 @@ export class PlayerComponent implements OnDestroy {
       };
 
       // Torrents con codecs compatibles (H.264/x264) y calidad decente
-      const h264Quality = torrents.filter(
+      const h264Quality = candidateTorrents.filter(
         (t: any) => !incompatibleCodec(t.name) && !lowQuality(t.name)
       );
 
       // Torrents con audio compatible
-      const h264QualityGoodAudio = h264Quality.filter((t: any) => !incompatibleAudio(t.name));
+      const h264QualityGoodAudio = sortBySeeders(
+        h264Quality.filter((t: any) => !incompatibleAudio(t.name))
+      );
+      const h264QualitySorted = sortBySeeders(h264Quality);
 
       // Fallback: cualquier H.264 aunque sea baja calidad
-      const h264Any = torrents.filter((t: any) => !incompatibleCodec(t.name));
+      const h264Any = sortBySeeders(
+        candidateTorrents.filter((t: any) => !incompatibleCodec(t.name))
+      );
 
       const bestTorrent =
         ytsTorrents.length > 0
           ? ytsTorrents[0]
           : h264QualityGoodAudio.length > 0
           ? h264QualityGoodAudio[0]
-          : h264Quality.length > 0
-          ? h264Quality[0]
+          : h264QualitySorted.length > 0
+          ? h264QualitySorted[0]
           : h264Any.length > 0
           ? h264Any[0]
-          : torrents[0];
+          : candidateTorrents[0];
 
       if (ytsTorrents.length > 0) {
         console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);

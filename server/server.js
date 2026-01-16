@@ -713,41 +713,62 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     const torrents = [];
-    const magnetRegex = /<a href="(magnet:\?xt=urn:btih:[^"]+)"/g;
-    const magnets = [];
-    let magnetMatch;
 
-    while ((magnetMatch = magnetRegex.exec(html)) !== null) {
-      magnets.push(magnetMatch[1]);
-    }
+    const decodeHtmlEntities = (value) =>
+      String(value)
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
 
-    console.log(`Magnet links encontrados: ${magnets.length}`);
+    const extractPeersFromRow = (rowHtml) => {
+      const numbersFrom = (regex) => {
+        const nums = [];
+        let match;
+        while ((match = regex.exec(rowHtml)) !== null) {
+          nums.push(parseInt(match[1], 10));
+        }
+        return nums;
+      };
 
-    for (const magnetLink of magnets) {
+      const rightTdRegex =
+        /<td[^>]*(?:align="right"|class="[^"]*(?:right|text-right)[^"]*")[^>]*>\s*(\d+)\s*<\/td>/gi;
+      const anyTdRegex = /<td[^>]*>\s*(\d+)\s*<\/td>/gi;
+
+      let nums = numbersFrom(rightTdRegex);
+      if (nums.length < 2) nums = numbersFrom(anyTdRegex);
+
+      const seeders = nums.length >= 2 ? nums[nums.length - 2] : 0;
+      const leechers = nums.length >= 2 ? nums[nums.length - 1] : 0;
+      return { seeders, leechers };
+    };
+
+    const extractName = (magnetLink, rowHtml) => {
+      const nameMatch = magnetLink.match(/&dn=([^&]+)/);
+      if (nameMatch) return decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
+
+      const detLinkMatch = rowHtml.match(/class="detLink"[^>]*>([^<]+)</i);
+      if (detLinkMatch) return decodeHtmlEntities(detLinkMatch[1]).trim();
+
+      return 'Unknown';
+    };
+
+    const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
+    let rowMatch;
+
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
       if (torrents.length >= 10) break;
 
-      const nameMatch = magnetLink.match(/&dn=([^&]+)/);
-      const name = nameMatch ? decodeURIComponent(nameMatch[1].replace(/\+/g, ' ')) : 'Unknown';
+      const rowHtml = rowMatch[0];
+      const magnetMatch = rowHtml.match(/href=['"](magnet:\?xt=urn:btih:[^'"]+)['"]/i);
+      if (!magnetMatch) continue;
 
-      const escapedMagnet = magnetLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const infoRegex = new RegExp(
-        escapedMagnet +
-          '[\\s\\S]{0,500}?<td align="right">(\\d+)<\\/td>\\s*<td align="right">(\\d+)<\\/td>',
-        'i'
-      );
-      const infoMatch = html.match(infoRegex);
-
-      let seeders = 0;
-      let leechers = 0;
-
-      if (infoMatch) {
-        seeders = parseInt(infoMatch[1]);
-        leechers = parseInt(infoMatch[2]);
-      }
-
-      const sizeRegex = new RegExp(escapedMagnet + '[\\s\\S]{0,300}?Size ([^,<]+)', 'i');
-      const sizeMatch = html.match(sizeRegex);
+      const magnetLink = decodeHtmlEntities(magnetMatch[1]);
+      const name = extractName(magnetLink, rowHtml);
+      const sizeMatch = rowHtml.match(/Size\s+([^,<]+)\s*,/i);
       const size = sizeMatch ? sizeMatch[1].trim() : 'Unknown';
+      const { seeders, leechers } = extractPeersFromRow(rowHtml);
 
       torrents.push({
         name,
@@ -757,6 +778,35 @@ app.get('/api/search-torrent', async (req, res) => {
         leechers,
         score: seeders * 2 + leechers,
       });
+    }
+
+    if (torrents.length === 0) {
+      const magnetRegex = /<a href=['"](magnet:\?xt=urn:btih:[^'"]+)['"]/g;
+      const magnets = [];
+      let magnetMatch;
+
+      while ((magnetMatch = magnetRegex.exec(html)) !== null) {
+        magnets.push(decodeHtmlEntities(magnetMatch[1]));
+      }
+
+      console.log(`Magnet links encontrados (fallback): ${magnets.length}`);
+
+      for (const magnetLink of magnets) {
+        if (torrents.length >= 10) break;
+
+        const name = extractName(magnetLink, html);
+
+        torrents.push({
+          name,
+          magnetLink,
+          size: 'Unknown',
+          seeders: 0,
+          leechers: 0,
+          score: 0,
+        });
+      }
+    } else {
+      console.log(`Magnet links encontrados: ${torrents.length}`);
     }
 
     torrents.sort((a, b) => b.score - a.score);
@@ -985,21 +1035,10 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
 
     console.log('🎬 Transcodificación en tiempo real:', file.name);
 
-    try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
-    } catch (err) {
-      console.warn('Advertencia: waitForFileOnDisk falló antes de ffprobe:', err.message);
-    }
+    const useTorrentStream = file.downloaded < file.length;
+    const inputStream = useTorrentStream ? file.createReadStream() : null;
 
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) {
-        console.error('❌ Error al obtener metadata:', err.message);
-        return res.status(500).send('Error al analizar video');
-      }
-
-      const duration = metadata.format.duration;
-      console.log(`📹 Duración: ${Math.floor(duration / 60)}m ${Math.floor(duration % 60)}s`);
-
+    const startTranscode = () => {
       res.writeHead(200, {
         'Content-Type': 'video/mp4',
         'Transfer-Encoding': 'chunked',
@@ -1009,7 +1048,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
 
       transcodedCache.set(cacheKey, 'transcoding');
 
-      const ffmpegCommand = ffmpeg(filePath)
+      const ffmpegCommand = ffmpeg(inputStream || filePath)
         .videoCodec('libx264')
         .videoBitrate('2500k')
         .audioCodec('aac')
@@ -1059,9 +1098,39 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
         try {
           ffmpegCommand.kill('SIGKILL');
         } catch (_) {}
+        try {
+          if (inputStream) inputStream.destroy();
+        } catch (_) {}
         transcodedCache.delete(cacheKey);
         activeFFmpegProcesses.delete(cacheKey);
       });
+    };
+
+    if (useTorrentStream) {
+      console.log('📡 Transcodificando desde stream de torrent (secuencial)');
+      startTranscode();
+      return;
+    }
+
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de ffprobe:', err.message);
+    }
+
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        console.warn('⚠️ Error al obtener metadata, continuando:', err.message);
+        startTranscode();
+        return;
+      }
+
+      const duration = metadata.format.duration;
+      if (duration) {
+        console.log(`📹 Duración: ${Math.floor(duration / 60)}m ${Math.floor(duration % 60)}s`);
+      }
+
+      startTranscode();
     });
 
     return;
