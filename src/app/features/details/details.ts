@@ -1,6 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { MatCardModule } from '@angular/material/card';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -10,7 +13,7 @@ type MediaType = 'movie' | 'tv';
 @Component({
   selector: 'app-details',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, MatCardModule, MatButtonModule, MatIconModule],
   templateUrl: './details.html',
   styleUrl: './details.scss',
 })

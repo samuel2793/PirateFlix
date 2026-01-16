@@ -31,6 +31,7 @@
               }
             ],
             "styles": [
+              "src/styles-material.scss",
               "src/styles.scss"
             ]
           },

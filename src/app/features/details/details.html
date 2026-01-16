@@ -2,23 +2,22 @@
   <p class="error" *ngIf="error()">{{ error() }}</p>
 
   <ng-container *ngIf="!error() && item() as it">
-    <div class="hero">
-      <div class="bg" [style.backgroundImage]="'url(' + backdrop() + ')'"></div>
-      <div class="overlay"></div>
-
-      <div class="content">
-        <img class="poster" [src]="poster()" [alt]="title()" />
-        <div class="meta">
-          <h1>{{ title() }}</h1>
-          <p class="overview">{{ overview() }}</p>
-
-          <div class="actions">
-            <button class="primary" type="button" (click)="play()">Reproducir</button>
-            <button class="secondary" type="button">Mi lista</button>
+    <mat-card class="details-card">
+      <div class="hero" [style.backgroundImage]="'url(' + backdrop() + ')'">
+        <div class="overlay"></div>
+        <div class="content">
+          <img class="poster" [src]="poster()" [alt]="title()" />
+          <div class="meta">
+            <h1>{{ title() }}</h1>
+            <p class="overview">{{ overview() }}</p>
+            <div class="actions">
+              <button mat-raised-button color="primary" type="button" (click)="play()"><mat-icon>play_arrow</mat-icon> Reproducir</button>
+              <button mat-stroked-button type="button">Mi lista</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </mat-card>
   </ng-container>
 </div>
 
