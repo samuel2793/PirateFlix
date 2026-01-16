@@ -141,6 +141,7 @@ client = createWebTorrentClient();
 // =====================
 const activeTorrents = new Map();
 const embeddedSubtitlesCache = new Map();
+const embeddedAudioTracksCache = new Map();
 
 const transcodedCache = new Map();
 const CACHE_DIR = path.join(os.tmpdir(), 'pirateflix-transcoded');
@@ -181,6 +182,9 @@ function canDestroyNow(infoHash) {
 function clearEmbeddedCacheForInfoHash(infoHash) {
   for (const k of Array.from(embeddedSubtitlesCache.keys())) {
     if (String(k).startsWith(`${infoHash}-`)) embeddedSubtitlesCache.delete(k);
+  }
+  for (const k of Array.from(embeddedAudioTracksCache.keys())) {
+    if (String(k).startsWith(`${infoHash}-`)) embeddedAudioTracksCache.delete(k);
   }
 }
 
@@ -986,11 +990,77 @@ app.get('/api/embedded-subtitles/:infoHash/:fileIndex', async (req, res) => {
   }
 });
 
+// Endpoint para detectar pistas de audio embebidas
+app.get('/api/audio-tracks/:infoHash/:fileIndex', async (req, res) => {
+  const { infoHash, fileIndex } = req.params;
+  const cacheKey = `${infoHash}-${fileIndex}`;
+
+  if (embeddedAudioTracksCache.has(cacheKey)) {
+    return res.json(embeddedAudioTracksCache.get(cacheKey));
+  }
+
+  const torrent = client.get(infoHash);
+  if (!torrent) return res.status(404).json({ error: 'Torrent no encontrado' });
+
+  const file = torrent.files[parseInt(fileIndex)];
+  if (!file) return res.status(404).json({ error: 'Archivo no encontrado' });
+
+  try {
+    const filePath = path.join(torrent.path, file.path);
+    console.log('Analizando pistas de audio embebidas en:', filePath);
+
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló:', err.message);
+    }
+
+    const audioTracks = await new Promise((resolve) => {
+      const tracks = [];
+      ffmpeg.ffprobe(filePath, (err, metadata) => {
+        if (err) {
+          console.error('Error al analizar archivo:', err.message);
+          resolve([]);
+          return;
+        }
+
+        if (metadata.streams) {
+          metadata.streams.forEach((stream, index) => {
+            if (stream.codec_type === 'audio') {
+              tracks.push({
+                index: stream.index,
+                codec: stream.codec_name,
+                language: stream.tags?.language || 'und',
+                title: stream.tags?.title || `Audio ${index}`,
+                channels: stream.channels || null,
+                default: stream.disposition?.default === 1,
+              });
+            }
+          });
+        }
+        resolve(tracks);
+      });
+    });
+
+    embeddedAudioTracksCache.set(cacheKey, audioTracks);
+    res.json(audioTracks);
+  } catch (error) {
+    console.error('Error al detectar pistas de audio embebidas:', error);
+    res.json([]);
+  }
+});
+
 // =====================
 // Streaming
 // =====================
 app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const { infoHash, fileIndex } = req.params;
+  const audioStreamParam = req.query.audioStream;
+  const audioStreamIndex =
+    typeof audioStreamParam === 'string' && audioStreamParam.trim() !== ''
+      ? Number(audioStreamParam)
+      : null;
+  const forceTranscode = Number.isFinite(audioStreamIndex);
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).send('Torrent no encontrado');
 
@@ -1004,6 +1074,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const fileName = file.name.toLowerCase();
 
   const needsTranscode =
+    forceTranscode ||
     fileName.endsWith('.mkv') ||
     fileName.includes('hevc') ||
     fileName.includes('x265') ||
@@ -1012,11 +1083,13 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   console.log(
     'Streaming archivo:',
     file.name,
-    needsTranscode ? '(TRANSCODIFICANDO automáticamente)' : ''
+    needsTranscode ? '(TRANSCODIFICANDO automáticamente)' : '',
+    forceTranscode ? `(audio stream ${audioStreamIndex})` : ''
   );
 
   if (needsTranscode) {
-    const cacheKey = `${infoHash}_${fileIndex}`;
+    const audioSuffix = forceTranscode ? `_a${audioStreamIndex}` : '';
+    const cacheKey = `${infoHash}_${fileIndex}${audioSuffix}`;
     const cachedPath = path.join(CACHE_DIR, `${cacheKey}.mp4`);
 
     if (activeFFmpegProcesses.has(cacheKey)) {
@@ -1048,6 +1121,10 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
 
       transcodedCache.set(cacheKey, 'transcoding');
 
+      const mapOptions = forceTranscode
+        ? ['-map', '0:v:0', '-map', `0:${audioStreamIndex}?`]
+        : [];
+
       const ffmpegCommand = ffmpeg(inputStream || filePath)
         .videoCodec('libx264')
         .videoBitrate('2500k')
@@ -1056,6 +1133,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
         .audioChannels(2)
         .format('mp4')
         .outputOptions([
+          ...mapOptions,
           '-preset ultrafast',
           '-tune zerolatency',
           '-movflags frag_keyframe+empty_moov+default_base_moof',
@@ -1438,6 +1516,7 @@ app.post('/api/quick-switch', async (req, res) => {
 
     // 5. Limpiar caches de subtítulos
     embeddedSubtitlesCache.clear();
+    embeddedAudioTracksCache.clear();
     pendingDestroy.clear();
 
     console.log(`⚡ Quick-switch completado en ${Date.now() - startTime}ms`);
@@ -1497,6 +1576,7 @@ app.post('/api/reset-state', async (req, res) => {
     // 5. Limpiar caches
     activeTorrents.clear();
     embeddedSubtitlesCache.clear();
+    embeddedAudioTracksCache.clear();
     transcodedCache.clear();
 
     console.log(`✅ Reset completo en ${Date.now() - startTime}ms`);

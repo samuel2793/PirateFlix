@@ -27,7 +27,8 @@
     }
 
     @if (videoSrc()) {
-      <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()" crossorigin="anonymous">
+      <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()" crossorigin="anonymous"
+        (loadedmetadata)="onVideoLoadedMetadata()">
         @for (subtitle of subtitleTracks(); track subtitle.index) {
           <track
             [label]="subtitle.language"
@@ -43,5 +44,18 @@
   <div class="hud">
     <a routerLink="/" class="btn">← Home</a>
     <a [routerLink]="['/details', type(), id()]" class="btn">Detalles</a>
+    @if (audioTracks().length > 1) {
+      <div class="audio-selector">
+        <label for="audio-track">Audio</label>
+        <select id="audio-track" (change)="onAudioTrackChange($event)">
+          <option value="auto" [selected]="selectedAudioTrack() === 'auto'">Auto</option>
+          @for (track of audioTracks(); track track.index) {
+            <option [value]="track.index" [selected]="selectedAudioTrack() === track.index">
+              {{ formatAudioTrackLabel(track) }}
+            </option>
+          }
+        </select>
+      </div>
+    }
   </div>
 </div>

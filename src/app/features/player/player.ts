@@ -24,6 +24,15 @@ interface SubtitleTrack {
   streamIndex?: number;
 }
 
+interface AudioTrack {
+  index: number;
+  language: string;
+  title: string;
+  codec?: string;
+  channels?: number | null;
+  default?: boolean;
+}
+
 interface EmbeddedSubtitle {
   index: number;
   codec: string;
@@ -69,10 +78,15 @@ export class PlayerComponent implements OnDestroy {
   errorMessage = signal<string>('');
   videoSrc = signal<string>('');
   subtitleTracks = signal<SubtitleTrack[]>([]);
+  audioTracks = signal<AudioTrack[]>([]);
+  selectedAudioTrack = signal<'auto' | number>('auto');
 
   private readonly API_URL = 'http://localhost:3001/api';
   private currentTorrentHash: string | null = null;
+  private currentVideoFileIndex: number | null = null;
   private progressInterval: any = null;
+  private pendingSeekTime: number | null = null;
+  private pendingWasPlaying = false;
 
   async ngOnInit() {
     const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
@@ -455,6 +469,9 @@ export class PlayerComponent implements OnDestroy {
     this.loading.set(true);
     this.errorMessage.set('');
     this.showPlayer.set(true);
+    this.subtitleTracks.set([]);
+    this.audioTracks.set([]);
+    this.selectedAudioTrack.set('auto');
 
     try {
       console.log('Enviando torrent al backend:', magnetUri);
@@ -500,11 +517,9 @@ export class PlayerComponent implements OnDestroy {
       }
 
       console.log('Archivo seleccionado:', videoFile.name);
+      this.currentVideoFileIndex = videoFile.index;
 
-      // ✅ TRANSCODIFICACIÓN AUTOMÁTICA: El backend detecta y transcodifica automáticamente
-      // Ya no necesitamos deshabilitar transcodificación, el backend maneja todos los codecs
-      const needsTranscode = false; // No se usa, backend decide automáticamente
-      const transcodeParam = ''; // No se envía parámetro, backend es inteligente
+      // ✅ TRANSCODIFICACIÓN AUTOMÁTICA: el backend detecta y decide si transcodificar
 
       if (videoFile.name.toLowerCase().endsWith('.mkv')) {
         console.log('📦 Archivo MKV detectado - backend transcodificará audio automáticamente');
@@ -560,7 +575,7 @@ export class PlayerComponent implements OnDestroy {
       this.subtitleTracks.set(subtitles);
 
       // Construir URL de streaming (con transcodificación si es necesario)
-      const streamUrl = `${this.API_URL}/stream/${torrentInfo.infoHash}/${videoFile.index}${transcodeParam}`;
+      const streamUrl = this.buildStreamUrl('auto');
       this.videoSrc.set(streamUrl);
 
       console.log('URL de streaming:', streamUrl);
@@ -574,6 +589,9 @@ export class PlayerComponent implements OnDestroy {
         );
       }
 
+      // Cargar pistas de audio sin bloquear el inicio del video
+      void this.loadAudioTracks(torrentInfo.infoHash, videoFile.index);
+
       // Iniciar monitoreo de progreso
       this.startProgressMonitoring();
 
@@ -583,6 +601,106 @@ export class PlayerComponent implements OnDestroy {
       this.errorMessage.set(`Error: ${error.message || 'Error desconocido'}`);
       this.loading.set(false);
     }
+  }
+
+  private buildStreamUrl(selection: 'auto' | number, cacheBust = false): string {
+    if (!this.currentTorrentHash || this.currentVideoFileIndex === null) return '';
+    const base = `${this.API_URL}/stream/${this.currentTorrentHash}/${this.currentVideoFileIndex}`;
+    const params = new URLSearchParams();
+
+    if (selection !== 'auto') {
+      params.set('audioStream', String(selection));
+    }
+    if (cacheBust) {
+      params.set('t', String(Date.now()));
+    }
+
+    const query = params.toString();
+    return query ? `${base}?${query}` : base;
+  }
+
+  private async loadAudioTracks(infoHash: string, fileIndex: number) {
+    try {
+      const response = await fetch(`${this.API_URL}/audio-tracks/${infoHash}/${fileIndex}`);
+      if (!response.ok) {
+        this.audioTracks.set([]);
+        return;
+      }
+
+      const tracks: AudioTrack[] = await response.json();
+      if (this.currentTorrentHash !== infoHash || this.currentVideoFileIndex !== fileIndex) {
+        return;
+      }
+
+      const normalized = tracks.map((track, idx) => {
+        const rawLanguage = track.language || 'und';
+        const language =
+          rawLanguage.length <= 3 ? this.getLanguageName(rawLanguage) : rawLanguage;
+
+        return {
+          ...track,
+          language,
+          title: track.title || `Audio ${idx + 1}`,
+        };
+      });
+
+      this.audioTracks.set(normalized);
+    } catch (error) {
+      console.error('Error al detectar pistas de audio:', error);
+      this.audioTracks.set([]);
+    }
+  }
+
+  onAudioTrackChange(event: Event) {
+    const value = (event.target as HTMLSelectElement).value;
+    if (value === 'auto') {
+      this.selectedAudioTrack.set('auto');
+    } else {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return;
+      this.selectedAudioTrack.set(parsed);
+    }
+
+    const v = this.videoPlayer?.nativeElement;
+    if (v) {
+      this.pendingSeekTime = v.currentTime || 0;
+      this.pendingWasPlaying = !v.paused;
+    }
+
+    const nextUrl = this.buildStreamUrl(this.selectedAudioTrack(), true);
+    this.videoSrc.set(nextUrl);
+  }
+
+  onVideoLoadedMetadata() {
+    if (this.pendingSeekTime === null) return;
+
+    const v = this.videoPlayer?.nativeElement;
+    if (!v) return;
+
+    const target = this.pendingSeekTime;
+    const shouldPlay = this.pendingWasPlaying;
+    this.pendingSeekTime = null;
+    this.pendingWasPlaying = false;
+
+    try {
+      if (Number.isFinite(target) && target > 0) {
+        v.currentTime = Math.min(target, v.duration || target);
+      }
+    } catch {}
+
+    if (shouldPlay) {
+      v.play().catch(() => {});
+    }
+  }
+
+  formatAudioTrackLabel(track: AudioTrack): string {
+    const pieces: string[] = [];
+    if (track.language) pieces.push(track.language);
+    if (track.title && track.title !== track.language) pieces.push(track.title);
+    if (track.channels) pieces.push(`${track.channels}ch`);
+    if (track.codec) pieces.push(track.codec.toUpperCase());
+    if (track.default) pieces.push('predeterminado');
+    return pieces.filter(Boolean).join(' - ');
   }
 
   startProgressMonitoring() {
