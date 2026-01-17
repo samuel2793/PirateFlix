@@ -9,10 +9,24 @@ import { firstValueFrom } from 'rxjs';
 type MediaType = 'movie' | 'tv';
 
 const NO_COMPATIBLE_VIDEO_CODE = 'NO_COMPATIBLE_VIDEO';
+const NO_SEEKABLE_CODE = 'NO_SEEKABLE';
+const NO_MULTI_AUDIO_CODE = 'NO_MULTI_AUDIO';
 
 function buildNoCompatibleVideoError(): Error {
   const error = new Error(NO_COMPATIBLE_VIDEO_CODE);
   (error as any).code = NO_COMPATIBLE_VIDEO_CODE;
+  return error;
+}
+
+function buildNoSeekableError(): Error {
+  const error = new Error(NO_SEEKABLE_CODE);
+  (error as any).code = NO_SEEKABLE_CODE;
+  return error;
+}
+
+function buildNoMultiAudioError(): Error {
+  const error = new Error(NO_MULTI_AUDIO_CODE);
+  (error as any).code = NO_MULTI_AUDIO_CODE;
   return error;
 }
 
@@ -61,6 +75,9 @@ interface TorrentInfo {
 
 interface LoadMagnetOptions {
   throwOnError?: boolean;
+  requireMultiAudio?: boolean;
+  requireSeekable?: boolean;
+  minAudioTracks?: number;
 }
 
 @Component({
@@ -98,6 +115,8 @@ export class PlayerComponent implements OnDestroy {
   subtitleTracks = signal<SubtitleTrack[]>([]);
   audioTracks = signal<AudioTrack[]>([]);
   selectedAudioTrack = signal<'auto' | number>('auto');
+  preferMultiAudio = signal<boolean>(false);
+  preferSeekable = signal<boolean>(false);
 
   private readonly API_URL = 'http://localhost:3001/api';
   private currentTorrentHash: string | null = null;
@@ -135,11 +154,15 @@ export class PlayerComponent implements OnDestroy {
     const idStr = this.route.snapshot.paramMap.get('id');
     const seasonStr = this.route.snapshot.paramMap.get('season');
     const episodeStr = this.route.snapshot.paramMap.get('episode');
+    const preferMultiAudioParam = this.route.snapshot.queryParamMap.get('multiAudio');
+    const preferSeekableParam = this.route.snapshot.queryParamMap.get('seekable');
 
     if (type === 'movie' || type === 'tv') this.type.set(type);
     if (idStr) this.id.set(Number(idStr));
     if (seasonStr) this.season.set(Number(seasonStr));
     if (episodeStr) this.episode.set(Number(episodeStr));
+    this.preferMultiAudio.set(preferMultiAudioParam === '1' || preferMultiAudioParam === 'true');
+    this.preferSeekable.set(preferSeekableParam === '1' || preferSeekableParam === 'true');
 
     await this.searchAndPlayTorrent();
   }
@@ -183,6 +206,8 @@ export class PlayerComponent implements OnDestroy {
 
     const type = this.type();
     const id = this.id();
+    const preferMultiAudio = this.preferMultiAudio();
+    const preferSeekable = this.preferSeekable();
 
     try {
       // 1. Quick-switch: limpiar streams/ffmpeg anteriores (muy rápido, ~50ms)
@@ -217,10 +242,18 @@ export class PlayerComponent implements OnDestroy {
       ].filter((q, index, arr) => q && arr.indexOf(q) === index);
 
       const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
+      const multiAudioHintRegex =
+        /\b(dual\s*audio|dual-audio|dualaudio|multi\s*audio|multi-audio|multiaudio|multi\s*lang|multi-lang|multilang)\b/i;
+      const hasMultiAudioHint = (name: string) => multiAudioHintRegex.test(name);
+      const seekableHintRegex =
+        /\b(mp4|x264|h\.?264|web[-\s]?dl|webrip)\b/i;
+      const hasSeekableHint = (name: string) => seekableHintRegex.test(name);
 
       const categoriesToTry = [207, 200, 0];
       let anyTimedOut = false;
       let lastCategoryError: any = null;
+      let sawNoMultiAudio = false;
+      let sawNoSeekable = false;
 
       const attemptCategory = async (category: number) => {
         const searchStartTime = Date.now();
@@ -235,6 +268,8 @@ export class PlayerComponent implements OnDestroy {
         const aggregatedResults: any[] = [];
         const seenMagnets = new Set<string>();
         let sawSeeded = false;
+        let sawNoMultiAudio = false;
+        let sawNoSeekable = false;
         let attempts = 0;
         const maxAttempts = searchQueries.length;
 
@@ -444,8 +479,31 @@ export class PlayerComponent implements OnDestroy {
           candidateTorrents.filter((t: any) => !incompatibleCodec(t.name))
         );
 
+        const multiAudioHinted = sortBySeeders(
+          candidateTorrents.filter((t: any) => hasMultiAudioHint(String(t?.name || '')))
+        );
+        const seekableHinted = sortBySeeders(
+          candidateTorrents.filter((t: any) => hasSeekableHint(String(t?.name || '')))
+        );
+        const multiAudioSeekableHinted =
+          preferMultiAudio && preferSeekable
+            ? sortBySeeders(
+                candidateTorrents.filter(
+                  (t: any) =>
+                    hasMultiAudioHint(String(t?.name || '')) &&
+                    hasSeekableHint(String(t?.name || ''))
+                )
+              )
+            : [];
+
         const bestTorrent =
-          ytsTorrents.length > 0
+          preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0
+            ? multiAudioSeekableHinted[0]
+            : preferSeekable && seekableHinted.length > 0
+            ? seekableHinted[0]
+            : preferMultiAudio && multiAudioHinted.length > 0
+            ? multiAudioHinted[0]
+            : ytsTorrents.length > 0
             ? ytsTorrents[0]
             : h264QualityGoodAudio.length > 0
             ? h264QualityGoodAudio[0]
@@ -486,6 +544,15 @@ export class PlayerComponent implements OnDestroy {
           }
         };
 
+        if (preferMultiAudio && preferSeekable) {
+          pushUnique(multiAudioSeekableHinted);
+        }
+        if (preferSeekable) {
+          pushUnique(seekableHinted);
+        }
+        if (preferMultiAudio) {
+          pushUnique(multiAudioHinted);
+        }
         pushUnique([bestTorrent]);
         pushUnique(ytsTorrents);
         pushUnique(h264QualityGoodAudio);
@@ -506,6 +573,8 @@ export class PlayerComponent implements OnDestroy {
           try {
             const loaded = await this.loadMagnetLink(candidate.magnetLink, sessionId, {
               throwOnError: true,
+              requireMultiAudio: preferMultiAudio,
+              requireSeekable: preferSeekable,
             });
             if (loaded) {
               lastError = null;
@@ -519,6 +588,22 @@ export class PlayerComponent implements OnDestroy {
               console.warn('⚠️ Torrent incompatible (ISO/BDMV), probando otro:', candidate.name);
               continue;
             } else {
+              if (error?.code === NO_MULTI_AUDIO_CODE) {
+                sawNoMultiAudio = true;
+                console.warn(
+                  '⚠️ Torrent sin varias pistas de audio, probando otro:',
+                  candidate.name
+                );
+                continue;
+              }
+              if (error?.code === NO_SEEKABLE_CODE) {
+                sawNoSeekable = true;
+                console.warn(
+                  '⚠️ Torrent sin seeking disponible, probando otro:',
+                  candidate.name
+                );
+                continue;
+              }
               lastError = error;
             }
             console.warn('⚠️ Error al cargar torrent, intentando otro:', error);
@@ -528,6 +613,12 @@ export class PlayerComponent implements OnDestroy {
         if (!loadedAny) {
           if (lastError) {
             return { status: 'error', error: lastError };
+          }
+          if (preferMultiAudio && sawNoMultiAudio) {
+            return { status: 'no-multi-audio' };
+          }
+          if (preferSeekable && sawNoSeekable) {
+            return { status: 'no-seekable' };
           }
           if (sawNoCompatible) {
             PlayerComponent.searchCache.delete(cacheKey);
@@ -549,6 +640,14 @@ export class PlayerComponent implements OnDestroy {
         if (result.status === 'loaded') {
           return;
         }
+        if (result.status === 'no-multi-audio') {
+          sawNoMultiAudio = true;
+          continue;
+        }
+        if (result.status === 'no-seekable') {
+          sawNoSeekable = true;
+          continue;
+        }
         if (result.status === 'error') {
           lastCategoryError = result.error;
           break;
@@ -564,6 +663,12 @@ export class PlayerComponent implements OnDestroy {
       if (anyTimedOut) {
         throw new Error('timeout');
       }
+      if (preferMultiAudio && sawNoMultiAudio) {
+        throw buildNoMultiAudioError();
+      }
+      if (preferSeekable && sawNoSeekable) {
+        throw buildNoSeekableError();
+      }
       throw new Error('No se encontraron torrents para esta película');
     } catch (error: any) {
       if (searchSignal.aborted || !this.isSessionActive(sessionId)) return;
@@ -575,6 +680,12 @@ export class PlayerComponent implements OnDestroy {
         errorMsg = 'No se encontraron torrents disponibles';
       } else if (error.message?.includes('timeout')) {
         errorMsg = 'La búsqueda tardó demasiado (timeout)';
+      } else if (error?.code === NO_MULTI_AUDIO_CODE) {
+        errorMsg =
+          'No se encontraron torrents con varias pistas de audio. Desactiva el filtro e intenta de nuevo.';
+      } else if (error?.code === NO_SEEKABLE_CODE) {
+        errorMsg =
+          'No se encontraron torrents con seeking disponible. Desactiva el filtro e intenta de nuevo.';
       } else if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
         errorMsg =
           'El torrent encontrado no contiene un archivo de vídeo compatible (ISO/BDMV).';
@@ -615,7 +726,10 @@ export class PlayerComponent implements OnDestroy {
           text: 'Reproducir',
           handler: (data) => {
             if (data.magnetLink && data.magnetLink.trim()) {
-              this.loadMagnetLink(data.magnetLink.trim(), this.playbackSession);
+              this.loadMagnetLink(data.magnetLink.trim(), this.playbackSession, {
+                requireMultiAudio: this.preferMultiAudio(),
+                requireSeekable: this.preferSeekable(),
+              });
               return true;
             }
             return false;
@@ -689,6 +803,11 @@ export class PlayerComponent implements OnDestroy {
     options: LoadMagnetOptions = {}
   ): Promise<boolean> {
     const throwOnError = options.throwOnError === true;
+    const requireSeekable = options.requireSeekable === true;
+    const minAudioTracks = Math.max(
+      0,
+      options.minAudioTracks ?? (options.requireMultiAudio ? 2 : 0)
+    );
     if (!this.isSessionActive(sessionId)) return false;
     this.loading.set(true);
     this.errorMessage.set('');
@@ -776,6 +895,31 @@ export class PlayerComponent implements OnDestroy {
 
       // ✅ TRANSCODIFICACIÓN AUTOMÁTICA: el backend detecta y decide si transcodificar
 
+      if (requireSeekable) {
+        const seekableInfo = await this.fetchSeekableInfo(
+          torrentInfo.infoHash,
+          videoFile.index
+        );
+        if (!this.isSessionActive(sessionId)) return false;
+        if (!seekableInfo.seekable) {
+          console.warn('⚠️ Archivo sin seeking disponible:', seekableInfo.reason || 'desconocido');
+          throw buildNoSeekableError();
+        }
+      }
+
+      let preloadedAudioTracks: AudioTrack[] | null = null;
+      if (minAudioTracks > 1) {
+        preloadedAudioTracks = await this.fetchAudioTracks(
+          torrentInfo.infoHash,
+          videoFile.index
+        );
+        if (!this.isSessionActive(sessionId)) return false;
+        if (preloadedAudioTracks.length < minAudioTracks) {
+          throw buildNoMultiAudioError();
+        }
+        this.audioTracks.set(preloadedAudioTracks);
+      }
+
       if (videoFile.name.toLowerCase().endsWith('.mkv')) {
         console.log('📦 Archivo MKV detectado - backend transcodificará audio automáticamente');
       }
@@ -846,7 +990,9 @@ export class PlayerComponent implements OnDestroy {
       }
 
       // Cargar pistas de audio sin bloquear el inicio del video
-      void this.loadAudioTracks(torrentInfo.infoHash, videoFile.index);
+      if (minAudioTracks <= 1) {
+        void this.loadAudioTracks(torrentInfo.infoHash, videoFile.index);
+      }
 
       // Iniciar monitoreo de progreso
       this.startProgressMonitoring();
@@ -866,7 +1012,15 @@ export class PlayerComponent implements OnDestroy {
         throw error;
       }
       console.error('Error al cargar magnet link:', error);
-      if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
+      if (error?.code === NO_MULTI_AUDIO_CODE) {
+        this.errorMessage.set(
+          'El torrent no tiene varias pistas de audio. Desactiva el filtro e intenta de nuevo.'
+        );
+      } else if (error?.code === NO_SEEKABLE_CODE) {
+        this.errorMessage.set(
+          'El torrent no permite seeking. Desactiva el filtro e intenta de nuevo.'
+        );
+      } else if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
         this.errorMessage.set(
           'El torrent no contiene un archivo de vídeo compatible (ISO/BDMV).'
         );
@@ -894,19 +1048,35 @@ export class PlayerComponent implements OnDestroy {
     return query ? `${base}?${query}` : base;
   }
 
-  private async loadAudioTracks(infoHash: string, fileIndex: number) {
+  private async fetchSeekableInfo(
+    infoHash: string,
+    fileIndex: number
+  ): Promise<{ seekable: boolean; reason?: string }> {
+    try {
+      const response = await fetch(`${this.API_URL}/seekable/${infoHash}/${fileIndex}`);
+      if (!response.ok) {
+        return { seekable: false, reason: `http-${response.status}` };
+      }
+
+      const data = await response.json();
+      return {
+        seekable: Boolean(data?.seekable),
+        reason: typeof data?.reason === 'string' ? data.reason : '',
+      };
+    } catch (error) {
+      console.error('Error al validar seeking:', error);
+      return { seekable: false, reason: 'request-failed' };
+    }
+  }
+
+  private async fetchAudioTracks(infoHash: string, fileIndex: number): Promise<AudioTrack[]> {
     try {
       const response = await fetch(`${this.API_URL}/audio-tracks/${infoHash}/${fileIndex}`);
       if (!response.ok) {
-        this.audioTracks.set([]);
-        return;
+        return [];
       }
 
       const tracks: AudioTrack[] = await response.json();
-      if (this.currentTorrentHash !== infoHash || this.currentVideoFileIndex !== fileIndex) {
-        return;
-      }
-
       const normalized = tracks.map((track, idx) => {
         const rawLanguage = track.language || 'und';
         const language =
@@ -918,6 +1088,20 @@ export class PlayerComponent implements OnDestroy {
           title: track.title || `Audio ${idx + 1}`,
         };
       });
+
+      return normalized;
+    } catch (error) {
+      console.error('Error al detectar pistas de audio:', error);
+      return [];
+    }
+  }
+
+  private async loadAudioTracks(infoHash: string, fileIndex: number) {
+    try {
+      const normalized = await this.fetchAudioTracks(infoHash, fileIndex);
+      if (this.currentTorrentHash !== infoHash || this.currentVideoFileIndex !== fileIndex) {
+        return;
+      }
 
       this.audioTracks.set(normalized);
     } catch (error) {

@@ -38,6 +38,20 @@
             </div>
 
             <div class="actions">
+              <mat-checkbox
+                class="playback-option"
+                [checked]="preferMultiAudio()"
+                (change)="preferMultiAudio.set($event.checked)"
+              >
+                Priorizar torrents con varias pistas de audio
+              </mat-checkbox>
+              <mat-checkbox
+                class="playback-option"
+                [checked]="preferSeekable()"
+                (change)="preferSeekable.set($event.checked)"
+              >
+                Solo torrents con seeking (duracion completa al inicio)
+              </mat-checkbox>
               <button mat-raised-button color="primary" type="button" (click)="play()">
                 <mat-icon>play_arrow</mat-icon>
                 Reproducir

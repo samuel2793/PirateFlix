@@ -1264,6 +1264,57 @@ app.get('/api/audio-tracks/:infoHash/:fileIndex', async (req, res) => {
   }
 });
 
+// Endpoint para validar si el archivo permite seeking (duracion al inicio)
+app.get('/api/seekable/:infoHash/:fileIndex', async (req, res) => {
+  const { infoHash, fileIndex } = req.params;
+  const torrent = client.get(infoHash);
+  if (!torrent) return res.status(404).json({ seekable: false, error: 'Torrent no encontrado' });
+
+  const file = torrent.files[parseInt(fileIndex)];
+  if (!file) return res.status(404).json({ seekable: false, error: 'Archivo no encontrado' });
+
+  const filePath = path.join(torrent.path, file.path);
+  const fileName = file.name.toLowerCase();
+
+  const needsTranscode =
+    fileName.endsWith('.mkv') ||
+    fileName.includes('hevc') ||
+    fileName.includes('x265') ||
+    fileName.includes('h265');
+
+  const fileLength = Number(file.length || 0);
+  const fileDownloaded = Number(file.downloaded || 0);
+  const fullyDownloaded = fileLength > 0 && fileDownloaded >= fileLength;
+  const isMp4Like = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
+
+  let faststart = false;
+  let seekable = false;
+  let reason = '';
+
+  if (needsTranscode) {
+    reason = 'needs-transcode';
+  } else if (fullyDownloaded) {
+    seekable = true;
+    reason = 'fully-downloaded';
+  } else if (isMp4Like) {
+    try {
+      faststart = await isLikelyFaststartMp4(file, filePath);
+    } catch (_) {
+      faststart = false;
+    }
+    if (faststart) {
+      seekable = true;
+      reason = 'faststart';
+    } else {
+      reason = 'no-faststart';
+    }
+  } else {
+    reason = 'unsupported-container';
+  }
+
+  res.json({ seekable, reason, faststart, fullyDownloaded, needsTranscode });
+});
+
 // =====================
 // Streaming
 // =====================
