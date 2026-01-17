@@ -5,6 +5,7 @@ import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -21,6 +22,7 @@ type MediaType = 'movie' | 'tv';
     MatButtonModule,
     MatIconModule,
     MatButtonToggleModule,
+    MatTooltipModule,
   ],
   templateUrl: './details.html',
   styleUrl: './details.scss',
@@ -33,8 +35,47 @@ export class DetailsComponent {
   loading = signal(true);
   error = signal<string | null>(null);
   item = signal<any | null>(null);
-  preferMultiAudio = signal(false);
-  preferSeekable = signal(false);
+  credits = signal<any | null>(null);
+  
+  // Preferences with localStorage persistence
+  preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
+  preferSeekable = signal(this.loadPref('preferSeekable'));
+  preferSubtitles = signal(this.loadPref('preferSubtitles'));
+  showInfo = signal(false);
+
+  // Load preference from localStorage
+  private loadPref(key: string): boolean {
+    try {
+      return localStorage.getItem(`pirateflix_${key}`) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  // Save preference to localStorage
+  savePref(key: string, value: boolean) {
+    try {
+      localStorage.setItem(`pirateflix_${key}`, value ? 'true' : 'false');
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  // Toggle handlers that persist
+  toggleMultiAudio(value: boolean) {
+    this.preferMultiAudio.set(value);
+    this.savePref('preferMultiAudio', value);
+  }
+
+  toggleSeekable(value: boolean) {
+    this.preferSeekable.set(value);
+    this.savePref('preferSeekable', value);
+  }
+
+  toggleSubtitles(value: boolean) {
+    this.preferSubtitles.set(value);
+    this.savePref('preferSubtitles', value);
+  }
 
   async ngOnInit() {
     try {
@@ -47,8 +88,12 @@ export class DetailsComponent {
         return;
       }
 
-      const data = await firstValueFrom(this.tmdb.details(type, id));
+      const [data, creditsData] = await Promise.all([
+        firstValueFrom(this.tmdb.details(type, id)),
+        firstValueFrom(this.tmdb.credits(type, id)),
+      ]);
       this.item.set(data);
+      this.credits.set(creditsData);
     } catch (e: any) {
       this.error.set(e?.message ?? String(e));
     } finally {
@@ -69,7 +114,7 @@ export class DetailsComponent {
   backdrop() {
     const it = this.item();
     return (
-      this.tmdb.posterUrl(it?.backdrop_path) ||
+      this.tmdb.backdropUrl(it?.backdrop_path) ||
       this.tmdb.posterUrl(it?.poster_path) ||
       'assets/placeholder.png'
     );
@@ -181,10 +226,45 @@ export class DetailsComponent {
     return this.item()?.homepage ?? '';
   }
 
+  cast() {
+    const c = this.credits();
+    if (!Array.isArray(c?.cast)) return [];
+    return c.cast.slice(0, 12).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      character: p.character,
+      profile: this.tmdb.posterUrl(p.profile_path),
+    }));
+  }
+
+  directors() {
+    const c = this.credits();
+    if (!Array.isArray(c?.crew)) return [];
+    return c.crew
+      .filter((p: any) => p.job === 'Director')
+      .map((p: any) => p.name);
+  }
+
+  writers() {
+    const c = this.credits();
+    if (!Array.isArray(c?.crew)) return [];
+    return c.crew
+      .filter((p: any) => p.job === 'Screenplay' || p.job === 'Writer')
+      .slice(0, 3)
+      .map((p: any) => p.name);
+  }
+
+  creators() {
+    const it = this.item();
+    if (!Array.isArray(it?.created_by)) return [];
+    return it.created_by.map((p: any) => p.name);
+  }
+
   play() {
     const queryParams: Record<string, string> = {};
     if (this.preferMultiAudio()) queryParams['multiAudio'] = '1';
     if (this.preferSeekable()) queryParams['seekable'] = '1';
+    if (this.preferSubtitles()) queryParams['subtitles'] = '1';
     this.router.navigate(
       [
         '/play',

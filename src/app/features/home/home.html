@@ -1,312 +1,334 @@
-<mat-sidenav-container class="shell">
-  <!-- Sidenav -->
-  <mat-sidenav #drawer class="sidenav" mode="over" [opened]="false">
-    <div class="side-head">
-      <div class="brand">
+<div class="home-page">
+  <!-- Navigation Bar -->
+  <nav class="navbar">
+    <div class="nav-left">
+      <div class="logo">
+        <mat-icon>play_circle</mat-icon>
+        <span>PirateFlix</span>
+      </div>
+    </div>
+    
+    <div class="nav-tabs">
+      <button 
+        class="nav-tab" 
+        [class.active]="activeTab() === 'movies'"
+        (click)="activeTab.set('movies')"
+      >
         <mat-icon>movie</mat-icon>
-        <div>
-          <div class="brand-title">PirateFlix</div>
-          <div class="brand-sub">TMDB Explorer</div>
-        </div>
-      </div>
+        <span>Películas</span>
+      </button>
+      <button 
+        class="nav-tab" 
+        [class.active]="activeTab() === 'tv'"
+        (click)="activeTab.set('tv')"
+      >
+        <mat-icon>tv</mat-icon>
+        <span>Series</span>
+      </button>
+      <button 
+        class="nav-tab" 
+        [class.active]="activeTab() === 'search'"
+        (click)="activeTab.set('search')"
+      >
+        <mat-icon>search</mat-icon>
+        <span>Buscar</span>
+      </button>
     </div>
 
-    <mat-nav-list>
-      <a mat-list-item (click)="scrollTo('search')">
-        <mat-icon matListItemIcon>search</mat-icon>
-        <span matListItemTitle>Buscar</span>
-      </a>
-      <a mat-list-item (click)="scrollTo('trending')">
-        <mat-icon matListItemIcon>trending_up</mat-icon>
-        <span matListItemTitle>Tendencias</span>
-      </a>
-      <a mat-list-item (click)="scrollTo('about')">
-        <mat-icon matListItemIcon>info</mat-icon>
-        <span matListItemTitle>Info</span>
-      </a>
-    </mat-nav-list>
-
-    <div class="side-footer">
-      <button mat-stroked-button (click)="drawer.close()">Cerrar</button>
+    <div class="nav-right">
+      <button class="nav-icon-btn" (click)="refreshTrending()">
+        <mat-icon>refresh</mat-icon>
+      </button>
     </div>
-  </mat-sidenav>
+  </nav>
 
-  <!-- Content -->
-  <mat-sidenav-content class="content">
-    <!-- Top bar -->
-    <mat-toolbar color="primary" class="topbar">
-      <button mat-icon-button (click)="drawer.toggle()" aria-label="Menu">
-        <mat-icon>menu</mat-icon>
-      </button>
+  <!-- Loading Bar -->
+  <div class="loading-bar" *ngIf="loading()">
+    <div class="loading-progress"></div>
+  </div>
 
-      <div class="topbar-title">
-        <span class="app-name">PirateFlix</span>
-        <span class="app-pill" *ngIf="loading()">Cargando…</span>
-      </div>
-
-      <span class="spacer"></span>
-
-      <button mat-icon-button [matMenuTriggerFor]="menu" aria-label="Opciones">
-        <mat-icon>more_vert</mat-icon>
-      </button>
-
-      <mat-menu #menu="matMenu">
-        <button mat-menu-item (click)="refreshTrending()">
-          <mat-icon>refresh</mat-icon>
-          <span>Recargar tendencias</span>
-        </button>
-        <button mat-menu-item (click)="clearSearch()">
-          <mat-icon>backspace</mat-icon>
-          <span>Limpiar búsqueda</span>
-        </button>
-      </mat-menu>
-    </mat-toolbar>
-
-    <!-- Global loading -->
-    <mat-progress-bar *ngIf="loading()" mode="indeterminate"></mat-progress-bar>
-
-    <div class="page">
-      <!-- Error global -->
-      <mat-card *ngIf="error()" class="error-card" appearance="outlined">
-        <mat-card-title>
-          <mat-icon class="warn">error</mat-icon>
-          Error
-        </mat-card-title>
-        <mat-card-content>{{ error() }}</mat-card-content>
-        <mat-card-actions align="end">
-          <button mat-raised-button color="primary" (click)="refreshTrending()">Reintentar</button>
-        </mat-card-actions>
-      </mat-card>
-
-      <!-- SEARCH -->
-      <section class="section" id="search">
-        <div class="section-head">
-          <h2>Buscar</h2>
-          <div class="muted">Películas, series o personas</div>
+  <!-- ========================================
+       MOVIES TAB
+       ======================================== -->
+  <div class="tab-content" *ngIf="activeTab() === 'movies'">
+    <!-- Movies Hero -->
+    <section class="hero" *ngIf="!loading() && movies().length">
+      <div class="hero-backdrop" [style.backgroundImage]="'url(' + getMovieHeroBackdrop() + ')'"></div>
+      <div class="hero-gradient"></div>
+      <div class="hero-content">
+        <span class="hero-badge">
+          <mat-icon>movie</mat-icon>
+          Película Destacada
+        </span>
+        <h1 class="hero-title">{{ getMovieHero()?.title }}</h1>
+        <p class="hero-overview">{{ getMovieHero()?.overview }}</p>
+        <div class="hero-meta">
+          <span class="hero-rating" *ngIf="getMovieHero()?.vote_average">
+            <mat-icon>star</mat-icon>
+            {{ getMovieHero()?.vote_average | number:'1.1-1' }}
+          </span>
+          <span>{{ getMovieHero()?.release_date | date:'yyyy' }}</span>
         </div>
+        <div class="hero-actions">
+          <button class="btn-play" (click)="openDetails('movie', getMovieHero()?.id)">
+            <mat-icon>play_arrow</mat-icon>
+            <span>Ver ahora</span>
+          </button>
+          <button class="btn-info" (click)="openDetails('movie', getMovieHero()?.id)">
+            <mat-icon>info_outline</mat-icon>
+            <span>Más info</span>
+          </button>
+        </div>
+      </div>
+    </section>
 
-        <mat-card class="search-card" appearance="outlined">
-          <div class="search-row">
-            <mat-form-field class="search-field" appearance="outline">
-              <mat-label>Buscar</mat-label>
-              <mat-icon matPrefix>search</mat-icon>
-
-              <input
-                matInput
-                placeholder="Ej: Interstellar, Breaking Bad, Brad Pitt"
-                [ngModel]="query()"
-                (ngModelChange)="setQuery($event)"
-                (keydown.enter)="doSearch()"
-                autocomplete="off"
-              />
-
-              <button
-                *ngIf="query().trim().length"
-                mat-icon-button
-                matSuffix
-                (click)="clearSearch()"
-                aria-label="Limpiar"
-              >
-                <mat-icon>close</mat-icon>
-              </button>
-
-              <mat-hint>Enter para buscar. O espera (autobúsqueda).</mat-hint>
-            </mat-form-field>
-
-            <button
-              mat-raised-button
-              color="primary"
-              (click)="doSearch()"
-              [disabled]="!query().trim().length"
-            >
-              Buscar
-            </button>
-          </div>
-
-          <div class="filter-row">
-            <span class="filter-label">Filtro:</span>
-            <mat-chip-listbox [value]="searchFilter()" (change)="setSearchFilter($event.value)">
-              <mat-chip-option value="all">Todo</mat-chip-option>
-              <mat-chip-option value="movie">Películas</mat-chip-option>
-              <mat-chip-option value="tv">Series</mat-chip-option>
-              <mat-chip-option value="person">Personas</mat-chip-option>
-            </mat-chip-listbox>
-
-            <span class="spacer"></span>
-
-            <mat-slide-toggle [ngModel]="autoSearch()" (ngModelChange)="autoSearch.set($event)">
-              Autobúsqueda
-            </mat-slide-toggle>
-          </div>
-
-          <mat-autocomplete
-            #auto="matAutocomplete"
-            (optionSelected)="onAutoPick($event.option.value)"
+    <!-- Movies Grid -->
+    <main class="main-content">
+      <section class="section" *ngIf="!loading() && !error()">
+        <div class="section-header">
+          <h2 class="section-title">Películas en Tendencia</h2>
+          <span class="section-count">{{ movies().length }} títulos</span>
+        </div>
+        
+        <div class="content-grid">
+          <div 
+            class="grid-card" 
+            *ngFor="let item of movies(); let i = index"
+            (click)="openDetails('movie', item.id)"
+            [class.featured]="i === 0"
           >
-            <mat-option *ngIf="searchLoading()" class="auto-loading" disabled>
-              <mat-progress-spinner diameter="18" mode="indeterminate"></mat-progress-spinner>
-              <span>Buscando…</span>
-            </mat-option>
-
-            <mat-option *ngFor="let item of searchResultsTop()" [value]="item">
-              <div class="auto-item">
-                <img
-                  class="auto-avatar"
-                  [src]="posterOrPlaceholder(item.poster_path || item.profile_path)"
-                  alt=""
-                />
-                <div class="auto-text">
-                  <div class="auto-title">{{ title(item) }}</div>
-                  <div class="auto-sub">{{ labelMediaType(item.media_type) }}</div>
+            <div class="card-poster">
+              <img [src]="posterOrPlaceholder(item.poster_path)" [alt]="item.title" [title]="item.title" loading="lazy" />
+              <div class="card-overlay">
+                <div class="overlay-top">
+                  <span class="card-rank">#{{ i + 1 }}</span>
+                </div>
+                <div class="overlay-bottom">
+                  <button class="play-btn">
+                    <mat-icon>play_arrow</mat-icon>
+                  </button>
                 </div>
               </div>
-            </mat-option>
-
-            <mat-option
-              *ngIf="!searchLoading() && hasSearch() && !searchResultsTop().length"
-              disabled
-            >
-              Sin resultados
-            </mat-option>
-          </mat-autocomplete>
-
-          <div class="search-state">
-            <mat-progress-spinner
-              *ngIf="searchLoading()"
-              diameter="28"
-              mode="indeterminate"
-            ></mat-progress-spinner>
-            <span *ngIf="searchError()" class="inline-error">
-              <mat-icon class="warn">error</mat-icon>
-              {{ searchError() }}
-            </span>
+              <div class="card-rating" *ngIf="item.vote_average">
+                <mat-icon>star</mat-icon>
+                {{ item.vote_average | number:'1.1-1' }}
+              </div>
+            </div>
+            <div class="card-info">
+              <div class="card-title">{{ item.title }}</div>
+              <div class="card-year">{{ item.release_date | date:'yyyy' }}</div>
+            </div>
           </div>
-        </mat-card>
+        </div>
+      </section>
 
-        <!-- Search results grid -->
-        <div *ngIf="hasSearch() && !searchLoading() && !searchError()" class="grid">
-          <mat-card
-            class="media-tile"
+      <!-- Error -->
+      <div class="error-banner" *ngIf="error()">
+        <mat-icon>error_outline</mat-icon>
+        <span>{{ error() }}</span>
+        <button class="btn-retry" (click)="refreshTrending()">Reintentar</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- ========================================
+       TV SHOWS TAB
+       ======================================== -->
+  <div class="tab-content" *ngIf="activeTab() === 'tv'">
+    <!-- TV Hero -->
+    <section class="hero" *ngIf="!loading() && tv().length">
+      <div class="hero-backdrop" [style.backgroundImage]="'url(' + getTvHeroBackdrop() + ')'"></div>
+      <div class="hero-gradient"></div>
+      <div class="hero-content">
+        <span class="hero-badge">
+          <mat-icon>tv</mat-icon>
+          Serie Destacada
+        </span>
+        <h1 class="hero-title">{{ getTvHero()?.name }}</h1>
+        <p class="hero-overview">{{ getTvHero()?.overview }}</p>
+        <div class="hero-meta">
+          <span class="hero-rating" *ngIf="getTvHero()?.vote_average">
+            <mat-icon>star</mat-icon>
+            {{ getTvHero()?.vote_average | number:'1.1-1' }}
+          </span>
+          <span>{{ getTvHero()?.first_air_date | date:'yyyy' }}</span>
+        </div>
+        <div class="hero-actions">
+          <button class="btn-play" (click)="openDetails('tv', getTvHero()?.id)">
+            <mat-icon>play_arrow</mat-icon>
+            <span>Ver ahora</span>
+          </button>
+          <button class="btn-info" (click)="openDetails('tv', getTvHero()?.id)">
+            <mat-icon>info_outline</mat-icon>
+            <span>Más info</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- TV Grid -->
+    <main class="main-content">
+      <section class="section" *ngIf="!loading() && !error()">
+        <div class="section-header">
+          <h2 class="section-title">Series en Tendencia</h2>
+          <span class="section-count">{{ tv().length }} títulos</span>
+        </div>
+        
+        <div class="content-grid">
+          <div 
+            class="grid-card" 
+            *ngFor="let item of tv(); let i = index"
+            (click)="openDetails('tv', item.id)"
+            [class.featured]="i === 0"
+          >
+            <div class="card-poster">
+              <img [src]="posterOrPlaceholder(item.poster_path)" [alt]="item.name" [title]="item.name" loading="lazy" />
+              <div class="card-overlay">
+                <div class="overlay-top">
+                  <span class="card-rank">#{{ i + 1 }}</span>
+                </div>
+                <div class="overlay-bottom">
+                  <button class="play-btn">
+                    <mat-icon>play_arrow</mat-icon>
+                  </button>
+                </div>
+              </div>
+              <div class="card-rating" *ngIf="item.vote_average">
+                <mat-icon>star</mat-icon>
+                {{ item.vote_average | number:'1.1-1' }}
+              </div>
+            </div>
+            <div class="card-info">
+              <div class="card-title">{{ item.name }}</div>
+              <div class="card-year">{{ item.first_air_date | date:'yyyy' }}</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Error -->
+      <div class="error-banner" *ngIf="error()">
+        <mat-icon>error_outline</mat-icon>
+        <span>{{ error() }}</span>
+        <button class="btn-retry" (click)="refreshTrending()">Reintentar</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- ========================================
+       SEARCH TAB
+       ======================================== -->
+  <div class="tab-content search-tab" *ngIf="activeTab() === 'search'">
+    <main class="main-content search-main">
+      <section class="search-section">
+        <div class="search-header">
+          <h1 class="search-page-title">Buscar</h1>
+          <p class="search-subtitle">Encuentra películas, series y personas</p>
+        </div>
+
+        <div class="search-container">
+          <div class="search-input-wrapper">
+            <mat-icon class="search-icon">search</mat-icon>
+            <input
+              type="text"
+              class="search-input"
+              placeholder="Buscar..."
+              [ngModel]="query()"
+              (ngModelChange)="setQuery($event)"
+              (keydown.enter)="doSearch()"
+              autocomplete="off"
+            />
+            <button class="search-clear" *ngIf="query().trim().length" (click)="clearSearch()">
+              <mat-icon>close</mat-icon>
+            </button>
+          </div>
+          
+          <div class="search-filters">
+            <button 
+              class="filter-chip" 
+              [class.active]="searchFilter() === 'all'"
+              (click)="setSearchFilter('all')"
+            >Todos</button>
+            <button 
+              class="filter-chip" 
+              [class.active]="searchFilter() === 'movie'"
+              (click)="setSearchFilter('movie')"
+            >Películas</button>
+            <button 
+              class="filter-chip" 
+              [class.active]="searchFilter() === 'tv'"
+              (click)="setSearchFilter('tv')"
+            >Series</button>
+            <button 
+              class="filter-chip" 
+              [class.active]="searchFilter() === 'person'"
+              (click)="setSearchFilter('person')"
+            >Personas</button>
+          </div>
+        </div>
+
+        <!-- Search Loading -->
+        <div class="search-loading" *ngIf="searchLoading()">
+          <div class="spinner"></div>
+          <span>Buscando...</span>
+        </div>
+
+        <!-- Search Error -->
+        <div class="search-error" *ngIf="searchError()">
+          <mat-icon>error_outline</mat-icon>
+          <span>{{ searchError() }}</span>
+        </div>
+
+        <!-- Search Results Grid -->
+        <div class="content-grid search-grid" *ngIf="hasSearch() && !searchLoading() && !searchError() && searchResultsFiltered().length">
+          <div 
+            class="grid-card" 
             *ngFor="let item of searchResultsFiltered()"
             (click)="openDetailsForResult(item)"
-            appearance="outlined"
-            matRipple
           >
-            <div class="tile-img">
-              <img
-                [src]="posterOrPlaceholder(item.poster_path || item.profile_path)"
-                [alt]="title(item)"
-                loading="lazy"
-              />
-              <div class="tile-badge">{{ labelMediaType(item.media_type) }}</div>
-            </div>
-            <div class="tile-body">
-              <div class="tile-title" [matTooltip]="title(item)">{{ title(item) }}</div>
-              <div class="tile-sub">
-                <span *ngIf="item.release_date || item.first_air_date">
-                  {{ item.release_date || item.first_air_date | date : 'yyyy' }}
-                </span>
-                <span *ngIf="(item.release_date || item.first_air_date) && item.vote_average">
-                  ·
-                </span>
-                <span *ngIf="item.vote_average">
-                  <mat-icon class="star">star</mat-icon>
-                  {{ item.vote_average | number : '1.1-1' }}
-                </span>
+            <div class="card-poster">
+              <img [src]="posterOrPlaceholder(item.poster_path || item.profile_path)" [alt]="title(item)" [title]="title(item)" loading="lazy" />
+              <div class="card-overlay">
+                <div class="overlay-top">
+                  <span class="media-badge">{{ labelMediaType(item.media_type) }}</span>
+                </div>
+                <div class="overlay-bottom">
+                  <button class="play-btn">
+                    <mat-icon>play_arrow</mat-icon>
+                  </button>
+                </div>
+              </div>
+              <div class="card-rating" *ngIf="item.vote_average">
+                <mat-icon>star</mat-icon>
+                {{ item.vote_average | number:'1.1-1' }}
               </div>
             </div>
-          </mat-card>
-        </div>
-      </section>
-
-      <!-- TRENDING -->
-      <section class="section" id="trending" *ngIf="!loading() && !error()">
-        <div class="section-head">
-          <h2>Tendencias</h2>
-          <div class="muted">Top del día (TMDB)</div>
+            <div class="card-info">
+              <div class="card-title">{{ title(item) }}</div>
+              <div class="card-year">
+                {{ (item.release_date || item.first_air_date) | date:'yyyy' }}
+              </div>
+            </div>
+          </div>
         </div>
 
-        <mat-card class="tabs-card" appearance="outlined">
-          <mat-tab-group [(selectedIndex)]="tabIndex" (selectedIndexChange)="tabIndex = $event">
-            <mat-tab label="Películas">
-              <div class="grid">
-                <mat-card
-                  class="media-tile"
-                  *ngFor="let item of movies()"
-                  (click)="openDetails('movie', item.id)"
-                  appearance="outlined"
-                  matRipple
-                >
-                  <div class="tile-img">
-                    <img
-                      [src]="posterOrPlaceholder(item.poster_path)"
-                      [alt]="title(item)"
-                      loading="lazy"
-                    />
-                    <div class="tile-badge">Movie</div>
-                  </div>
-                  <div class="tile-body">
-                    <div class="tile-title" [matTooltip]="title(item)">{{ title(item) }}</div>
-                    <div class="tile-sub">
-                      <span *ngIf="item.release_date">{{ item.release_date | date : 'yyyy' }}</span>
-                      <span *ngIf="item.release_date && item.vote_average"> · </span>
-                      <span *ngIf="item.vote_average">
-                        <mat-icon class="star">star</mat-icon>
-                        {{ item.vote_average | number : '1.1-1' }}
-                      </span>
-                    </div>
-                  </div>
-                </mat-card>
-              </div>
-            </mat-tab>
+        <!-- No Results -->
+        <div class="no-results" *ngIf="hasSearch() && !searchLoading() && !searchError() && !searchResultsFiltered().length">
+          <mat-icon>search_off</mat-icon>
+          <p>No se encontraron resultados</p>
+        </div>
 
-            <mat-tab label="Series">
-              <div class="grid">
-                <mat-card
-                  class="media-tile"
-                  *ngFor="let item of tv()"
-                  (click)="openDetails('tv', item.id)"
-                  appearance="outlined"
-                  matRipple
-                >
-                  <div class="tile-img">
-                    <img
-                      [src]="posterOrPlaceholder(item.poster_path)"
-                      [alt]="title(item)"
-                      loading="lazy"
-                    />
-                    <div class="tile-badge">TV</div>
-                  </div>
-                  <div class="tile-body">
-                    <div class="tile-title" [matTooltip]="title(item)">{{ title(item) }}</div>
-                    <div class="tile-sub">
-                      <span *ngIf="item.first_air_date">{{
-                        item.first_air_date | date : 'yyyy'
-                      }}</span>
-                      <span *ngIf="item.first_air_date && item.vote_average"> · </span>
-                      <span *ngIf="item.vote_average">
-                        <mat-icon class="star">star</mat-icon>
-                        {{ item.vote_average | number : '1.1-1' }}
-                      </span>
-                    </div>
-                  </div>
-                </mat-card>
-              </div>
-            </mat-tab>
-          </mat-tab-group>
-        </mat-card>
+        <!-- Empty State -->
+        <div class="empty-search" *ngIf="!hasSearch() && !searchLoading()">
+          <mat-icon>movie_filter</mat-icon>
+          <p>Escribe algo para buscar</p>
+        </div>
       </section>
+    </main>
+  </div>
 
-      <!-- ABOUT -->
-      <section class="section" id="about">
-        <mat-card appearance="outlined" class="about-card">
-          <mat-card-title>Info</mat-card-title>
-          <mat-card-content class="muted">
-            Imágenes y datos desde TMDB. Esta UI prioriza búsqueda rápida, navegación clara y grid
-            responsive.
-          </mat-card-content>
-        </mat-card>
-      </section>
-    </div>
-  </mat-sidenav-content>
-</mat-sidenav-container>
+  <!-- Footer -->
+  <footer class="footer">
+    <p>Datos proporcionados por TMDB</p>
+  </footer>
+</div>

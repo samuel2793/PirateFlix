@@ -1,145 +1,202 @@
-<div class="page" *ngIf="!loading(); else loadingTpl">
-  <mat-card *ngIf="error()" class="error-card" appearance="outlined">
-    <mat-card-title>
-      <mat-icon class="warn">error</mat-icon>
-      Error
-    </mat-card-title>
-    <mat-card-content>{{ error() }}</mat-card-content>
-  </mat-card>
+<div class="details-page" *ngIf="!loading(); else loadingTpl">
+  <!-- Error State -->
+  <div class="error-state" *ngIf="error()">
+    <mat-icon>error_outline</mat-icon>
+    <h2>Error al cargar</h2>
+    <p>{{ error() }}</p>
+    <button mat-flat-button routerLink="/">Volver al inicio</button>
+  </div>
 
   <ng-container *ngIf="!error() && item() as it">
-    <mat-card class="hero-card" appearance="outlined">
-      <div class="hero">
-        <div class="hero-bg" [style.backgroundImage]="'url(' + backdrop() + ')'"></div>
-        <div class="hero-overlay"></div>
-        <div class="hero-content">
-          <div class="poster-wrap">
-            <img class="poster" [src]="poster()" [alt]="title()" />
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-backdrop" [style.backgroundImage]="'url(' + backdrop() + ')'"></div>
+      <div class="hero-gradient"></div>
+      <div class="hero-vignette"></div>
+
+      <div class="hero-content">
+        <!-- Logo/Title Area -->
+        <div class="title-area">
+          <span class="media-badge">{{ mediaLabel() }}</span>
+          <h1 class="title">{{ title() }}</h1>
+          <p class="tagline" *ngIf="it.tagline">"{{ it.tagline }}"</p>
+        </div>
+
+        <!-- Meta Info -->
+        <div class="meta-row">
+          <span class="rating-badge" *ngIf="rating()">
+            <mat-icon>star</mat-icon>
+            {{ rating() }}
+          </span>
+          <span class="meta-item" *ngIf="year()">{{ year() }}</span>
+          <span class="meta-divider" *ngIf="year() && runtimeLabel()"></span>
+          <span class="meta-item" *ngIf="runtimeLabel()">{{ runtimeLabel() }}</span>
+          <span class="meta-divider" *ngIf="seasonsLabel()"></span>
+          <span class="meta-item" *ngIf="seasonsLabel()">{{ seasonsLabel() }} temporada{{ seasonsLabel() !== '1' ? 's' : '' }}</span>
+        </div>
+
+        <!-- Genres -->
+        <div class="genres" *ngIf="genres().length">
+          <span class="genre" *ngFor="let g of genres(); let last = last">
+            {{ g }}<span *ngIf="!last" class="genre-dot">•</span>
+          </span>
+        </div>
+
+        <!-- Overview -->
+        <p class="overview">{{ overview() || 'Sin sinopsis disponible.' }}</p>
+
+        <!-- Crew Info -->
+        <div class="crew-info">
+          <div class="crew-item" *ngIf="directors().length">
+            <span class="crew-label">{{ directors().length > 1 ? 'Directores:' : 'Director:' }}</span>
+            <span class="crew-value">{{ directors().join(', ') }}</span>
           </div>
+          <div class="crew-item" *ngIf="creators().length">
+            <span class="crew-label">{{ creators().length > 1 ? 'Creadores:' : 'Creador:' }}</span>
+            <span class="crew-value">{{ creators().join(', ') }}</span>
+          </div>
+          <div class="crew-item" *ngIf="writers().length">
+            <span class="crew-label">Guión:</span>
+            <span class="crew-value">{{ writers().join(', ') }}</span>
+          </div>
+        </div>
 
-          <div class="meta">
-            <div class="eyebrow">{{ mediaLabel() }}</div>
-            <h1>{{ title() }}</h1>
+        <!-- Action Buttons -->
+        <div class="actions">
+          <button class="btn-play" (click)="play()">
+            <mat-icon>play_arrow</mat-icon>
+            <span>Reproducir</span>
+          </button>
+          <button class="btn-secondary">
+            <mat-icon>add</mat-icon>
+            <span>Mi lista</span>
+          </button>
+          <button class="btn-icon" matTooltip="Me gusta">
+            <mat-icon>thumb_up</mat-icon>
+          </button>
+          <button class="btn-icon" matTooltip="Compartir">
+            <mat-icon>share</mat-icon>
+          </button>
+        </div>
 
-            <div class="subline">
-              <span *ngIf="year()">{{ year() }}</span>
-              <span class="dot" *ngIf="year() && runtimeLabel()">•</span>
-              <span *ngIf="runtimeLabel()">{{ runtimeLabel() }}</span>
-              <span class="dot" *ngIf="(year() || runtimeLabel()) && rating()">•</span>
-              <span *ngIf="rating()">{{ rating() }} / 10</span>
-              <span class="votes" *ngIf="votesLabel()">{{ votesLabel() }} votos</span>
-            </div>
+        <!-- Playback Options -->
+        <div class="playback-options">
+          <label class="option-toggle">
+            <input type="checkbox" [checked]="preferMultiAudio()" (change)="toggleMultiAudio($any($event.target).checked)" />
+            <span class="toggle-track"></span>
+            <span class="toggle-label">Multi-audio</span>
+          </label>
+          <label class="option-toggle">
+            <input type="checkbox" [checked]="preferSubtitles()" (change)="toggleSubtitles($any($event.target).checked)" />
+            <span class="toggle-track"></span>
+            <span class="toggle-label">Con subtítulos</span>
+          </label>
+          <label class="option-toggle">
+            <input type="checkbox" [checked]="preferSeekable()" (change)="toggleSeekable($any($event.target).checked)" />
+            <span class="toggle-track"></span>
+            <span class="toggle-label">Solo seekable</span>
+          </label>
+        </div>
+      </div>
 
-            <p class="tagline" *ngIf="it.tagline">{{ it.tagline }}</p>
-            <p class="overview">{{ overview() || 'Sin sinopsis disponible.' }}</p>
+      <!-- Poster (visible on larger screens) -->
+      <div class="hero-poster">
+        <img [src]="poster()" [alt]="title()" />
+      </div>
+    </section>
 
-            <div class="chips" *ngIf="genres().length">
-              <span class="chip" *ngFor="let g of genres()">{{ g }}</span>
-            </div>
-
-            <div class="actions">
-              <mat-button-toggle-group
-                class="playback-toggle-group mat-elevation-z2"
-                appearance="standard"
-                multiple
-              >
-                <mat-button-toggle
-                  class="playback-toggle"
-                  [checked]="preferMultiAudio()"
-                  (change)="preferMultiAudio.set($event.source.checked)"
-                  value="multiAudio"
-                >
-                  Priorizar torrents con varias pistas de audio
-                </mat-button-toggle>
-                <mat-button-toggle
-                  class="playback-toggle"
-                  [checked]="preferSeekable()"
-                  (change)="preferSeekable.set($event.source.checked)"
-                  value="seekable"
-                >
-                  Solo torrents con seeking (duracion completa al inicio)
-                </mat-button-toggle>
-              </mat-button-toggle-group>
-              <button mat-raised-button color="primary" type="button" (click)="play()">
-                <mat-icon>play_arrow</mat-icon>
-                Reproducir
-              </button>
-              <button mat-stroked-button type="button">
-                <mat-icon>add</mat-icon>
-                Mi lista
-              </button>
-            </div>
+    <!-- Cast Section -->
+    <section class="section cast-section" *ngIf="cast().length">
+      <h2 class="section-title">Reparto</h2>
+      <div class="cast-scroll">
+        <div class="cast-card" *ngFor="let person of cast()">
+          <div class="cast-image">
+            <img 
+              [src]="person.profile || 'assets/placeholder.png'" 
+              [alt]="person.name"
+              loading="lazy"
+            />
+          </div>
+          <div class="cast-details">
+            <div class="cast-name">{{ person.name }}</div>
+            <div class="cast-role">{{ person.character }}</div>
           </div>
         </div>
       </div>
-    </mat-card>
+    </section>
 
-    <div class="details-grid">
-      <mat-card class="details-card" appearance="outlined">
-        <div class="card-title">Ficha técnica</div>
-        <div class="facts">
-          <div class="fact">
-            <div class="label">Estreno</div>
-            <div class="value">{{ releaseDateLabel() }}</div>
+    <!-- Details Section (Collapsible) -->
+    <section class="section info-section">
+      <button class="info-toggle" (click)="showInfo.set(!showInfo())">
+        <div class="toggle-left">
+          <mat-icon>info_outline</mat-icon>
+          <span>Información adicional</span>
+        </div>
+        <mat-icon class="toggle-arrow" [class.expanded]="showInfo()">expand_more</mat-icon>
+      </button>
+      
+      <div class="info-content" *ngIf="showInfo()">
+        <div class="info-chips">
+          <!-- Quick Facts -->
+          <div class="info-chip" *ngIf="releaseDateLabel()">
+            <mat-icon>calendar_today</mat-icon>
+            <span>{{ releaseDateLabel() }}</span>
           </div>
-          <div class="fact">
-            <div class="label">Duración</div>
-            <div class="value">{{ runtimeLabel() || '—' }}</div>
+          <div class="info-chip" *ngIf="runtimeLabel()">
+            <mat-icon>schedule</mat-icon>
+            <span>{{ runtimeLabel() }}</span>
           </div>
-          <div class="fact">
-            <div class="label">Estado</div>
-            <div class="value">{{ statusLabel() }}</div>
+          <div class="info-chip" *ngIf="seasonsLabel()">
+            <mat-icon>tv</mat-icon>
+            <span>{{ seasonsLabel() }} temporada{{ seasonsLabel() !== '1' ? 's' : '' }}</span>
           </div>
-          <div class="fact" *ngIf="seasonsLabel()">
-            <div class="label">Temporadas</div>
-            <div class="value">{{ seasonsLabel() }}</div>
+          <div class="info-chip" *ngIf="episodesLabel()">
+            <mat-icon>video_library</mat-icon>
+            <span>{{ episodesLabel() }} episodios</span>
           </div>
-          <div class="fact" *ngIf="episodesLabel()">
-            <div class="label">Episodios</div>
-            <div class="value">{{ episodesLabel() }}</div>
+          <div class="info-chip" *ngIf="languageLabel()">
+            <mat-icon>language</mat-icon>
+            <span>{{ languageLabel() }}</span>
           </div>
-          <div class="fact">
-            <div class="label">Idioma original</div>
-            <div class="value">{{ languageLabel() }}</div>
+          <div class="info-chip" *ngIf="countriesLabel()">
+            <mat-icon>public</mat-icon>
+            <span>{{ countriesLabel() }}</span>
+          </div>
+          <div class="info-chip" *ngIf="statusLabel()">
+            <mat-icon>fiber_manual_record</mat-icon>
+            <span>{{ statusLabel() }}</span>
           </div>
         </div>
-      </mat-card>
 
-      <mat-card class="details-card" appearance="outlined">
-        <div class="card-title">Producción</div>
-        <div class="facts">
-          <div class="fact">
-            <div class="label">Países</div>
-            <div class="value">{{ countriesLabel() }}</div>
+        <div class="info-details">
+          <div class="info-column" *ngIf="companiesLabel()">
+            <span class="info-label">Estudios</span>
+            <span class="info-value">{{ companiesLabel() }}</span>
           </div>
-          <div class="fact">
-            <div class="label">Estudios</div>
-            <div class="value">{{ companiesLabel() }}</div>
+          <div class="info-column" *ngIf="budgetLabel() !== '—'">
+            <span class="info-label">Presupuesto</span>
+            <span class="info-value">{{ budgetLabel() }}</span>
           </div>
-          <div class="fact">
-            <div class="label">Presupuesto</div>
-            <div class="value">{{ budgetLabel() }}</div>
-          </div>
-          <div class="fact">
-            <div class="label">Recaudación</div>
-            <div class="value">{{ revenueLabel() }}</div>
-          </div>
-          <div class="fact" *ngIf="homepageLabel()">
-            <div class="label">Sitio oficial</div>
-            <a class="value link" [href]="homepageLabel()" target="_blank" rel="noreferrer">
-              {{ homepageLabel() }}
-            </a>
+          <div class="info-column" *ngIf="revenueLabel() !== '—'">
+            <span class="info-label">Recaudación</span>
+            <span class="info-value">{{ revenueLabel() }}</span>
           </div>
         </div>
-      </mat-card>
-    </div>
+
+        <a class="official-link" *ngIf="homepageLabel()" [href]="homepageLabel()" target="_blank" rel="noreferrer">
+          <mat-icon>open_in_new</mat-icon>
+          Visitar sitio oficial
+        </a>
+      </div>
+    </section>
   </ng-container>
 </div>
 
 <ng-template #loadingTpl>
-  <div class="page loading">
-    <mat-card class="loading-card" appearance="outlined">
-      <mat-card-content>Cargando…</mat-card-content>
-    </mat-card>
+  <div class="details-page loading-state">
+    <div class="loading-spinner">
+      <div class="spinner"></div>
+      <p>Cargando...</p>
+    </div>
   </div>
 </ng-template>

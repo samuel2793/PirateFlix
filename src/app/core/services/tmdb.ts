@@ -31,6 +31,15 @@ export class TmdbService {
     });
   }
 
+  credits(type: MediaType, id: number) {
+    return this.http.get<any>(`${this.baseUrl}/${type}/${id}/credits`, {
+      params: {
+        api_key: this.key,
+        language: this.lang,
+      },
+    });
+  }
+
   searchMulti(query: string, page = 1) {
     return this.http.get<any>(`${this.baseUrl}/search/multi`, {
       params: {
@@ -47,5 +56,10 @@ export class TmdbService {
   posterUrl(path: string | null | undefined) {
     if (!path) return '';
     return `${APP_CONFIG.tmdb.imageBase}${path}`;
+  }
+
+  backdropUrl(path: string | null | undefined) {
+    if (!path) return '';
+    return `https://image.tmdb.org/t/p/original${path}`;
   }
 }

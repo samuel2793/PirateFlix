@@ -72,6 +72,9 @@ export class HomeComponent implements OnDestroy {
   searchError = signal<string | null>(null);
 
   tabIndex = 0;
+  
+  // Active tab: 'movies' | 'tv' | 'search'
+  activeTab = signal<'movies' | 'tv' | 'search'>('movies');
 
   // Derived
   hasSearch = computed(() => this.query().trim().length > 0);
@@ -118,6 +121,33 @@ export class HomeComponent implements OnDestroy {
   }
 
   // UI helpers
+  getMovieHero() {
+    return this.movies()[0] || null;
+  }
+
+  getMovieHeroBackdrop() {
+    const item = this.getMovieHero();
+    return item ? this.tmdb.backdropUrl(item.backdrop_path) : '';
+  }
+
+  getTvHero() {
+    return this.tv()[0] || null;
+  }
+
+  getTvHeroBackdrop() {
+    const item = this.getTvHero();
+    return item ? this.tmdb.backdropUrl(item.backdrop_path) : '';
+  }
+
+  getHeroItem() {
+    return this.movies()[0] || null;
+  }
+
+  getHeroBackdrop() {
+    const item = this.getHeroItem();
+    return item ? this.tmdb.backdropUrl(item.backdrop_path) : '';
+  }
+
   poster(path: string | null | undefined) {
     return this.tmdb.posterUrl(path);
   }

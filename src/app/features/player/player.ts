@@ -117,6 +117,19 @@ export class PlayerComponent implements OnDestroy {
   selectedAudioTrack = signal<'auto' | number>('auto');
   preferMultiAudio = signal<boolean>(false);
   preferSeekable = signal<boolean>(false);
+  preferSubtitles = signal<boolean>(false);
+  
+  // Subtitle customization
+  subtitleSize = signal<number>(this.loadSubtitlePref('size', 100));
+  subtitleColor = signal<string>(this.loadSubtitlePref('color', '#ffffff'));
+  subtitleBackground = signal<string>(this.loadSubtitlePref('background', 'rgba(0,0,0,0.7)'));
+  subtitleFont = signal<string>(this.loadSubtitlePref('font', 'sans-serif'));
+  showSubtitleSettings = signal<boolean>(false);
+  
+  // Settings panel
+  showSettings = signal<boolean>(false);
+  settingsTab = signal<'audio' | 'subtitles' | 'appearance'>('audio');
+  selectedSubtitleTrack = signal<number>(-1);
 
   private readonly API_URL = 'http://localhost:3001/api';
   private currentTorrentHash: string | null = null;
@@ -156,6 +169,7 @@ export class PlayerComponent implements OnDestroy {
     const episodeStr = this.route.snapshot.paramMap.get('episode');
     const preferMultiAudioParam = this.route.snapshot.queryParamMap.get('multiAudio');
     const preferSeekableParam = this.route.snapshot.queryParamMap.get('seekable');
+    const preferSubtitlesParam = this.route.snapshot.queryParamMap.get('subtitles');
 
     if (type === 'movie' || type === 'tv') this.type.set(type);
     if (idStr) this.id.set(Number(idStr));
@@ -163,6 +177,7 @@ export class PlayerComponent implements OnDestroy {
     if (episodeStr) this.episode.set(Number(episodeStr));
     this.preferMultiAudio.set(preferMultiAudioParam === '1' || preferMultiAudioParam === 'true');
     this.preferSeekable.set(preferSeekableParam === '1' || preferSeekableParam === 'true');
+    this.preferSubtitles.set(preferSubtitlesParam === '1' || preferSubtitlesParam === 'true');
 
     await this.searchAndPlayTorrent();
   }
@@ -208,6 +223,7 @@ export class PlayerComponent implements OnDestroy {
     const id = this.id();
     const preferMultiAudio = this.preferMultiAudio();
     const preferSeekable = this.preferSeekable();
+    const preferSubtitles = this.preferSubtitles();
 
     try {
       // 1. Quick-switch: limpiar streams/ffmpeg anteriores (muy rápido, ~50ms)
@@ -248,6 +264,9 @@ export class PlayerComponent implements OnDestroy {
       const seekableHintRegex =
         /\b(mp4|x264|h\.?264|web[-\s]?dl|webrip)\b/i;
       const hasSeekableHint = (name: string) => seekableHintRegex.test(name);
+      const subtitlesHintRegex =
+        /\b(subs?|subtitles?|subtitulado|castellano|spa(nish)?|lat(ino)?|esp|espa[ñn]ol)\b/i;
+      const hasSubtitlesHint = (name: string) => subtitlesHintRegex.test(name);
 
       const categoriesToTry = [207, 200, 0];
       let anyTimedOut = false;
@@ -485,6 +504,9 @@ export class PlayerComponent implements OnDestroy {
         const seekableHinted = sortBySeeders(
           candidateTorrents.filter((t: any) => hasSeekableHint(String(t?.name || '')))
         );
+        const subtitlesHinted = sortBySeeders(
+          candidateTorrents.filter((t: any) => hasSubtitlesHint(String(t?.name || '')))
+        );
         const multiAudioSeekableHinted =
           preferMultiAudio && preferSeekable
             ? sortBySeeders(
@@ -497,7 +519,9 @@ export class PlayerComponent implements OnDestroy {
             : [];
 
         const bestTorrent =
-          preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0
+          preferSubtitles && subtitlesHinted.length > 0
+            ? subtitlesHinted[0]
+            : preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0
             ? multiAudioSeekableHinted[0]
             : preferSeekable && seekableHinted.length > 0
             ? seekableHinted[0]
@@ -544,6 +568,9 @@ export class PlayerComponent implements OnDestroy {
           }
         };
 
+        if (preferSubtitles) {
+          pushUnique(subtitlesHinted);
+        }
         if (preferMultiAudio && preferSeekable) {
           pushUnique(multiAudioSeekableHinted);
         }
@@ -1131,6 +1158,9 @@ export class PlayerComponent implements OnDestroy {
   }
 
   onVideoLoadedMetadata() {
+    // Apply subtitle styles
+    this.applySubtitleStyles();
+    
     if (this.pendingSeekTime === null) return;
 
     const v = this.videoPlayer?.nativeElement;
@@ -1342,12 +1372,139 @@ export class PlayerComponent implements OnDestroy {
     return filename.split('.').slice(0, -1).pop() || 'Desconocido';
   }
 
+  // Subtitle customization helpers
+  private loadSubtitlePref<T>(key: string, defaultValue: T): T {
+    try {
+      const stored = localStorage.getItem(`pirateflix_subtitle_${key}`);
+      if (stored === null) return defaultValue;
+      if (typeof defaultValue === 'number') return Number(stored) as T;
+      return stored as T;
+    } catch {
+      return defaultValue;
+    }
+  }
+
+  private saveSubtitlePref(key: string, value: string | number) {
+    try {
+      localStorage.setItem(`pirateflix_subtitle_${key}`, String(value));
+    } catch {}
+  }
+
+  setSubtitleSize(size: number) {
+    this.subtitleSize.set(size);
+    this.saveSubtitlePref('size', size);
+    this.applySubtitleStyles();
+  }
+
+  setSubtitleColor(color: string) {
+    this.subtitleColor.set(color);
+    this.saveSubtitlePref('color', color);
+    this.applySubtitleStyles();
+  }
+
+  setSubtitleBackground(bg: string) {
+    this.subtitleBackground.set(bg);
+    this.saveSubtitlePref('background', bg);
+    this.applySubtitleStyles();
+  }
+
+  setSubtitleFont(font: string) {
+    this.subtitleFont.set(font);
+    this.saveSubtitlePref('font', font);
+    this.applySubtitleStyles();
+  }
+
+  toggleSubtitleSettings() {
+    this.showSubtitleSettings.set(!this.showSubtitleSettings());
+  }
+
+  toggleSettings() {
+    this.showSettings.set(!this.showSettings());
+    // Auto-select appropriate tab
+    if (this.showSettings()) {
+      if (this.audioTracks().length > 1) {
+        this.settingsTab.set('audio');
+      } else if (this.subtitleTracks().length > 0) {
+        this.settingsTab.set('subtitles');
+      }
+    }
+  }
+
+  setSettingsTab(tab: 'audio' | 'subtitles' | 'appearance') {
+    this.settingsTab.set(tab);
+  }
+
+  selectAudioTrack(track: 'auto' | number) {
+    this.selectedAudioTrack.set(track);
+    // Trigger audio track change
+    const event = { target: { value: track.toString() } } as unknown as Event;
+    this.onAudioTrackChange(event);
+  }
+
+  selectSubtitleTrack(index: number) {
+    this.selectedSubtitleTrack.set(index);
+    const video = this.videoPlayer?.nativeElement;
+    if (!video) return;
+    
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      tracks[i].mode = (i === index) ? 'showing' : 'hidden';
+    }
+  }
+
+  adjustSubtitleSize(delta: number) {
+    const newSize = Math.max(50, Math.min(200, this.subtitleSize() + delta));
+    this.setSubtitleSize(newSize);
+  }
+
+  private subtitleStyleElement: HTMLStyleElement | null = null;
+
+  applySubtitleStyles() {
+    // Create or update a dynamic style element for ::cue styling
+    // ::cue doesn't support CSS variables, so we need to inject actual values
+    if (!this.subtitleStyleElement) {
+      this.subtitleStyleElement = document.createElement('style');
+      this.subtitleStyleElement.id = 'subtitle-custom-styles';
+      document.head.appendChild(this.subtitleStyleElement);
+    }
+
+    const size = this.subtitleSize();
+    const color = this.subtitleColor();
+    const bg = this.subtitleBackground();
+    const font = this.subtitleFont();
+
+    // Calculate font size (base is roughly 1.5em for default video subtitles)
+    const fontSize = (size / 100) * 1.5;
+
+    this.subtitleStyleElement.textContent = `
+      video::cue {
+        font-size: ${fontSize}em !important;
+        color: ${color} !important;
+        background-color: ${bg} !important;
+        font-family: ${font} !important;
+        padding: 4px 8px;
+        border-radius: 4px;
+        text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+      }
+    `;
+  }
+
+  private cleanupSubtitleStyles() {
+    if (this.subtitleStyleElement) {
+      this.subtitleStyleElement.remove();
+      this.subtitleStyleElement = null;
+    }
+  }
+
   ngOnDestroy() {
     // Limpiar interval de progreso
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
       this.progressInterval = null;
     }
+
+    // Limpiar estilos de subtítulos
+    this.cleanupSubtitleStyles();
 
     // Parar el video completamente
     this.stopPlaybackAndPolling();
