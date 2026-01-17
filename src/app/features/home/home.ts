@@ -64,7 +64,7 @@ export class HomeComponent implements OnDestroy {
 
   // Search
   query = signal<string>('');
-  searchFilter = signal<SearchFilter>('all');
+  searchFilter = signal<SearchFilter>('movie');
   autoSearch = signal<boolean>(true);
 
   searchResults = signal<any[]>([]);
@@ -155,7 +155,7 @@ export class HomeComponent implements OnDestroy {
   }
 
   setSearchFilter(v: SearchFilter) {
-    this.searchFilter.set((v ?? 'all') as SearchFilter);
+    this.searchFilter.set((v ?? 'movie') as SearchFilter);
   }
 
   clearSearch() {
