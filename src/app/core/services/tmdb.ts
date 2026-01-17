@@ -57,4 +57,9 @@ export class TmdbService {
     if (!path) return '';
     return `${APP_CONFIG.tmdb.imageBase}${path}`;
   }
+
+  backdropUrl(path: string | null | undefined) {
+    if (!path) return '';
+    return `https://image.tmdb.org/t/p/original${path}`;
+  }
 }

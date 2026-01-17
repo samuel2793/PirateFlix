@@ -5,6 +5,7 @@ import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -21,6 +22,7 @@ type MediaType = 'movie' | 'tv';
     MatButtonModule,
     MatIconModule,
     MatButtonToggleModule,
+    MatTooltipModule,
   ],
   templateUrl: './details.html',
   styleUrl: './details.scss',
@@ -34,8 +36,46 @@ export class DetailsComponent {
   error = signal<string | null>(null);
   item = signal<any | null>(null);
   credits = signal<any | null>(null);
-  preferMultiAudio = signal(false);
-  preferSeekable = signal(false);
+  
+  // Preferences with localStorage persistence
+  preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
+  preferSeekable = signal(this.loadPref('preferSeekable'));
+  preferSubtitles = signal(this.loadPref('preferSubtitles'));
+  showInfo = signal(false);
+
+  // Load preference from localStorage
+  private loadPref(key: string): boolean {
+    try {
+      return localStorage.getItem(`pirateflix_${key}`) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  // Save preference to localStorage
+  savePref(key: string, value: boolean) {
+    try {
+      localStorage.setItem(`pirateflix_${key}`, value ? 'true' : 'false');
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  // Toggle handlers that persist
+  toggleMultiAudio(value: boolean) {
+    this.preferMultiAudio.set(value);
+    this.savePref('preferMultiAudio', value);
+  }
+
+  toggleSeekable(value: boolean) {
+    this.preferSeekable.set(value);
+    this.savePref('preferSeekable', value);
+  }
+
+  toggleSubtitles(value: boolean) {
+    this.preferSubtitles.set(value);
+    this.savePref('preferSubtitles', value);
+  }
 
   async ngOnInit() {
     try {
@@ -74,7 +114,7 @@ export class DetailsComponent {
   backdrop() {
     const it = this.item();
     return (
-      this.tmdb.posterUrl(it?.backdrop_path) ||
+      this.tmdb.backdropUrl(it?.backdrop_path) ||
       this.tmdb.posterUrl(it?.poster_path) ||
       'assets/placeholder.png'
     );
@@ -224,6 +264,7 @@ export class DetailsComponent {
     const queryParams: Record<string, string> = {};
     if (this.preferMultiAudio()) queryParams['multiAudio'] = '1';
     if (this.preferSeekable()) queryParams['seekable'] = '1';
+    if (this.preferSubtitles()) queryParams['subtitles'] = '1';
     this.router.navigate(
       [
         '/play',
