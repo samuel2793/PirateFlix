@@ -4,7 +4,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { MatCheckboxModule } from '@angular/material/checkbox';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -20,7 +20,7 @@ type MediaType = 'movie' | 'tv';
     MatCardModule,
     MatButtonModule,
     MatIconModule,
-    MatCheckboxModule,
+    MatButtonToggleModule,
   ],
   templateUrl: './details.html',
   styleUrl: './details.scss',
