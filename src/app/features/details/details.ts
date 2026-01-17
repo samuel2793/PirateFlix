@@ -4,6 +4,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -13,7 +14,14 @@ type MediaType = 'movie' | 'tv';
 @Component({
   selector: 'app-details',
   standalone: true,
-  imports: [CommonModule, RouterModule, MatCardModule, MatButtonModule, MatIconModule],
+  imports: [
+    CommonModule,
+    RouterModule,
+    MatCardModule,
+    MatButtonModule,
+    MatIconModule,
+    MatCheckboxModule,
+  ],
   templateUrl: './details.html',
   styleUrl: './details.scss',
 })
@@ -25,6 +33,8 @@ export class DetailsComponent {
   loading = signal(true);
   error = signal<string | null>(null);
   item = signal<any | null>(null);
+  preferMultiAudio = signal(false);
+  preferSeekable = signal(false);
 
   async ngOnInit() {
     try {
@@ -172,11 +182,17 @@ export class DetailsComponent {
   }
 
   play() {
-    this.router.navigate([
-      '/play',
-      this.route.snapshot.paramMap.get('type'),
-      this.route.snapshot.paramMap.get('id'),
-    ]);
+    const queryParams: Record<string, string> = {};
+    if (this.preferMultiAudio()) queryParams['multiAudio'] = '1';
+    if (this.preferSeekable()) queryParams['seekable'] = '1';
+    this.router.navigate(
+      [
+        '/play',
+        this.route.snapshot.paramMap.get('type'),
+        this.route.snapshot.paramMap.get('id'),
+      ],
+      { queryParams }
+    );
   }
 
   private formatDate(value: string | null | undefined) {
