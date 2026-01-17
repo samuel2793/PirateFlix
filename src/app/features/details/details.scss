@@ -153,7 +153,17 @@
   align-items: center;
 }
 
-.playback-option {
+.playback-toggle-group {
+  --mat-button-toggle-background-color: rgba(255, 255, 255, 0.16);
+  --mat-button-toggle-text-color: #f6f7fb;
+  --mat-button-toggle-selected-state-background-color: var(--mat-option-selected-state-label-text-color);
+  --mat-button-toggle-selected-state-text-color: #ffffff;
+  --mat-button-toggle-divider-color: rgba(255, 255, 255, 0.2);
+  --mat-button-toggle-height: 40px;
+  overflow: hidden;
+}
+
+.playback-toggle {
   font-size: 13px;
 }
 

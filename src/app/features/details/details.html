@@ -38,20 +38,28 @@
             </div>
 
             <div class="actions">
-              <mat-checkbox
-                class="playback-option"
-                [checked]="preferMultiAudio()"
-                (change)="preferMultiAudio.set($event.checked)"
+              <mat-button-toggle-group
+                class="playback-toggle-group mat-elevation-z2"
+                appearance="standard"
+                multiple
               >
-                Priorizar torrents con varias pistas de audio
-              </mat-checkbox>
-              <mat-checkbox
-                class="playback-option"
-                [checked]="preferSeekable()"
-                (change)="preferSeekable.set($event.checked)"
-              >
-                Solo torrents con seeking (duracion completa al inicio)
-              </mat-checkbox>
+                <mat-button-toggle
+                  class="playback-toggle"
+                  [checked]="preferMultiAudio()"
+                  (change)="preferMultiAudio.set($event.source.checked)"
+                  value="multiAudio"
+                >
+                  Priorizar torrents con varias pistas de audio
+                </mat-button-toggle>
+                <mat-button-toggle
+                  class="playback-toggle"
+                  [checked]="preferSeekable()"
+                  (change)="preferSeekable.set($event.source.checked)"
+                  value="seekable"
+                >
+                  Solo torrents con seeking (duracion completa al inicio)
+                </mat-button-toggle>
+              </mat-button-toggle-group>
               <button mat-raised-button color="primary" type="button" (click)="play()">
                 <mat-icon>play_arrow</mat-icon>
                 Reproducir
