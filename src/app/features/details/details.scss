@@ -1,85 +1,232 @@
-.page {
-  min-height: 100vh;
-  background: #0b0b0f;
-  color: #fff;
-  padding: 16px;
+:host {
+  display: block;
 }
 
-.error {
-  color: #ff7b7b;
+.page {
+  padding: 16px;
+  max-width: 1240px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.error-card {
+  margin: 16px 0;
+
+  .warn {
+    vertical-align: -4px;
+    margin-right: 6px;
+  }
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding-top: 32px;
+}
+
+.loading-card {
+  padding: 8px 18px;
+}
+
+.hero-card {
+  border-radius: 18px;
+  overflow: hidden;
+  padding: 0;
 }
 
 .hero {
   position: relative;
-  border-radius: 16px;
-  overflow: hidden;
   min-height: 420px;
+  background: #10121a;
+  color: #f6f7fb;
 }
 
-.bg {
+.hero-bg {
   position: absolute;
   inset: 0;
   background-size: cover;
   background-position: center;
-  filter: blur(0px);
-  transform: scale(1.05);
+  transform: scale(1.04);
+  filter: saturate(1.05) contrast(1.05);
 }
 
-.overlay {
+.hero-overlay {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     90deg,
-    rgba(11, 11, 15, 0.95) 0%,
-    rgba(11, 11, 15, 0.75) 45%,
-    rgba(11, 11, 15, 0.25) 100%
+    rgba(12, 13, 18, 0.92) 0%,
+    rgba(12, 13, 18, 0.7) 45%,
+    rgba(12, 13, 18, 0.35) 100%
   );
 }
 
-.content {
+.hero-content {
   position: relative;
-  display: flex;
-  gap: 16px;
-  padding: 16px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 24px;
+  padding: 24px;
+  align-items: start;
+}
+
+.poster-wrap {
+  width: 180px;
 }
 
 .poster {
-  width: 160px;
-  height: 240px;
-  border-radius: 12px;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
   object-fit: cover;
-  background: #222;
-  flex: 0 0 auto;
+  background: #2a2f3a;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
 }
 
 .meta {
-  max-width: 720px;
+  max-width: 760px;
+
+  h1 {
+    margin: 4px 0 8px;
+    font-size: 32px;
+    font-weight: 700;
+  }
+}
+
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.subline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.dot {
+  opacity: 0.6;
+}
+
+.votes {
+  margin-left: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.tagline {
+  margin: 6px 0 0;
+  font-style: italic;
+  opacity: 0.85;
 }
 
 .overview {
-  opacity: 0.9;
-  line-height: 1.4;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .actions {
   display: flex;
   gap: 10px;
-  margin-top: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
 }
 
-button {
-  border: 0;
-  border-radius: 10px;
-  padding: 10px 14px;
+.details-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.details-card {
+  padding: 16px;
+}
+
+.card-title {
+  font-weight: 650;
+  margin-bottom: 12px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.value {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.primary {
-  background: #fff;
-  color: #000;
+.link {
+  color: #1d4ed8;
+  text-decoration: none;
+  border-bottom: 1px dashed rgba(29, 78, 216, 0.45);
 }
-.secondary {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+
+.link:hover {
+  border-bottom-color: rgba(29, 78, 216, 0.8);
+}
+
+@media (max-width: 900px) {
+  .hero-content {
+    grid-template-columns: 1fr;
+  }
+
+  .poster-wrap {
+    width: 160px;
+    margin: 0 auto;
+  }
+
+  .meta h1 {
+    font-size: 26px;
+  }
+
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .facts {
+    grid-template-columns: 1fr;
+  }
+
+  .hero {
+    min-height: 360px;
+  }
 }

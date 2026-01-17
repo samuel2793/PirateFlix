@@ -111,6 +111,7 @@ createAgents();
 
 // Track active search AbortControllers so we can abort searches on-demand
 const activeSearchControllers = new Set();
+let latestQuickSwitchSession = 0;
 
 // Configurar CORS
 app.use(cors());
@@ -141,6 +142,7 @@ client = createWebTorrentClient();
 // =====================
 const activeTorrents = new Map();
 const embeddedSubtitlesCache = new Map();
+const embeddedAudioTracksCache = new Map();
 
 const transcodedCache = new Map();
 const CACHE_DIR = path.join(os.tmpdir(), 'pirateflix-transcoded');
@@ -181,6 +183,9 @@ function canDestroyNow(infoHash) {
 function clearEmbeddedCacheForInfoHash(infoHash) {
   for (const k of Array.from(embeddedSubtitlesCache.keys())) {
     if (String(k).startsWith(`${infoHash}-`)) embeddedSubtitlesCache.delete(k);
+  }
+  for (const k of Array.from(embeddedAudioTracksCache.keys())) {
+    if (String(k).startsWith(`${infoHash}-`)) embeddedAudioTracksCache.delete(k);
   }
 }
 
@@ -281,6 +286,50 @@ async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15
   });
 }
 
+const MP4_FASTSTART_SCAN_BYTES = 1024 * 1024;
+const MP4_FASTSTART_MIN_BYTES = 64 * 1024;
+const MP4_ATOM_MOOV = Buffer.from('moov');
+const MP4_ATOM_MDAT = Buffer.from('mdat');
+
+async function isLikelyFaststartMp4(file, filePath) {
+  try {
+    await waitForFileOnDisk(file, filePath, Math.min(256 * 1024, file.length), 3000);
+  } catch (_) {
+    return false;
+  }
+
+  let stat = null;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    return false;
+  }
+
+  const readBytes = Math.min(stat.size, MP4_FASTSTART_SCAN_BYTES);
+  if (readBytes < MP4_FASTSTART_MIN_BYTES) return false;
+
+  let fd = null;
+  try {
+    fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(readBytes);
+    fs.readSync(fd, buf, 0, readBytes, 0);
+
+    const moovIndex = buf.indexOf(MP4_ATOM_MOOV);
+    if (moovIndex === -1) return false;
+    const mdatIndex = buf.indexOf(MP4_ATOM_MDAT);
+    if (mdatIndex === -1) return true;
+    return moovIndex < mdatIndex;
+  } catch (_) {
+    return false;
+  } finally {
+    if (fd) {
+      try {
+        fs.closeSync(fd);
+      } catch (_) {}
+    }
+  }
+}
+
 // Warmup: hacer peticiones HEAD/GET rápidas a mirrors
 async function warmupMirrors(timeoutPer = 3000) {
   try {
@@ -325,6 +374,51 @@ app.get('/api/search-torrent', async (req, res) => {
   const { query, category = '207' } = req.query; // 207 = HD Movies
   if (!query) return res.status(400).json({ error: 'query es requerido' });
 
+  const perMirrorTimeoutMs = parseInt(process.env.PIRATEFLIX_MIRROR_TIMEOUT_MS || '20000', 10);
+  const stage2TimeoutMs = Math.max(
+    Math.floor(perMirrorTimeoutMs * 1.3),
+    Math.floor(perMirrorTimeoutMs + 3000)
+  );
+  const baseTimeoutMs = parseInt(process.env.PIRATEFLIX_SEARCH_TIMEOUT_MS || '30000', 10);
+  const timeoutMs = Math.max(baseTimeoutMs, stage2TimeoutMs + 2000);
+  const requestAbortController = new AbortController();
+  const requestAbortSignal = requestAbortController.signal;
+  activeSearchControllers.add(requestAbortController);
+  const requestTimeout = setTimeout(() => {
+    try {
+      requestAbortController.abort();
+    } catch (_) {}
+  }, timeoutMs);
+
+  const onClientClose = () => {
+    try {
+      if (!requestAbortSignal.aborted) requestAbortController.abort();
+    } catch (_) {}
+  };
+  req.on('close', onClientClose);
+  req.on('aborted', onClientClose);
+
+  const cleanupSearch = () => {
+    clearTimeout(requestTimeout);
+    activeSearchControllers.delete(requestAbortController);
+    try {
+      req.removeListener('close', onClientClose);
+      req.removeListener('aborted', onClientClose);
+    } catch (_) {}
+  };
+
+  const isAbortLikeError = (err) => {
+    if (!err) return false;
+    const code = err.code || err.name;
+    const msg = String(err.message || '').toLowerCase();
+    return (
+      code === 'ERR_CANCELED' ||
+      code === 'AbortError' ||
+      msg.includes('canceled') ||
+      msg.includes('aborted')
+    );
+  };
+
   try {
     let cleanQuery = query
       .replace(/'/g, '')
@@ -336,7 +430,6 @@ app.get('/api/search-torrent', async (req, res) => {
     console.log(`Buscando torrent: ${query}`);
     if (cleanQuery !== query) console.log(`Query limpio: ${cleanQuery}`);
 
-    const timeoutMs = parseInt(process.env.PIRATEFLIX_SEARCH_TIMEOUT_MS || '30000', 10);
     const httpAgent = httpAgentGlobal;
     const httpsAgentShared = httpsAgentGlobal;
     const mirrors = MIRRORS.slice();
@@ -361,7 +454,7 @@ app.get('/api/search-torrent', async (req, res) => {
       console.warn('No se pudieron obtener diagnostics internos:', e.message);
     }
 
-    async function fetchSearchHtml(cleanQuery, category) {
+    async function fetchSearchHtml(cleanQuery, category, parentSignal) {
       const headers = {
         'User-Agent':
           'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
@@ -381,9 +474,63 @@ app.get('/api/search-torrent', async (req, res) => {
         return cached.html;
       }
 
+      const perMirrorTimeout = perMirrorTimeoutMs;
+      const controllers = new Set();
+      const overallSignal = parentSignal;
+
+      const makeAbortError = () => {
+        const err = new Error('Search aborted');
+        err.code = 'ERR_CANCELED';
+        return err;
+      };
+
+      const isAbortError = (err) => {
+        if (!err) return false;
+        const code = err.code || err.name;
+        const msg = String(err.message || '').toLowerCase();
+        return (
+          code === 'ERR_CANCELED' ||
+          code === 'AbortError' ||
+          msg.includes('canceled') ||
+          msg.includes('aborted')
+        );
+      };
+
+      const isAggregateAbort = (err) => {
+        const errs = err && err.errors;
+        return Array.isArray(errs) && errs.length > 0 && errs.every((e) => isAbortError(e));
+      };
+
+      const ensureNotAborted = () => {
+        if (overallSignal && overallSignal.aborted) throw makeAbortError();
+      };
+
+      const trackController = (controller) => {
+        if (!controllers.has(controller)) controllers.add(controller);
+        activeSearchControllers.add(controller);
+        if (overallSignal && overallSignal.aborted) {
+          try {
+            controller.abort();
+          } catch (_) {}
+        } else if (overallSignal) {
+          overallSignal.addEventListener(
+            'abort',
+            () => {
+              try {
+                controller.abort();
+              } catch (_) {}
+            },
+            { once: true }
+          );
+        }
+        return controller;
+      };
+
       const tryYtsFallback = async (q) => {
         if (String(process.env.PIRATEFLIX_USE_EXTERNAL_API || 'true').toLowerCase() !== 'true')
           return null;
+        ensureNotAborted();
+        let controller = null;
         try {
           const apiUrl = `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(
             q
@@ -394,12 +541,19 @@ app.get('/api/search-torrent', async (req, res) => {
             apiUrl,
             `(timeout ${ytsTimeout}ms)`
           );
+          controller = trackController(new AbortController());
           const resp = await axios.get(apiUrl, {
             timeout: ytsTimeout,
             responseType: 'json',
             httpsAgent: httpsAgentShared,
             httpAgent,
+            signal: controller.signal,
           });
+          try {
+            activeSearchControllers.delete(controller);
+          } catch (e) {
+            /* ignore */
+          }
           const movies = resp?.data?.data?.movies;
           if (!movies || movies.length === 0) return null;
 
@@ -416,24 +570,29 @@ app.get('/api/search-torrent', async (req, res) => {
           if (magnets.length === 0) return null;
           return magnets.map((m) => `<a href="${m}">download</a>`).join('\n');
         } catch (err) {
+          if (controller) {
+            try {
+              activeSearchControllers.delete(controller);
+            } catch (e) {
+              /* ignore */
+            }
+          }
+          if (isAbortError(err) || (overallSignal && overallSignal.aborted)) throw makeAbortError();
           console.warn('Fallback YTS falló:', err && err.message ? err.message : err);
           return null;
         }
       };
 
-      const perMirrorTimeout = parseInt(process.env.PIRATEFLIX_MIRROR_TIMEOUT_MS || '20000', 10);
-      const controllers = [];
-
-      try {
-        if (Date.now() - lastWarmupAt > WARMUP_INTERVAL_MS) {
-          console.log(
-            '🔧 Warmup previo detectado como antiguo. Ejecutando warmup corto antes de buscar...'
-          );
-          await warmupMirrors(3000);
-        }
-      } catch (e) {
-        console.warn('Warmup corto falló antes de buscar:', e && e.message ? e.message : e);
-      }
+      // try {
+      //   if (Date.now() - lastWarmupAt > WARMUP_INTERVAL_MS) {
+      //     console.log(
+      //       '🔧 Warmup previo detectado como antiguo. Ejecutando warmup corto antes de buscar...'
+      //     );
+      //     await warmupMirrors(3000);
+      //   }
+      // } catch (e) {
+      //   console.warn('Warmup corto falló antes de buscar:', e && e.message ? e.message : e);
+      // }
 
       const healthyMirrors = mirrors.filter((base) => {
         const s = mirrorStats.get(base);
@@ -462,8 +621,7 @@ app.get('/api/search-torrent', async (req, res) => {
       const makeRequestFor = (base, timeoutMs, signalController) => {
         const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
         const controller = signalController || new AbortController();
-        controllers.push({ controller, base, url });
-        activeSearchControllers.add(controller);
+        trackController(controller);
 
         console.log(`Lanzando petición a: ${url} (timeout ${timeoutMs}ms)`);
 
@@ -492,6 +650,19 @@ app.get('/api/search-torrent', async (req, res) => {
             throw new Error(`Empty response from ${base}`);
           })
           .catch((err) => {
+            if (
+              isAbortError(err) ||
+              controller.signal.aborted ||
+              (overallSignal && overallSignal.aborted)
+            ) {
+              try {
+                activeSearchControllers.delete(controller);
+              } catch (e) {
+                /* ignore */
+              }
+              throw makeAbortError();
+            }
+
             const msg = err && err.message ? String(err.message).toLowerCase() : '';
             if (
               msg.includes('certificate key too weak') ||
@@ -524,6 +695,7 @@ app.get('/api/search-torrent', async (req, res) => {
 
       let result = null;
       try {
+        ensureNotAborted();
         const topN = Math.max(1, Math.min(prioritized.length, FAST_PARALLEL_MIRRORS));
         const topList = prioritized.slice(0, topN);
         try {
@@ -532,6 +704,12 @@ app.get('/api/search-torrent', async (req, res) => {
           const winner = await Promise.any(requests);
           result = winner.html;
         } catch (stage1Err) {
+          if (
+            (overallSignal && overallSignal.aborted) ||
+            isAbortError(stage1Err) ||
+            isAggregateAbort(stage1Err)
+          )
+            throw makeAbortError();
           console.warn(
             'Stage1 falló:',
             stage1Err && stage1Err.errors
@@ -539,7 +717,7 @@ app.get('/api/search-torrent', async (req, res) => {
               : (stage1Err && stage1Err.message) || stage1Err
           );
 
-          for (const { controller } of controllers) {
+          for (const controller of controllers) {
             try {
               controller.abort();
             } catch (e) {
@@ -552,6 +730,7 @@ app.get('/api/search-torrent', async (req, res) => {
             }
           }
 
+          ensureNotAborted();
           const wideTimeout = Math.max(perMirrorTimeout * 2, Math.floor(perMirrorTimeout + 7000));
           const controllersStage2 = [];
           console.log(`Stage2: probando todos los mirrors en paralelo (timeout ${wideTimeout}ms)`);
@@ -562,8 +741,23 @@ app.get('/api/search-torrent', async (req, res) => {
               return makeRequestFor(m, wideTimeout, controller);
             });
             const winner2 = await Promise.any(requests2);
+            for (const { controller } of controllersStage2) {
+              try {
+                controller.abort();
+              } catch (e) {}
+              try {
+                activeSearchControllers.delete(controller);
+              } catch (e) {}
+            }
+
             result = winner2.html;
           } catch (stage2Err) {
+            if (
+              (overallSignal && overallSignal.aborted) ||
+              isAbortError(stage2Err) ||
+              isAggregateAbort(stage2Err)
+            )
+              throw makeAbortError();
             console.warn(
               'Stage2 falló:',
               stage2Err && stage2Err.errors
@@ -594,13 +788,17 @@ app.get('/api/search-torrent', async (req, res) => {
               console.warn('Error en fallback externo rápido:', e && e.message ? e.message : e);
             }
 
+            ensureNotAborted();
             if (!result) console.log('Intentando reintentos secuenciales con timeout extendido...');
             for (const base of mirrors) {
+              ensureNotAborted();
               const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
               console.log(
                 `Intentando secuencial a: ${url} (timeout ${EXTENDED_MIRROR_TIMEOUT_MS}ms)`
               );
+              let controller = null;
               try {
+                controller = trackController(new AbortController());
                 const resp = await axios.get(url, {
                   headers,
                   timeout: EXTENDED_MIRROR_TIMEOUT_MS,
@@ -609,7 +807,15 @@ app.get('/api/search-torrent', async (req, res) => {
                   validateStatus: (s) => s >= 200 && s < 400,
                   httpsAgent: httpsAgentShared,
                   httpAgent,
+                  signal: controller.signal,
                 });
+                if (controller) {
+                  try {
+                    activeSearchControllers.delete(controller);
+                  } catch (e) {
+                    /* ignore */
+                  }
+                }
 
                 if (resp && resp.data && resp.data.length > 0) {
                   console.log(
@@ -620,6 +826,15 @@ app.get('/api/search-torrent', async (req, res) => {
                   break;
                 }
               } catch (err) {
+                if (controller) {
+                  try {
+                    activeSearchControllers.delete(controller);
+                  } catch (e) {
+                    /* ignore */
+                  }
+                }
+                if (isAbortError(err) || (overallSignal && overallSignal.aborted))
+                  throw makeAbortError();
                 const prev = mirrorStats.get(base) || { fails: 0 };
                 prev.fails = (prev.fails || 0) + 1;
                 prev.lastFail = Date.now();
@@ -643,7 +858,7 @@ app.get('/api/search-torrent', async (req, res) => {
           }
         }
       } finally {
-        for (const { controller } of controllers) {
+        for (const controller of controllers) {
           try {
             controller.abort();
           } catch (e) {
@@ -665,9 +880,10 @@ app.get('/api/search-torrent', async (req, res) => {
 
     let html = null;
     try {
-      html = await fetchSearchHtml(cleanQuery, category);
+      html = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
       console.log(`Busqueda finalizada en ${Date.now() - searchStart} ms`);
     } catch (initialErr) {
+      if (isAbortLikeError(initialErr) || requestAbortSignal.aborted) throw initialErr;
       console.warn('Búsqueda inicial falló, intentando fallbacks de query:', initialErr.message);
 
       const fallbacks = [];
@@ -697,7 +913,7 @@ app.get('/api/search-torrent', async (req, res) => {
       for (const fq of fallbacks) {
         try {
           console.log(`Intentando fallback: '${fq}'`);
-          html = await fetchSearchHtml(fq, category);
+          html = await fetchSearchHtml(fq, category, requestAbortSignal);
           console.log(`Fallback exitoso con query: '${fq}'`);
           break;
         } catch (fbErr) {
@@ -713,41 +929,62 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     const torrents = [];
-    const magnetRegex = /<a href="(magnet:\?xt=urn:btih:[^"]+)"/g;
-    const magnets = [];
-    let magnetMatch;
 
-    while ((magnetMatch = magnetRegex.exec(html)) !== null) {
-      magnets.push(magnetMatch[1]);
-    }
+    const decodeHtmlEntities = (value) =>
+      String(value)
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
 
-    console.log(`Magnet links encontrados: ${magnets.length}`);
+    const extractPeersFromRow = (rowHtml) => {
+      const numbersFrom = (regex) => {
+        const nums = [];
+        let match;
+        while ((match = regex.exec(rowHtml)) !== null) {
+          nums.push(parseInt(match[1], 10));
+        }
+        return nums;
+      };
 
-    for (const magnetLink of magnets) {
+      const rightTdRegex =
+        /<td[^>]*(?:align="right"|class="[^"]*(?:right|text-right)[^"]*")[^>]*>\s*(\d+)\s*<\/td>/gi;
+      const anyTdRegex = /<td[^>]*>\s*(\d+)\s*<\/td>/gi;
+
+      let nums = numbersFrom(rightTdRegex);
+      if (nums.length < 2) nums = numbersFrom(anyTdRegex);
+
+      const seeders = nums.length >= 2 ? nums[nums.length - 2] : 0;
+      const leechers = nums.length >= 2 ? nums[nums.length - 1] : 0;
+      return { seeders, leechers };
+    };
+
+    const extractName = (magnetLink, rowHtml) => {
+      const nameMatch = magnetLink.match(/&dn=([^&]+)/);
+      if (nameMatch) return decodeURIComponent(nameMatch[1].replace(/\+/g, ' '));
+
+      const detLinkMatch = rowHtml.match(/class="detLink"[^>]*>([^<]+)</i);
+      if (detLinkMatch) return decodeHtmlEntities(detLinkMatch[1]).trim();
+
+      return 'Unknown';
+    };
+
+    const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
+    let rowMatch;
+
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
       if (torrents.length >= 10) break;
 
-      const nameMatch = magnetLink.match(/&dn=([^&]+)/);
-      const name = nameMatch ? decodeURIComponent(nameMatch[1].replace(/\+/g, ' ')) : 'Unknown';
+      const rowHtml = rowMatch[0];
+      const magnetMatch = rowHtml.match(/href=['"](magnet:\?xt=urn:btih:[^'"]+)['"]/i);
+      if (!magnetMatch) continue;
 
-      const escapedMagnet = magnetLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const infoRegex = new RegExp(
-        escapedMagnet +
-          '[\\s\\S]{0,500}?<td align="right">(\\d+)<\\/td>\\s*<td align="right">(\\d+)<\\/td>',
-        'i'
-      );
-      const infoMatch = html.match(infoRegex);
-
-      let seeders = 0;
-      let leechers = 0;
-
-      if (infoMatch) {
-        seeders = parseInt(infoMatch[1]);
-        leechers = parseInt(infoMatch[2]);
-      }
-
-      const sizeRegex = new RegExp(escapedMagnet + '[\\s\\S]{0,300}?Size ([^,<]+)', 'i');
-      const sizeMatch = html.match(sizeRegex);
+      const magnetLink = decodeHtmlEntities(magnetMatch[1]);
+      const name = extractName(magnetLink, rowHtml);
+      const sizeMatch = rowHtml.match(/Size\s+([^,<]+)\s*,/i);
       const size = sizeMatch ? sizeMatch[1].trim() : 'Unknown';
+      const { seeders, leechers } = extractPeersFromRow(rowHtml);
 
       torrents.push({
         name,
@@ -757,6 +994,35 @@ app.get('/api/search-torrent', async (req, res) => {
         leechers,
         score: seeders * 2 + leechers,
       });
+    }
+
+    if (torrents.length === 0) {
+      const magnetRegex = /<a href=['"](magnet:\?xt=urn:btih:[^'"]+)['"]/g;
+      const magnets = [];
+      let magnetMatch;
+
+      while ((magnetMatch = magnetRegex.exec(html)) !== null) {
+        magnets.push(decodeHtmlEntities(magnetMatch[1]));
+      }
+
+      console.log(`Magnet links encontrados (fallback): ${magnets.length}`);
+
+      for (const magnetLink of magnets) {
+        if (torrents.length >= 10) break;
+
+        const name = extractName(magnetLink, html);
+
+        torrents.push({
+          name,
+          magnetLink,
+          size: 'Unknown',
+          seeders: 0,
+          leechers: 0,
+          score: 0,
+        });
+      }
+    } else {
+      console.log(`Magnet links encontrados: ${torrents.length}`);
     }
 
     torrents.sort((a, b) => b.score - a.score);
@@ -778,6 +1044,10 @@ app.get('/api/search-torrent', async (req, res) => {
     if (
       msg.includes('timeout') ||
       error?.code === 'ECONNABORTED' ||
+      error?.code === 'ERR_CANCELED' ||
+      error?.name === 'AbortError' ||
+      msg.includes('canceled') ||
+      msg.includes('aborted') ||
       msg.includes('all mirrors failed') ||
       msg.includes('empty response') ||
       msg.includes('certificate key too weak') ||
@@ -785,20 +1055,18 @@ app.get('/api/search-torrent', async (req, res) => {
       msg.includes('request failed with status code 5') ||
       (error && error.response && error.response.status >= 500 && error.response.status < 600)
     ) {
-      return res
-        .status(504)
-        .json({
-          error: 'Timeout en búsqueda',
-          message: 'La búsqueda tardó demasiado o los mirrors no respondieron',
-        });
+      return res.status(504).json({
+        error: 'Timeout en búsqueda',
+        message: 'La búsqueda tardó demasiado o los mirrors no respondieron',
+      });
     }
 
-    res
-      .status(500)
-      .json({
-        error: 'Error al buscar torrent',
-        message: (error && error.message) || String(error),
-      });
+    res.status(500).json({
+      error: 'Error al buscar torrent',
+      message: (error && error.message) || String(error),
+    });
+  } finally {
+    cleanupSearch();
   }
 });
 
@@ -936,11 +1204,77 @@ app.get('/api/embedded-subtitles/:infoHash/:fileIndex', async (req, res) => {
   }
 });
 
+// Endpoint para detectar pistas de audio embebidas
+app.get('/api/audio-tracks/:infoHash/:fileIndex', async (req, res) => {
+  const { infoHash, fileIndex } = req.params;
+  const cacheKey = `${infoHash}-${fileIndex}`;
+
+  if (embeddedAudioTracksCache.has(cacheKey)) {
+    return res.json(embeddedAudioTracksCache.get(cacheKey));
+  }
+
+  const torrent = client.get(infoHash);
+  if (!torrent) return res.status(404).json({ error: 'Torrent no encontrado' });
+
+  const file = torrent.files[parseInt(fileIndex)];
+  if (!file) return res.status(404).json({ error: 'Archivo no encontrado' });
+
+  try {
+    const filePath = path.join(torrent.path, file.path);
+    console.log('Analizando pistas de audio embebidas en:', filePath);
+
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló:', err.message);
+    }
+
+    const audioTracks = await new Promise((resolve) => {
+      const tracks = [];
+      ffmpeg.ffprobe(filePath, (err, metadata) => {
+        if (err) {
+          console.error('Error al analizar archivo:', err.message);
+          resolve([]);
+          return;
+        }
+
+        if (metadata.streams) {
+          metadata.streams.forEach((stream, index) => {
+            if (stream.codec_type === 'audio') {
+              tracks.push({
+                index: stream.index,
+                codec: stream.codec_name,
+                language: stream.tags?.language || 'und',
+                title: stream.tags?.title || `Audio ${index}`,
+                channels: stream.channels || null,
+                default: stream.disposition?.default === 1,
+              });
+            }
+          });
+        }
+        resolve(tracks);
+      });
+    });
+
+    embeddedAudioTracksCache.set(cacheKey, audioTracks);
+    res.json(audioTracks);
+  } catch (error) {
+    console.error('Error al detectar pistas de audio embebidas:', error);
+    res.json([]);
+  }
+});
+
 // =====================
 // Streaming
 // =====================
 app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const { infoHash, fileIndex } = req.params;
+  const audioStreamParam = req.query.audioStream;
+  const audioStreamIndex =
+    typeof audioStreamParam === 'string' && audioStreamParam.trim() !== ''
+      ? Number(audioStreamParam)
+      : null;
+  const forceTranscode = Number.isFinite(audioStreamIndex);
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).send('Torrent no encontrado');
 
@@ -953,20 +1287,42 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const filePath = path.join(torrent.path, file.path);
   const fileName = file.name.toLowerCase();
 
-  const needsTranscode =
+  let needsTranscode =
+    forceTranscode ||
     fileName.endsWith('.mkv') ||
     fileName.includes('hevc') ||
     fileName.includes('x265') ||
     fileName.includes('h265');
 
+  const isMp4Like = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
+  if (!needsTranscode && isMp4Like) {
+    const fileDownloaded = Number(file.downloaded || 0);
+    const fileLength = Number(file.length || 0);
+    const fullyDownloaded = fileLength > 0 && fileDownloaded >= fileLength;
+
+    if (!fullyDownloaded) {
+      const faststart = await isLikelyFaststartMp4(file, filePath);
+      if (!faststart) {
+        try {
+          const tailBytes = Math.min(2 * 1024 * 1024, fileLength);
+          const start = Math.max(0, fileLength - tailBytes);
+          if (fileLength > 0) file.select(start, fileLength - 1);
+        } catch (_) {}
+        console.log('⚠️ MP4 sin faststart detectado, priorizando cola para moov');
+      }
+    }
+  }
+
   console.log(
     'Streaming archivo:',
     file.name,
-    needsTranscode ? '(TRANSCODIFICANDO automáticamente)' : ''
+    needsTranscode ? '(TRANSCODIFICANDO automáticamente)' : '',
+    forceTranscode ? `(audio stream ${audioStreamIndex})` : ''
   );
 
   if (needsTranscode) {
-    const cacheKey = `${infoHash}_${fileIndex}`;
+    const audioSuffix = forceTranscode ? `_a${audioStreamIndex}` : '';
+    const cacheKey = `${infoHash}_${fileIndex}${audioSuffix}`;
     const cachedPath = path.join(CACHE_DIR, `${cacheKey}.mp4`);
 
     if (activeFFmpegProcesses.has(cacheKey)) {
@@ -985,21 +1341,10 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
 
     console.log('🎬 Transcodificación en tiempo real:', file.name);
 
-    try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
-    } catch (err) {
-      console.warn('Advertencia: waitForFileOnDisk falló antes de ffprobe:', err.message);
-    }
+    const useTorrentStream = file.downloaded < file.length;
+    const inputStream = useTorrentStream ? file.createReadStream() : null;
 
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) {
-        console.error('❌ Error al obtener metadata:', err.message);
-        return res.status(500).send('Error al analizar video');
-      }
-
-      const duration = metadata.format.duration;
-      console.log(`📹 Duración: ${Math.floor(duration / 60)}m ${Math.floor(duration % 60)}s`);
-
+    const startTranscode = () => {
       res.writeHead(200, {
         'Content-Type': 'video/mp4',
         'Transfer-Encoding': 'chunked',
@@ -1009,7 +1354,9 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
 
       transcodedCache.set(cacheKey, 'transcoding');
 
-      const ffmpegCommand = ffmpeg(filePath)
+      const mapOptions = forceTranscode ? ['-map', '0:v:0', '-map', `0:${audioStreamIndex}?`] : [];
+
+      const ffmpegCommand = ffmpeg(inputStream || filePath)
         .videoCodec('libx264')
         .videoBitrate('2500k')
         .audioCodec('aac')
@@ -1017,6 +1364,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
         .audioChannels(2)
         .format('mp4')
         .outputOptions([
+          ...mapOptions,
           '-preset ultrafast',
           '-tune zerolatency',
           '-movflags frag_keyframe+empty_moov+default_base_moof',
@@ -1059,9 +1407,39 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
         try {
           ffmpegCommand.kill('SIGKILL');
         } catch (_) {}
+        try {
+          if (inputStream) inputStream.destroy();
+        } catch (_) {}
         transcodedCache.delete(cacheKey);
         activeFFmpegProcesses.delete(cacheKey);
       });
+    };
+
+    if (useTorrentStream) {
+      console.log('📡 Transcodificando desde stream de torrent (secuencial)');
+      startTranscode();
+      return;
+    }
+
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de ffprobe:', err.message);
+    }
+
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) {
+        console.warn('⚠️ Error al obtener metadata, continuando:', err.message);
+        startTranscode();
+        return;
+      }
+
+      const duration = metadata.format.duration;
+      if (duration) {
+        console.log(`📹 Duración: ${Math.floor(duration / 60)}m ${Math.floor(duration % 60)}s`);
+      }
+
+      startTranscode();
     });
 
     return;
@@ -1334,15 +1712,40 @@ app.post('/api/quick-switch', async (req, res) => {
   console.log('⚡ Quick-switch solicitado');
 
   try {
+    const rawSession = req?.body?.sessionId;
+    const sessionId = Number(rawSession);
+    if (Number.isFinite(sessionId)) {
+      if (sessionId < latestQuickSwitchSession) {
+        console.log(
+          '⚠️ Quick-switch ignorado por sesión antigua:',
+          sessionId,
+          '(latest=',
+          latestQuickSwitchSession,
+          ')'
+        );
+        return res.json({
+          success: true,
+          skipped: true,
+          time: Date.now() - startTime,
+          reason: 'stale-session',
+        });
+      }
+      latestQuickSwitchSession = sessionId;
+    }
+
     // 1. Abortar búsquedas activas inmediatamente
     for (const ctrl of Array.from(activeSearchControllers)) {
-      try { ctrl.abort(); } catch (_) {}
+      try {
+        ctrl.abort();
+      } catch (_) {}
       activeSearchControllers.delete(ctrl);
     }
 
     // 2. Matar todos los procesos FFmpeg
     for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try { proc.kill && proc.kill('SIGKILL'); } catch (_) {}
+      try {
+        proc.kill && proc.kill('SIGKILL');
+      } catch (_) {}
       activeFFmpegProcesses.delete(key);
       transcodedCache.delete(key);
     }
@@ -1350,7 +1753,9 @@ app.post('/api/quick-switch', async (req, res) => {
     // 3. Cerrar streams HTTP activos (sin esperar)
     for (const [infoHash, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
       for (const r of Array.from(resSet)) {
-        try { r.destroy && r.destroy(); } catch (_) {}
+        try {
+          r.destroy && r.destroy();
+        } catch (_) {}
       }
     }
     activeResponsesByInfoHash.clear();
@@ -1369,6 +1774,7 @@ app.post('/api/quick-switch', async (req, res) => {
 
     // 5. Limpiar caches de subtítulos
     embeddedSubtitlesCache.clear();
+    embeddedAudioTracksCache.clear();
     pendingDestroy.clear();
 
     console.log(`⚡ Quick-switch completado en ${Date.now() - startTime}ms`);
@@ -1387,15 +1793,40 @@ app.post('/api/reset-state', async (req, res) => {
   console.log('🔁 Reset completo solicitado');
 
   try {
+    const rawSession = req?.body?.sessionId;
+    const sessionId = Number(rawSession);
+    if (Number.isFinite(sessionId)) {
+      if (sessionId < latestQuickSwitchSession) {
+        console.log(
+          '⚠️ Reset ignorado por sesión antigua:',
+          sessionId,
+          '(latest=',
+          latestQuickSwitchSession,
+          ')'
+        );
+        return res.json({
+          success: true,
+          skipped: true,
+          time: Date.now() - startTime,
+          reason: 'stale-session',
+        });
+      }
+      latestQuickSwitchSession = sessionId;
+    }
+
     // 1. Abortar búsquedas
     for (const ctrl of Array.from(activeSearchControllers)) {
-      try { ctrl.abort(); } catch (_) {}
+      try {
+        ctrl.abort();
+      } catch (_) {}
       activeSearchControllers.delete(ctrl);
     }
 
     // 2. Matar FFmpeg
     for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try { proc.kill && proc.kill('SIGKILL'); } catch (_) {}
+      try {
+        proc.kill && proc.kill('SIGKILL');
+      } catch (_) {}
       activeFFmpegProcesses.delete(key);
       transcodedCache.delete(key);
     }
@@ -1403,7 +1834,9 @@ app.post('/api/reset-state', async (req, res) => {
     // 3. Cerrar streams
     for (const [, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
       for (const r of Array.from(resSet)) {
-        try { r.destroy && r.destroy(); } catch (_) {}
+        try {
+          r.destroy && r.destroy();
+        } catch (_) {}
       }
     }
     activeResponsesByInfoHash.clear();
@@ -1428,6 +1861,7 @@ app.post('/api/reset-state', async (req, res) => {
     // 5. Limpiar caches
     activeTorrents.clear();
     embeddedSubtitlesCache.clear();
+    embeddedAudioTracksCache.clear();
     transcodedCache.clear();
 
     console.log(`✅ Reset completo en ${Date.now() - startTime}ms`);
@@ -1435,7 +1869,9 @@ app.post('/api/reset-state', async (req, res) => {
   } catch (err) {
     console.error('Error en reset:', err);
     // Recrear cliente de todas formas
-    try { client = createWebTorrentClient(); } catch (_) {}
+    try {
+      client = createWebTorrentClient();
+    } catch (_) {}
     res.json({ success: true, time: Date.now() - startTime });
   }
 });

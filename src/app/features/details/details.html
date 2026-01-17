@@ -1,27 +1,123 @@
 <div class="page" *ngIf="!loading(); else loadingTpl">
-  <p class="error" *ngIf="error()">{{ error() }}</p>
+  <mat-card *ngIf="error()" class="error-card" appearance="outlined">
+    <mat-card-title>
+      <mat-icon class="warn">error</mat-icon>
+      Error
+    </mat-card-title>
+    <mat-card-content>{{ error() }}</mat-card-content>
+  </mat-card>
 
   <ng-container *ngIf="!error() && item() as it">
-    <div class="hero">
-      <div class="bg" [style.backgroundImage]="'url(' + backdrop() + ')'"></div>
-      <div class="overlay"></div>
+    <mat-card class="hero-card" appearance="outlined">
+      <div class="hero">
+        <div class="hero-bg" [style.backgroundImage]="'url(' + backdrop() + ')'"></div>
+        <div class="hero-overlay"></div>
+        <div class="hero-content">
+          <div class="poster-wrap">
+            <img class="poster" [src]="poster()" [alt]="title()" />
+          </div>
 
-      <div class="content">
-        <img class="poster" [src]="poster()" [alt]="title()" />
-        <div class="meta">
-          <h1>{{ title() }}</h1>
-          <p class="overview">{{ overview() }}</p>
+          <div class="meta">
+            <div class="eyebrow">{{ mediaLabel() }}</div>
+            <h1>{{ title() }}</h1>
 
-          <div class="actions">
-            <button class="primary" type="button" (click)="play()">Reproducir</button>
-            <button class="secondary" type="button">Mi lista</button>
+            <div class="subline">
+              <span *ngIf="year()">{{ year() }}</span>
+              <span class="dot" *ngIf="year() && runtimeLabel()">•</span>
+              <span *ngIf="runtimeLabel()">{{ runtimeLabel() }}</span>
+              <span class="dot" *ngIf="(year() || runtimeLabel()) && rating()">•</span>
+              <span *ngIf="rating()">{{ rating() }} / 10</span>
+              <span class="votes" *ngIf="votesLabel()">{{ votesLabel() }} votos</span>
+            </div>
+
+            <p class="tagline" *ngIf="it.tagline">{{ it.tagline }}</p>
+            <p class="overview">{{ overview() || 'Sin sinopsis disponible.' }}</p>
+
+            <div class="chips" *ngIf="genres().length">
+              <span class="chip" *ngFor="let g of genres()">{{ g }}</span>
+            </div>
+
+            <div class="actions">
+              <button mat-raised-button color="primary" type="button" (click)="play()">
+                <mat-icon>play_arrow</mat-icon>
+                Reproducir
+              </button>
+              <button mat-stroked-button type="button">
+                <mat-icon>add</mat-icon>
+                Mi lista
+              </button>
+            </div>
           </div>
         </div>
       </div>
+    </mat-card>
+
+    <div class="details-grid">
+      <mat-card class="details-card" appearance="outlined">
+        <div class="card-title">Ficha técnica</div>
+        <div class="facts">
+          <div class="fact">
+            <div class="label">Estreno</div>
+            <div class="value">{{ releaseDateLabel() }}</div>
+          </div>
+          <div class="fact">
+            <div class="label">Duración</div>
+            <div class="value">{{ runtimeLabel() || '—' }}</div>
+          </div>
+          <div class="fact">
+            <div class="label">Estado</div>
+            <div class="value">{{ statusLabel() }}</div>
+          </div>
+          <div class="fact" *ngIf="seasonsLabel()">
+            <div class="label">Temporadas</div>
+            <div class="value">{{ seasonsLabel() }}</div>
+          </div>
+          <div class="fact" *ngIf="episodesLabel()">
+            <div class="label">Episodios</div>
+            <div class="value">{{ episodesLabel() }}</div>
+          </div>
+          <div class="fact">
+            <div class="label">Idioma original</div>
+            <div class="value">{{ languageLabel() }}</div>
+          </div>
+        </div>
+      </mat-card>
+
+      <mat-card class="details-card" appearance="outlined">
+        <div class="card-title">Producción</div>
+        <div class="facts">
+          <div class="fact">
+            <div class="label">Países</div>
+            <div class="value">{{ countriesLabel() }}</div>
+          </div>
+          <div class="fact">
+            <div class="label">Estudios</div>
+            <div class="value">{{ companiesLabel() }}</div>
+          </div>
+          <div class="fact">
+            <div class="label">Presupuesto</div>
+            <div class="value">{{ budgetLabel() }}</div>
+          </div>
+          <div class="fact">
+            <div class="label">Recaudación</div>
+            <div class="value">{{ revenueLabel() }}</div>
+          </div>
+          <div class="fact" *ngIf="homepageLabel()">
+            <div class="label">Sitio oficial</div>
+            <a class="value link" [href]="homepageLabel()" target="_blank" rel="noreferrer">
+              {{ homepageLabel() }}
+            </a>
+          </div>
+        </div>
+      </mat-card>
     </div>
   </ng-container>
 </div>
 
 <ng-template #loadingTpl>
-  <div class="page"><p>Cargando…</p></div>
+  <div class="page loading">
+    <mat-card class="loading-card" appearance="outlined">
+      <mat-card-content>Cargando…</mat-card-content>
+    </mat-card>
+  </div>
 </ng-template>

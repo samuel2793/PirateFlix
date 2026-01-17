@@ -1,6 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { MatCardModule } from '@angular/material/card';
+import { MatButtonModule } from '@angular/material/button';
+import { MatIconModule } from '@angular/material/icon';
 import { TmdbService } from '../../core/services/tmdb';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -10,7 +13,7 @@ type MediaType = 'movie' | 'tv';
 @Component({
   selector: 'app-details',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, MatCardModule, MatButtonModule, MatIconModule],
   templateUrl: './details.html',
   styleUrl: './details.scss',
 })
@@ -50,16 +53,122 @@ export class DetailsComponent {
 
   poster() {
     const it = this.item();
-    return this.tmdb.posterUrl(it?.poster_path);
+    return this.tmdb.posterUrl(it?.poster_path) || 'assets/placeholder.png';
   }
 
   backdrop() {
     const it = this.item();
-    return this.tmdb.posterUrl(it?.backdrop_path);
+    return (
+      this.tmdb.posterUrl(it?.backdrop_path) ||
+      this.tmdb.posterUrl(it?.poster_path) ||
+      'assets/placeholder.png'
+    );
   }
 
   overview() {
     return this.item()?.overview ?? '';
+  }
+
+  mediaLabel() {
+    const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
+    if (type === 'tv') return 'Serie';
+    if (type === 'movie') return 'Película';
+    return 'Título';
+  }
+
+  year() {
+    const it = this.item();
+    const date = it?.release_date ?? it?.first_air_date;
+    return typeof date === 'string' && date.length >= 4 ? date.slice(0, 4) : '';
+  }
+
+  rating() {
+    const v = this.item()?.vote_average;
+    return typeof v === 'number' && v > 0 ? v.toFixed(1) : '';
+  }
+
+  votesLabel() {
+    const v = this.item()?.vote_count;
+    if (typeof v !== 'number' || v <= 0) return '';
+    return new Intl.NumberFormat('es-ES').format(v);
+  }
+
+  runtimeLabel() {
+    const it = this.item();
+    let runtime: number | null = null;
+
+    if (typeof it?.runtime === 'number') {
+      runtime = it.runtime;
+    } else if (Array.isArray(it?.episode_run_time)) {
+      runtime = it.episode_run_time.find((n: any) => typeof n === 'number' && n > 0) ?? null;
+    }
+
+    if (!runtime) return '';
+    const hours = Math.floor(runtime / 60);
+    const minutes = runtime % 60;
+    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+
+  genres() {
+    const it = this.item();
+    if (!Array.isArray(it?.genres)) return [];
+    return it.genres.map((g: any) => g?.name).filter(Boolean);
+  }
+
+  releaseDateLabel() {
+    const it = this.item();
+    return this.formatDate(it?.release_date ?? it?.first_air_date);
+  }
+
+  statusLabel() {
+    return this.item()?.status ?? '—';
+  }
+
+  languageLabel() {
+    const code = this.item()?.original_language;
+    return code ? String(code).toUpperCase() : '—';
+  }
+
+  seasonsLabel() {
+    const n = this.item()?.number_of_seasons;
+    return Number.isFinite(n) ? String(n) : '';
+  }
+
+  episodesLabel() {
+    const n = this.item()?.number_of_episodes;
+    return Number.isFinite(n) ? String(n) : '';
+  }
+
+  countriesLabel() {
+    const it = this.item();
+    const countries = Array.isArray(it?.production_countries)
+      ? it.production_countries.map((c: any) => c?.name).filter(Boolean)
+      : [];
+    const origin = Array.isArray(it?.origin_country)
+      ? it.origin_country.map((c: any) => c).filter(Boolean)
+      : [];
+    const list = countries.length ? countries : origin;
+    return list.length ? list.join(', ') : '—';
+  }
+
+  companiesLabel() {
+    const it = this.item();
+    const companies = Array.isArray(it?.production_companies)
+      ? it.production_companies.map((c: any) => c?.name).filter(Boolean)
+      : [];
+    return companies.length ? companies.slice(0, 4).join(', ') : '—';
+  }
+
+  budgetLabel() {
+    return this.formatCurrency(this.item()?.budget);
+  }
+
+  revenueLabel() {
+    return this.formatCurrency(this.item()?.revenue);
+  }
+
+  homepageLabel() {
+    return this.item()?.homepage ?? '';
   }
 
   play() {
@@ -68,5 +177,25 @@ export class DetailsComponent {
       this.route.snapshot.paramMap.get('type'),
       this.route.snapshot.paramMap.get('id'),
     ]);
+  }
+
+  private formatDate(value: string | null | undefined) {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return new Intl.DateTimeFormat('es-ES', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(parsed);
+  }
+
+  private formatCurrency(value: number | null | undefined) {
+    if (typeof value !== 'number' || value <= 0) return '—';
+    return new Intl.NumberFormat('es-ES', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(value);
   }
 }

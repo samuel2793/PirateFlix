@@ -16,6 +16,7 @@
   left: 12px;
   display: flex;
   gap: 8px;
+  align-items: center;
   z-index: 10;
 }
 
@@ -26,6 +27,31 @@
   padding: 8px 10px;
   border-radius: 10px;
   font-weight: 600;
+}
+
+.audio-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 6px 10px;
+  border-radius: 10px;
+
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    opacity: 0.9;
+  }
+
+  select {
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
 }
 
 .loading-overlay {
