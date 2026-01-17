@@ -8,6 +8,14 @@ import { firstValueFrom } from 'rxjs';
 
 type MediaType = 'movie' | 'tv';
 
+const NO_COMPATIBLE_VIDEO_CODE = 'NO_COMPATIBLE_VIDEO';
+
+function buildNoCompatibleVideoError(): Error {
+  const error = new Error(NO_COMPATIBLE_VIDEO_CODE);
+  (error as any).code = NO_COMPATIBLE_VIDEO_CODE;
+  return error;
+}
+
 interface TorrentFile {
   index: number;
   name: string;
@@ -49,6 +57,10 @@ interface TorrentInfo {
   progress?: number;
   downloadSpeed?: number;
   numPeers?: number;
+}
+
+interface LoadMagnetOptions {
+  throwOnError?: boolean;
 }
 
 @Component({
@@ -206,256 +218,353 @@ export class PlayerComponent implements OnDestroy {
 
       const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
 
-      const searchStartTime = Date.now();
-      const overallTimeoutMs = 35000;
-      let timedOut = false;
-      let didSearch = false;
-      const cacheKey = `${type}:${id}`;
-      const cachedSearch = PlayerComponent.searchCache.get(cacheKey);
-      const cacheFresh =
-        cachedSearch && Date.now() - cachedSearch.ts < PlayerComponent.SEARCH_CACHE_TTL_MS;
+      const categoriesToTry = [207, 200, 0];
+      let anyTimedOut = false;
+      let lastCategoryError: any = null;
 
-      const aggregatedResults: any[] = [];
-      const seenMagnets = new Set<string>();
-      let sawSeeded = false;
-      let attempts = 0;
-      const maxAttempts = searchQueries.length; // Limitar intentos para evitar timeouts múltiples
+      const attemptCategory = async (category: number) => {
+        const searchStartTime = Date.now();
+        const overallTimeoutMs = 35000;
+        let timedOut = false;
+        let didSearch = false;
+        const cacheKey = `${type}:${id}:${category}`;
+        const cachedSearch = PlayerComponent.searchCache.get(cacheKey);
+        const cacheFresh =
+          cachedSearch && Date.now() - cachedSearch.ts < PlayerComponent.SEARCH_CACHE_TTL_MS;
 
-      const mergeResults = (results: any) => {
-        for (const torrent of results.results || []) {
-          const key = torrent.magnetLink || torrent.name;
-          if (key && !seenMagnets.has(key)) {
-            seenMagnets.add(key);
-            aggregatedResults.push(torrent);
+        const aggregatedResults: any[] = [];
+        const seenMagnets = new Set<string>();
+        let sawSeeded = false;
+        let attempts = 0;
+        const maxAttempts = searchQueries.length;
+
+        const mergeResults = (results: any) => {
+          for (const torrent of results.results || []) {
+            const key = torrent.magnetLink || torrent.name;
+            if (key && !seenMagnets.has(key)) {
+              seenMagnets.add(key);
+              aggregatedResults.push(torrent);
+            }
           }
+        };
+
+        if (cacheFresh && cachedSearch) {
+          console.log('✅ Usando resultados en cache para esta película');
+          aggregatedResults.push(...cachedSearch.results);
+          sawSeeded = cachedSearch.sawSeeded;
         }
-      };
 
-      if (cacheFresh && cachedSearch) {
-        console.log('✅ Usando resultados en cache para esta película');
-        aggregatedResults.push(...cachedSearch.results);
-        sawSeeded = cachedSearch.sawSeeded;
-      }
-
-      for (const searchQuery of searchQueries) {
-        if (cacheFresh) break;
-        if (!this.isSessionActive(sessionId)) return;
-        if (Date.now() - searchStartTime > overallTimeoutMs) {
-          if (aggregatedResults.length > 0) {
-            console.warn('⚠️ Timeout global alcanzado, usando resultados parciales');
+        for (const searchQuery of searchQueries) {
+          if (cacheFresh) break;
+          if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+          if (Date.now() - searchStartTime > overallTimeoutMs) {
+            if (aggregatedResults.length > 0) {
+              console.warn('⚠️ Timeout global alcanzado, usando resultados parciales');
+              break;
+            }
+            timedOut = true;
             break;
           }
-          timedOut = true;
-          break;
-        }
-        if (attempts >= maxAttempts) {
-          console.log('⚠️ Alcanzado límite de intentos de búsqueda');
-          break;
-        }
+          if (attempts >= maxAttempts) {
+            console.log('⚠️ Alcanzado límite de intentos de búsqueda');
+            break;
+          }
 
-        attempts++;
-        console.log(`Intentando búsqueda ${attempts}/${maxAttempts}: ${searchQuery}`);
+          attempts++;
+          console.log(`Intentando búsqueda ${attempts}/${maxAttempts}: ${searchQuery}`);
 
-        try {
-          didSearch = true;
-          const searchResponse = await fetch(
-            `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=207`,
-            { signal: searchSignal }
-          );
+          try {
+            didSearch = true;
+            const searchResponse = await fetch(
+              `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=${category}`,
+              { signal: searchSignal }
+            );
 
-          if (!this.isSessionActive(sessionId)) return;
-          if (!searchResponse.ok) {
-            console.log(`❌ Error HTTP ${searchResponse.status}`);
-            if (searchResponse.status === 504) {
-              if (aggregatedResults.length > 0) {
-                console.warn('⚠️ Timeout en búsqueda, usando resultados parciales');
+            if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+            if (!searchResponse.ok) {
+              console.log(`❌ Error HTTP ${searchResponse.status}`);
+              if (searchResponse.status === 504) {
+                if (aggregatedResults.length > 0) {
+                  console.warn('⚠️ Timeout en búsqueda, usando resultados parciales');
+                  break;
+                }
+                timedOut = true;
                 break;
               }
-              timedOut = true;
-              break;
+              continue;
             }
+
+            const results = await searchResponse.json();
+            if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+
+            if (results.results && results.results.length > 0) {
+              mergeResults(results);
+
+              const hasSeeders = results.results.some((t: any) => getSeeders(t) > 0);
+              if (hasSeeders) {
+                sawSeeded = true;
+                console.log(
+                  `✓ Encontrados ${results.results.length} torrents con seeders: ${searchQuery}`
+                );
+              } else {
+                console.log(
+                  `⚠️ Resultados sin seeders para: ${searchQuery} (probando menos restrictivo)`
+                );
+              }
+            }
+          } catch (fetchError: any) {
+            if (searchSignal.aborted || fetchError?.name === 'AbortError')
+              return { status: 'aborted' };
+            console.error(`❌ Error en búsqueda: ${fetchError}`);
             continue;
           }
+        }
 
-          const results = await searchResponse.json();
-          if (!this.isSessionActive(sessionId)) return;
+        if (aggregatedResults.length === 0 && cachedSearch && !cacheFresh) {
+          console.warn('⚠️ Usando cache expirado por timeout');
+          aggregatedResults.push(...cachedSearch.results);
+          sawSeeded = cachedSearch.sawSeeded;
+        }
 
-          if (results.results && results.results.length > 0) {
-            mergeResults(results);
-
-            const hasSeeders = results.results.some((t: any) => getSeeders(t) > 0);
-            if (hasSeeders) {
-              sawSeeded = true;
-              console.log(
-                `✓ Encontrados ${results.results.length} torrents con seeders: ${searchQuery}`
-              );
-              break;
-            } else {
-              console.log(
-                `⚠️ Resultados sin seeders para: ${searchQuery} (probando menos restrictivo)`
-              );
-            }
+        if (aggregatedResults.length === 0) {
+          if (timedOut) {
+            return { status: 'timeout' };
           }
-        } catch (fetchError: any) {
-          if (searchSignal.aborted || fetchError?.name === 'AbortError') return;
-          console.error(`❌ Error en búsqueda: ${fetchError}`);
-          continue;
+          return { status: 'no-results' };
         }
-      }
 
-      if (aggregatedResults.length === 0 && cachedSearch && !cacheFresh) {
-        console.warn('⚠️ Usando cache expirado por timeout');
-        aggregatedResults.push(...cachedSearch.results);
-        sawSeeded = cachedSearch.sawSeeded;
-      }
-
-      if (aggregatedResults.length === 0) {
-        if (timedOut) {
-          throw new Error('timeout');
+        if (!sawSeeded) {
+          console.warn('⚠️ No se encontraron torrents con seeders, usando el mejor disponible');
         }
-        throw new Error('No se encontraron torrents para esta película');
-      }
 
-      if (!sawSeeded) {
-        console.warn('⚠️ No se encontraron torrents con seeders, usando el mejor disponible');
-      }
+        // Preferir torrents con formatos compatibles con navegadores
+        const torrents = aggregatedResults;
 
-      // Preferir torrents con formatos compatibles con navegadores
-      const torrents = aggregatedResults;
+        if (didSearch || !cacheFresh) {
+          PlayerComponent.searchCache.set(cacheKey, {
+            ts: Date.now(),
+            results: torrents,
+            sawSeeded,
+          });
+        }
 
-      if (didSearch || !cacheFresh) {
-        PlayerComponent.searchCache.set(cacheKey, {
-          ts: Date.now(),
-          results: torrents,
-          sawSeeded,
+        console.log(`📋 Torrents disponibles (cat ${category}):`);
+        torrents.forEach((t: any, i: number) => {
+          console.log(`  ${i + 1}. ${t.name}`);
         });
-      }
 
-      console.log(`📋 Torrents disponibles:`);
-      torrents.forEach((t: any, i: number) => {
-        console.log(`  ${i + 1}. ${t.name}`);
-      });
+        const sortBySeeders = (list: any[]) =>
+          list
+            .slice()
+            .sort(
+              (a, b) =>
+                getSeeders(b) - getSeeders(a) ||
+                (Number(b?.leechers) || 0) - (Number(a?.leechers) || 0)
+            );
 
-      const sortBySeeders = (list: any[]) =>
-        list
-          .slice()
-          .sort(
-            (a, b) =>
-              getSeeders(b) - getSeeders(a) ||
-              (Number(b?.leechers) || 0) - (Number(a?.leechers) || 0)
+        const minSeedersPreferred = 2;
+        const strongSeededTorrents = torrents.filter(
+          (t: any) => getSeeders(t) >= minSeedersPreferred
+        );
+        const unknownSeededTorrents = torrents.filter((t: any) => getSeeders(t) === 0);
+
+        let candidateTorrents =
+          strongSeededTorrents.length > 0 ? strongSeededTorrents : torrents;
+
+        if (strongSeededTorrents.length === 0) {
+          if (unknownSeededTorrents.length > 0) {
+            console.warn(
+              `⚠️ Seeders muy bajos (<${minSeedersPreferred}); probando torrents con seeders desconocidos`
+            );
+            candidateTorrents = unknownSeededTorrents;
+          } else {
+            console.warn('⚠️ No hay torrents con seeders suficientes, usando el mejor disponible');
+          }
+        }
+
+        // Filtros en orden de preferencia:
+        // 1. YTS (siempre H.264 MP4 con audio AAC)
+        // 2. WEB-DL/WEBRip H.264 de calidad
+        // 3. Cualquier H.264 de calidad
+        // 4. Lo que sea (probablemente no funcionará)
+        const ytsTorrents = sortBySeeders(
+          candidateTorrents.filter((t: any) => t.name.toLowerCase().includes('yts'))
+        );
+
+        const lowQuality = (name: string) => {
+          const lower = name.toLowerCase();
+          // Formatos de baja calidad (grabaciones de cine, etc)
+          return (
+            lower.includes('ts ') || // TeleSync
+            lower.includes('cam') || // CAMRip
+            lower.includes('hdcam') ||
+            lower.includes('tc ') || // TeleCine
+            lower.includes('hdtc') ||
+            lower.includes('r5') ||
+            lower.includes('screener')
           );
+        };
 
-      const minSeedersPreferred = 2;
-      const strongSeededTorrents = torrents.filter((t: any) => getSeeders(t) >= minSeedersPreferred);
-      const unknownSeededTorrents = torrents.filter((t: any) => getSeeders(t) === 0);
-
-      let candidateTorrents =
-        strongSeededTorrents.length > 0 ? strongSeededTorrents : torrents;
-
-      if (strongSeededTorrents.length === 0) {
-        if (unknownSeededTorrents.length > 0) {
-          console.warn(
-            `⚠️ Seeders muy bajos (<${minSeedersPreferred}); probando torrents con seeders desconocidos`
+        const incompatibleCodec = (name: string) => {
+          const lower = name.toLowerCase();
+          // Video codecs no soportados por navegadores
+          return (
+            lower.includes('hevc') ||
+            lower.includes('x265') ||
+            lower.includes('h.265') ||
+            lower.includes('h265') ||
+            lower.includes('av1')
           );
-          candidateTorrents = unknownSeededTorrents;
+        };
+
+        const incompatibleAudio = (name: string) => {
+          const lower = name.toLowerCase();
+          return (
+            lower.includes('atmos') ||
+            lower.includes('ddp') ||
+            lower.includes('dd+') ||
+            lower.includes('eac3') ||
+            lower.includes('truehd')
+          );
+        };
+
+        // Torrents con codecs compatibles (H.264/x264) y calidad decente
+        const h264Quality = candidateTorrents.filter(
+          (t: any) => !incompatibleCodec(t.name) && !lowQuality(t.name)
+        );
+
+        // Torrents con audio compatible
+        const h264QualityGoodAudio = sortBySeeders(
+          h264Quality.filter((t: any) => !incompatibleAudio(t.name))
+        );
+        const h264QualitySorted = sortBySeeders(h264Quality);
+
+        // Fallback: cualquier H.264 aunque sea baja calidad
+        const h264Any = sortBySeeders(
+          candidateTorrents.filter((t: any) => !incompatibleCodec(t.name))
+        );
+
+        const bestTorrent =
+          ytsTorrents.length > 0
+            ? ytsTorrents[0]
+            : h264QualityGoodAudio.length > 0
+            ? h264QualityGoodAudio[0]
+            : h264QualitySorted.length > 0
+            ? h264QualitySorted[0]
+            : h264Any.length > 0
+            ? h264Any[0]
+            : candidateTorrents[0];
+
+        if (ytsTorrents.length > 0) {
+          console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);
+        } else if (h264QualityGoodAudio.length > 0 && h264QualityGoodAudio[0] === bestTorrent) {
+          console.log(`✅ Seleccionado H.264 de calidad con audio compatible`);
+        } else if (h264Quality.length > 0 && h264Quality[0] === bestTorrent) {
+          console.log(`⚠️ H.264 de calidad pero con audio avanzado (video OK, audio puede fallar)`);
+        } else if (h264Any.length > 0 && h264Any[0] === bestTorrent) {
+          console.log(`⚠️ H.264 pero BAJA CALIDAD (TS/CAM)`);
         } else {
-          console.warn('⚠️ No hay torrents con seeders suficientes, usando el mejor disponible');
+          console.log(`❌ ADVERTENCIA: Video HEVC/x265 - NO compatible con navegadores`);
+          console.log(`   El video NO se verá. Busca manualmente un torrent con H.264 o x264`);
+        }
+        console.log(`Torrent seleccionado: ${bestTorrent.name}`);
+        console.log(`Seeders: ${bestTorrent.seeders}, Tamaño: ${bestTorrent.size}`);
+
+        // Mostrar fase de streaming
+        this.loadingPhase.set('streaming');
+        // Cargar el magnet link (con fallback si no hay video compatible)
+        if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+
+        const orderedCandidates: any[] = [];
+        const seenCandidates = new Set<string>();
+        const pushUnique = (list: any[]) => {
+          for (const torrent of list) {
+            const key = torrent?.magnetLink || torrent?.name;
+            if (!key || seenCandidates.has(key)) continue;
+            seenCandidates.add(key);
+            orderedCandidates.push(torrent);
+          }
+        };
+
+        pushUnique([bestTorrent]);
+        pushUnique(ytsTorrents);
+        pushUnique(h264QualityGoodAudio);
+        pushUnique(h264QualitySorted);
+        pushUnique(h264Any);
+        pushUnique(sortBySeeders(candidateTorrents));
+
+        let lastError: any = null;
+        let sawNoCompatible = false;
+        let loadedAny = false;
+
+        for (let i = 0; i < orderedCandidates.length; i++) {
+          const candidate = orderedCandidates[i];
+          if (!candidate?.magnetLink) continue;
+          if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+
+          console.log(`🎯 Probando torrent ${i + 1}/${orderedCandidates.length}: ${candidate.name}`);
+          try {
+            const loaded = await this.loadMagnetLink(candidate.magnetLink, sessionId, {
+              throwOnError: true,
+            });
+            if (loaded) {
+              lastError = null;
+              loadedAny = true;
+              break;
+            }
+          } catch (error: any) {
+            if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+            if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
+              sawNoCompatible = true;
+              console.warn('⚠️ Torrent incompatible (ISO/BDMV), probando otro:', candidate.name);
+              continue;
+            } else {
+              lastError = error;
+            }
+            console.warn('⚠️ Error al cargar torrent, intentando otro:', error);
+          }
+        }
+
+        if (!loadedAny) {
+          if (lastError) {
+            return { status: 'error', error: lastError };
+          }
+          if (sawNoCompatible) {
+            PlayerComponent.searchCache.delete(cacheKey);
+            return { status: 'incompatible' };
+          }
+          return { status: 'no-results' };
+        }
+
+        return { status: 'loaded' };
+      };
+
+      for (const category of categoriesToTry) {
+        if (!this.isSessionActive(sessionId)) return;
+        console.log(`🔎 Buscando en categoría ${category}...`);
+        const result = await attemptCategory(category);
+        if (result.status === 'aborted') {
+          return;
+        }
+        if (result.status === 'loaded') {
+          return;
+        }
+        if (result.status === 'error') {
+          lastCategoryError = result.error;
+          break;
+        }
+        if (result.status === 'timeout') {
+          anyTimedOut = true;
         }
       }
 
-      // Filtros en orden de preferencia:
-      // 1. YTS (siempre H.264 MP4 con audio AAC)
-      // 2. WEB-DL/WEBRip H.264 de calidad
-      // 3. Cualquier H.264 de calidad
-      // 4. Lo que sea (probablemente no funcionará)
-      const ytsTorrents = sortBySeeders(
-        candidateTorrents.filter((t: any) => t.name.toLowerCase().includes('yts'))
-      );
-
-      const lowQuality = (name: string) => {
-        const lower = name.toLowerCase();
-        // Formatos de baja calidad (grabaciones de cine, etc)
-        return (
-          lower.includes('ts ') || // TeleSync
-          lower.includes('cam') || // CAMRip
-          lower.includes('hdcam') ||
-          lower.includes('tc ') || // TeleCine
-          lower.includes('hdtc') ||
-          lower.includes('r5') ||
-          lower.includes('screener')
-        );
-      };
-
-      const incompatibleCodec = (name: string) => {
-        const lower = name.toLowerCase();
-        // Video codecs no soportados por navegadores
-        return (
-          lower.includes('hevc') ||
-          lower.includes('x265') ||
-          lower.includes('h.265') ||
-          lower.includes('h265') ||
-          lower.includes('av1')
-        );
-      };
-
-      const incompatibleAudio = (name: string) => {
-        const lower = name.toLowerCase();
-        return (
-          lower.includes('atmos') ||
-          lower.includes('ddp') ||
-          lower.includes('dd+') ||
-          lower.includes('eac3') ||
-          lower.includes('truehd')
-        );
-      };
-
-      // Torrents con codecs compatibles (H.264/x264) y calidad decente
-      const h264Quality = candidateTorrents.filter(
-        (t: any) => !incompatibleCodec(t.name) && !lowQuality(t.name)
-      );
-
-      // Torrents con audio compatible
-      const h264QualityGoodAudio = sortBySeeders(
-        h264Quality.filter((t: any) => !incompatibleAudio(t.name))
-      );
-      const h264QualitySorted = sortBySeeders(h264Quality);
-
-      // Fallback: cualquier H.264 aunque sea baja calidad
-      const h264Any = sortBySeeders(
-        candidateTorrents.filter((t: any) => !incompatibleCodec(t.name))
-      );
-
-      const bestTorrent =
-        ytsTorrents.length > 0
-          ? ytsTorrents[0]
-          : h264QualityGoodAudio.length > 0
-          ? h264QualityGoodAudio[0]
-          : h264QualitySorted.length > 0
-          ? h264QualitySorted[0]
-          : h264Any.length > 0
-          ? h264Any[0]
-          : candidateTorrents[0];
-
-      if (ytsTorrents.length > 0) {
-        console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);
-      } else if (h264QualityGoodAudio.length > 0 && h264QualityGoodAudio[0] === bestTorrent) {
-        console.log(`✅ Seleccionado H.264 de calidad con audio compatible`);
-      } else if (h264Quality.length > 0 && h264Quality[0] === bestTorrent) {
-        console.log(`⚠️ H.264 de calidad pero con audio avanzado (video OK, audio puede fallar)`);
-      } else if (h264Any.length > 0 && h264Any[0] === bestTorrent) {
-        console.log(`⚠️ H.264 pero BAJA CALIDAD (TS/CAM)`);
-      } else {
-        console.log(`❌ ADVERTENCIA: Video HEVC/x265 - NO compatible con navegadores`);
-        console.log(`   El video NO se verá. Busca manualmente un torrent con H.264 o x264`);
+      if (lastCategoryError) {
+        throw lastCategoryError;
       }
-      console.log(`Torrent seleccionado: ${bestTorrent.name}`);
-      console.log(`Seeders: ${bestTorrent.seeders}, Tamaño: ${bestTorrent.size}`);
-
-      // Mostrar fase de streaming
-      this.loadingPhase.set('streaming');
-      // Cargar el magnet link
-      if (!this.isSessionActive(sessionId)) return;
-      await this.loadMagnetLink(bestTorrent.magnetLink, sessionId);
+      if (anyTimedOut) {
+        throw new Error('timeout');
+      }
+      throw new Error('No se encontraron torrents para esta película');
     } catch (error: any) {
       if (searchSignal.aborted || !this.isSessionActive(sessionId)) return;
       console.error('Error al buscar torrent:', error);
@@ -466,6 +575,9 @@ export class PlayerComponent implements OnDestroy {
         errorMsg = 'No se encontraron torrents disponibles';
       } else if (error.message?.includes('timeout')) {
         errorMsg = 'La búsqueda tardó demasiado (timeout)';
+      } else if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
+        errorMsg =
+          'El torrent encontrado no contiene un archivo de vídeo compatible (ISO/BDMV).';
       }
 
       this.errorMessage.set(errorMsg);
@@ -571,8 +683,13 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
-  async loadMagnetLink(magnetUri: string, sessionId: number = this.playbackSession) {
-    if (!this.isSessionActive(sessionId)) return;
+  async loadMagnetLink(
+    magnetUri: string,
+    sessionId: number = this.playbackSession,
+    options: LoadMagnetOptions = {}
+  ): Promise<boolean> {
+    const throwOnError = options.throwOnError === true;
+    if (!this.isSessionActive(sessionId)) return false;
     this.loading.set(true);
     this.errorMessage.set('');
     this.showPlayer.set(true);
@@ -597,7 +714,7 @@ export class PlayerComponent implements OnDestroy {
       }
 
       const torrentInfo: TorrentInfo = await response.json();
-      if (!this.isSessionActive(sessionId)) return;
+      if (!this.isSessionActive(sessionId)) return false;
       this.currentTorrentHash = torrentInfo.infoHash;
 
       console.log('Torrent agregado:', torrentInfo.name);
@@ -616,6 +733,11 @@ export class PlayerComponent implements OnDestroy {
         );
       };
 
+      const isDiscImage = (name: string) => {
+        const ext = name.toLowerCase().split('.').pop();
+        return ['iso', 'img', 'bin', 'mdf', 'mds', 'cue'].includes(ext || '');
+      };
+
       const isLikelySample = (name: string) => {
         const lower = name.toLowerCase();
         return (
@@ -629,15 +751,21 @@ export class PlayerComponent implements OnDestroy {
         );
       };
 
-      const videoCandidates = torrentInfo.files.filter(isVideoFile);
+      const videoCandidates = torrentInfo.files.filter(
+        (file) => isVideoFile(file) && !isDiscImage(file.name)
+      );
       const filteredVideos = videoCandidates.filter((file) => !isLikelySample(file.name));
       const pickFrom = filteredVideos.length > 0 ? filteredVideos : videoCandidates;
 
-      const videoFile =
-        pickFrom.slice().sort((a, b) => b.length - a.length)[0] ||
-        torrentInfo.files.reduce((prev, current) =>
-          prev.length > current.length ? prev : current
-        );
+      if (pickFrom.length === 0) {
+        const hasDiscImage = torrentInfo.files.some((file) => isDiscImage(file.name));
+        if (hasDiscImage) {
+          console.warn('⚠️ Torrent contiene imagen de disco (ISO/IMG), no compatible con el navegador');
+        }
+        throw buildNoCompatibleVideoError();
+      }
+
+      const videoFile = pickFrom.slice().sort((a, b) => b.length - a.length)[0];
 
       if (!videoFile) {
         throw new Error('No se encontró archivo de video en el torrent');
@@ -680,7 +808,7 @@ export class PlayerComponent implements OnDestroy {
 
       if (embeddedResponse.ok) {
         const embeddedSubs: EmbeddedSubtitle[] = await embeddedResponse.json();
-        if (!this.isSessionActive(sessionId)) return;
+        if (!this.isSessionActive(sessionId)) return false;
         console.log('Subtítulos embebidos encontrados:', embeddedSubs.length);
 
           // Agregar subtítulos embebidos a la lista
@@ -723,13 +851,30 @@ export class PlayerComponent implements OnDestroy {
       // Iniciar monitoreo de progreso
       this.startProgressMonitoring();
 
-      if (!this.isSessionActive(sessionId)) return;
+      if (!this.isSessionActive(sessionId)) return false;
       this.loading.set(false);
+      return true;
     } catch (error: any) {
-      if (!this.isSessionActive(sessionId)) return;
+      if (!this.isSessionActive(sessionId)) return false;
+      const infoHash = this.currentTorrentHash;
+      this.currentTorrentHash = null;
+      this.currentVideoFileIndex = null;
+      if (infoHash) {
+        fetch(`${this.API_URL}/torrent/${infoHash}`, { method: 'DELETE' }).catch(() => {});
+      }
+      if (throwOnError) {
+        throw error;
+      }
       console.error('Error al cargar magnet link:', error);
-      this.errorMessage.set(`Error: ${error.message || 'Error desconocido'}`);
+      if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
+        this.errorMessage.set(
+          'El torrent no contiene un archivo de vídeo compatible (ISO/BDMV).'
+        );
+      } else {
+        this.errorMessage.set(`Error: ${error.message || 'Error desconocido'}`);
+      }
       this.loading.set(false);
+      return false;
     }
   }
 
