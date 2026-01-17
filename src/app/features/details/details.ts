@@ -33,6 +33,7 @@ export class DetailsComponent {
   loading = signal(true);
   error = signal<string | null>(null);
   item = signal<any | null>(null);
+  credits = signal<any | null>(null);
   preferMultiAudio = signal(false);
   preferSeekable = signal(false);
 
@@ -47,8 +48,12 @@ export class DetailsComponent {
         return;
       }
 
-      const data = await firstValueFrom(this.tmdb.details(type, id));
+      const [data, creditsData] = await Promise.all([
+        firstValueFrom(this.tmdb.details(type, id)),
+        firstValueFrom(this.tmdb.credits(type, id)),
+      ]);
       this.item.set(data);
+      this.credits.set(creditsData);
     } catch (e: any) {
       this.error.set(e?.message ?? String(e));
     } finally {
@@ -179,6 +184,40 @@ export class DetailsComponent {
 
   homepageLabel() {
     return this.item()?.homepage ?? '';
+  }
+
+  cast() {
+    const c = this.credits();
+    if (!Array.isArray(c?.cast)) return [];
+    return c.cast.slice(0, 12).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      character: p.character,
+      profile: this.tmdb.posterUrl(p.profile_path),
+    }));
+  }
+
+  directors() {
+    const c = this.credits();
+    if (!Array.isArray(c?.crew)) return [];
+    return c.crew
+      .filter((p: any) => p.job === 'Director')
+      .map((p: any) => p.name);
+  }
+
+  writers() {
+    const c = this.credits();
+    if (!Array.isArray(c?.crew)) return [];
+    return c.crew
+      .filter((p: any) => p.job === 'Screenplay' || p.job === 'Writer')
+      .slice(0, 3)
+      .map((p: any) => p.name);
+  }
+
+  creators() {
+    const it = this.item();
+    if (!Array.isArray(it?.created_by)) return [];
+    return it.created_by.map((p: any) => p.name);
   }
 
   play() {

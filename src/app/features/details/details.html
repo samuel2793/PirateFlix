@@ -74,10 +74,43 @@
       </div>
     </mat-card>
 
+    <!-- Cast & Crew Section -->
+    <mat-card class="cast-card" appearance="outlined" *ngIf="cast().length">
+      <div class="card-title">Reparto principal</div>
+      <div class="cast-grid">
+        <div class="cast-member" *ngFor="let person of cast()">
+          <div class="cast-photo-wrap">
+            <img
+              class="cast-photo"
+              [src]="person.profile || 'assets/placeholder.png'"
+              [alt]="person.name"
+              loading="lazy"
+            />
+          </div>
+          <div class="cast-info">
+            <div class="cast-name">{{ person.name }}</div>
+            <div class="cast-character" *ngIf="person.character">{{ person.character }}</div>
+          </div>
+        </div>
+      </div>
+    </mat-card>
+
     <div class="details-grid">
       <mat-card class="details-card" appearance="outlined">
         <div class="card-title">Ficha técnica</div>
         <div class="facts">
+          <div class="fact" *ngIf="directors().length">
+            <div class="label">{{ directors().length > 1 ? 'Directores' : 'Director' }}</div>
+            <div class="value">{{ directors().join(', ') }}</div>
+          </div>
+          <div class="fact" *ngIf="creators().length">
+            <div class="label">{{ creators().length > 1 ? 'Creadores' : 'Creador' }}</div>
+            <div class="value">{{ creators().join(', ') }}</div>
+          </div>
+          <div class="fact" *ngIf="writers().length">
+            <div class="label">{{ writers().length > 1 ? 'Guionistas' : 'Guionista' }}</div>
+            <div class="value">{{ writers().join(', ') }}</div>
+          </div>
           <div class="fact">
             <div class="label">Estreno</div>
             <div class="value">{{ releaseDateLabel() }}</div>
