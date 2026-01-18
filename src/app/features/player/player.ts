@@ -158,7 +158,9 @@ export class PlayerComponent implements OnDestroy {
   openSubtitlesLoading = signal<boolean>(false);
   openSubtitlesError = signal<string>('');
   openSubtitlesLanguages = signal<string>('es,en');
-  openSubtitlesIndex = signal<number>(0);
+  openSubtitlesLanguageOrder = signal<string[]>([]);
+  openSubtitlesLanguageIndices = signal<Record<string, number>>({});
+  openSubtitlesBuckets = signal<Record<string, OpenSubtitleResult[]>>({});
 
   private readonly API_URL = 'http://localhost:3001/api';
   private currentTorrentHash: string | null = null;
@@ -230,7 +232,9 @@ export class PlayerComponent implements OnDestroy {
     this.openSubtitlesResults.set([]);
     this.openSubtitlesError.set('');
     this.openSubtitlesLoading.set(false);
-    this.openSubtitlesIndex.set(0);
+    this.openSubtitlesLanguageOrder.set([]);
+    this.openSubtitlesLanguageIndices.set({});
+    this.openSubtitlesBuckets.set({});
     this.currentTorrentHash = null;
     this.currentVideoFileIndex = null;
 
@@ -915,7 +919,9 @@ export class PlayerComponent implements OnDestroy {
     this.selectedSubtitleTrack.set(-1);
     this.openSubtitlesResults.set([]);
     this.openSubtitlesError.set('');
-    this.openSubtitlesIndex.set(0);
+    this.openSubtitlesLanguageOrder.set([]);
+    this.openSubtitlesLanguageIndices.set({});
+    this.openSubtitlesBuckets.set({});
 
     try {
       console.log('Enviando torrent al backend:', magnetUri);
@@ -1280,23 +1286,38 @@ export class PlayerComponent implements OnDestroy {
     return Boolean(this.currentTitle);
   }
 
-  currentOpenSubtitleResult(): OpenSubtitleResult | null {
-    const results = this.openSubtitlesResults();
-    const idx = this.openSubtitlesIndex();
-    if (!results.length || idx < 0 || idx >= results.length) return null;
-    return results[idx];
+  currentOpenSubtitleResult(languageKey: string): OpenSubtitleResult | null {
+    const buckets = this.openSubtitlesBuckets();
+    const list = buckets[languageKey] || [];
+    const indices = this.openSubtitlesLanguageIndices();
+    const idx = indices[languageKey] ?? 0;
+    if (!list.length || idx < 0 || idx >= list.length) return null;
+    return list[idx];
   }
 
-  hasNextOpenSubtitle(): boolean {
-    return this.openSubtitlesIndex() + 1 < this.openSubtitlesResults().length;
+  hasNextOpenSubtitle(languageKey: string): boolean {
+    const buckets = this.openSubtitlesBuckets();
+    const list = buckets[languageKey] || [];
+    const indices = this.openSubtitlesLanguageIndices();
+    const idx = indices[languageKey] ?? 0;
+    return idx + 1 < list.length;
   }
 
-  pickNextOpenSubtitle() {
-    if (!this.hasNextOpenSubtitle()) {
-      this.openSubtitlesError.set('No hay más subtítulos para probar.');
+  pickNextOpenSubtitle(languageKey: string) {
+    const buckets = this.openSubtitlesBuckets();
+    const list = buckets[languageKey] || [];
+    const indices = { ...this.openSubtitlesLanguageIndices() };
+    const idx = indices[languageKey] ?? 0;
+    if (idx + 1 >= list.length) {
+      const label =
+        languageKey === 'all'
+          ? 'todos los idiomas'
+          : this.getLanguageName(languageKey);
+      this.openSubtitlesError.set(`No hay más subtítulos para ${label}.`);
       return;
     }
-    this.openSubtitlesIndex.set(this.openSubtitlesIndex() + 1);
+    indices[languageKey] = idx + 1;
+    this.openSubtitlesLanguageIndices.set(indices);
     this.openSubtitlesError.set('');
   }
 
@@ -1304,12 +1325,63 @@ export class PlayerComponent implements OnDestroy {
     this.openSubtitlesLanguages.set(value);
   }
 
-  private normalizeOpenSubtitlesLanguages(value: string) {
-    return value
+  private parseOpenSubtitlesLanguages(value: string) {
+    const parts = String(value || '')
       .split(',')
-      .map((lang) => lang.trim().toLowerCase())
-      .filter(Boolean)
-      .join(',');
+      .map((lang) => this.normalizeOpenSubtitlesLanguage(lang))
+      .filter(Boolean);
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const lang of parts) {
+      if (seen.has(lang)) continue;
+      seen.add(lang);
+      unique.push(lang);
+    }
+    return unique;
+  }
+
+  private normalizeOpenSubtitlesLanguage(value: string) {
+    return String(value || '').trim().toLowerCase().replace(/_/g, '-');
+  }
+
+  private matchesOpenSubtitlesLanguage(resultLang: string, queryLang: string) {
+    const normalizedResult = this.normalizeOpenSubtitlesLanguage(resultLang);
+    const normalizedQuery = this.normalizeOpenSubtitlesLanguage(queryLang);
+    if (!normalizedResult || !normalizedQuery) return false;
+    if (normalizedResult === normalizedQuery) return true;
+    const resultBase = normalizedResult.split('-')[0];
+    const queryBase = normalizedQuery.split('-')[0];
+    return (
+      resultBase === normalizedQuery ||
+      normalizedResult === queryBase ||
+      resultBase === queryBase
+    );
+  }
+
+  private buildOpenSubtitlesBuckets(
+    results: OpenSubtitleResult[],
+    languages: string[]
+  ): { buckets: Record<string, OpenSubtitleResult[]>; order: string[] } {
+    const sorted = results.slice().sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+    if (!languages.length) {
+      if (!sorted.length) return { buckets: {}, order: [] };
+      return { buckets: { all: sorted }, order: ['all'] };
+    }
+
+    const buckets: Record<string, OpenSubtitleResult[]> = {};
+    for (const lang of languages) {
+      buckets[lang] = [];
+    }
+
+    for (const result of sorted) {
+      const match = languages.find((lang) =>
+        this.matchesOpenSubtitlesLanguage(result.language, lang)
+      );
+      if (match) buckets[match].push(result);
+    }
+
+    const order = languages.filter((lang) => buckets[lang] && buckets[lang].length > 0);
+    return { buckets, order };
   }
 
   private buildOpenSubtitlesQuery(includeYear = true) {
@@ -1369,8 +1441,13 @@ export class PlayerComponent implements OnDestroy {
       if (season !== null) params.set('season', String(season));
       if (episode !== null) params.set('episode', String(episode));
 
-      const languages = this.normalizeOpenSubtitlesLanguages(this.openSubtitlesLanguages());
-      if (languages) params.set('languages', languages);
+      const languageList = this.parseOpenSubtitlesLanguages(this.openSubtitlesLanguages());
+      const languages = languageList.join(',');
+      let usedLanguagesFilter = false;
+      if (languages) {
+        params.set('languages', languages);
+        usedLanguagesFilter = true;
+      }
 
       console.log('[OpenSubtitles] search start:', {
         query: params.get('query'),
@@ -1385,6 +1462,7 @@ export class PlayerComponent implements OnDestroy {
 
       if (results.length === 0) {
         const fallbackParams = new URLSearchParams(params);
+        let fallbackUsedLanguages = usedLanguagesFilter;
         if (fallbackParams.has('tmdbId')) {
           fallbackParams.delete('tmdbId');
           console.log('[OpenSubtitles] retry without tmdbId:', {
@@ -1395,6 +1473,7 @@ export class PlayerComponent implements OnDestroy {
             languages: fallbackParams.get('languages'),
           });
           results = await this.fetchOpenSubtitles(fallbackParams);
+          fallbackUsedLanguages = fallbackParams.has('languages');
           console.log('[OpenSubtitles] results without tmdbId:', results.length);
         }
 
@@ -1404,6 +1483,7 @@ export class PlayerComponent implements OnDestroy {
             fallbackParams.set('query', fallbackQuery);
             console.log('[OpenSubtitles] retry without year:', fallbackQuery);
             results = await this.fetchOpenSubtitles(fallbackParams);
+            fallbackUsedLanguages = fallbackParams.has('languages');
             console.log('[OpenSubtitles] results without year:', results.length);
           }
         }
@@ -1412,15 +1492,24 @@ export class PlayerComponent implements OnDestroy {
           fallbackParams.delete('languages');
           console.log('[OpenSubtitles] retry without languages:', fallbackParams.get('query'));
           results = await this.fetchOpenSubtitles(fallbackParams);
+          fallbackUsedLanguages = fallbackParams.has('languages');
           console.log('[OpenSubtitles] results without languages:', results.length);
         }
+        usedLanguagesFilter = fallbackUsedLanguages;
       }
 
-      const sorted = results.slice().sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
-      this.openSubtitlesResults.set(sorted);
-      this.openSubtitlesIndex.set(0);
+      const groupingLanguages = usedLanguagesFilter ? languageList : [];
+      const grouped = this.buildOpenSubtitlesBuckets(results, groupingLanguages);
+      const nextIndices: Record<string, number> = {};
+      for (const key of grouped.order) {
+        nextIndices[key] = 0;
+      }
+      this.openSubtitlesResults.set(results);
+      this.openSubtitlesBuckets.set(grouped.buckets);
+      this.openSubtitlesLanguageOrder.set(grouped.order);
+      this.openSubtitlesLanguageIndices.set(nextIndices);
 
-      if (sorted.length === 0) {
+      if (grouped.order.length === 0) {
         this.openSubtitlesError.set('No se encontraron subtítulos en OpenSubtitles.');
       }
     } catch (error: any) {
@@ -1429,6 +1518,9 @@ export class PlayerComponent implements OnDestroy {
         error?.message || 'No se pudo consultar OpenSubtitles en este momento.'
       );
       this.openSubtitlesResults.set([]);
+      this.openSubtitlesBuckets.set({});
+      this.openSubtitlesLanguageOrder.set([]);
+      this.openSubtitlesLanguageIndices.set({});
     } finally {
       this.openSubtitlesLoading.set(false);
     }

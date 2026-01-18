@@ -174,26 +174,31 @@
                 @if (openSubtitlesError()) {
                   <p class="open-subtitle-status error">{{ openSubtitlesError() }}</p>
                 }
-                @if (!openSubtitlesLoading() && openSubtitlesResults().length > 0) {
+                @if (!openSubtitlesLoading() && openSubtitlesLanguageOrder().length > 0) {
                   <div class="open-subtitle-list">
-                    @if (currentOpenSubtitleResult(); as result) {
-                      <div class="open-subtitle-item">
-                        <span class="sub-icon">🌐</span>
-                        <div class="open-subtitle-info">
-                          <div class="open-subtitle-title">{{ formatOpenSubtitleTitle(result) }}</div>
-                          @if (formatOpenSubtitleMeta(result)) {
-                            <div class="open-subtitle-meta">{{ formatOpenSubtitleMeta(result) }}</div>
-                          }
+                    @for (languageKey of openSubtitlesLanguageOrder(); track languageKey) {
+                      @if (currentOpenSubtitleResult(languageKey); as result) {
+                        <div class="open-subtitle-item">
+                          <span class="sub-icon">🌐</span>
+                          <div class="open-subtitle-info">
+                            <div class="open-subtitle-title">{{ formatOpenSubtitleTitle(result) }}</div>
+                            @if (formatOpenSubtitleMeta(result)) {
+                              <div class="open-subtitle-meta">{{ formatOpenSubtitleMeta(result) }}</div>
+                            }
+                          </div>
+                          <div class="open-subtitle-actions">
+                            <button class="download-btn" (click)="downloadOpenSubtitle(result)">
+                              Descargar
+                            </button>
+                            <button
+                              class="next-btn"
+                              (click)="pickNextOpenSubtitle(languageKey)"
+                              [disabled]="!hasNextOpenSubtitle(languageKey)">
+                              No funciona
+                            </button>
+                          </div>
                         </div>
-                        <div class="open-subtitle-actions">
-                          <button class="download-btn" (click)="downloadOpenSubtitle(result)">
-                            Descargar
-                          </button>
-                          <button class="next-btn" (click)="pickNextOpenSubtitle()" [disabled]="!hasNextOpenSubtitle()">
-                            No funciona
-                          </button>
-                        </div>
-                      </div>
+                      }
                     }
                   </div>
                 } @else if (!openSubtitlesLoading() && !openSubtitlesError()) {
