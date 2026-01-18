@@ -4,14 +4,14 @@
       <div class="loading-overlay">
         <div class="loading-content">
           @if (loadingPhase() === 'resetting') {
-            <h2>Preparando el servidor para el siguiente streaming...</h2>
-            <p>Reiniciando conexiones, limpiando torrents y calentando mirrors.</p>
+            <h2 i18n>Preparing the server for the next stream...</h2>
+            <p i18n>Resetting connections, clearing torrents, and warming up mirrors.</p>
           } @else if (loadingPhase() === 'searching') {
-            <h2>Buscando torrents disponibles...</h2>
-            <p>Consultando mirrors y fuentes externas.</p>
+            <h2 i18n>Searching for available torrents...</h2>
+            <p i18n>Checking mirrors and external sources.</p>
           } @else {
-            <h2>Cargando torrent...</h2>
-            <p>Progreso: {{ loadingProgress() }}%</p>
+            <h2 i18n>Loading torrent...</h2>
+            <p i18n>Progress: {{ loadingProgress() }}%</p>
             <div class="progress-bar">
               <div class="progress-fill" [style.width.%]="loadingProgress()"></div>
             </div>
@@ -42,10 +42,10 @@
   }
 
   <div class="hud">
-    <a routerLink="/" class="btn">← Home</a>
-    <a [routerLink]="['/details', type(), id()]" class="btn">Detalles</a>
-    <button class="btn settings-btn" (click)="toggleSettings()" title="Configuración">
-      ⚙️ Ajustes
+    <a routerLink="/" class="btn">← <span i18n>Home</span></a>
+    <a [routerLink]="['/details', type(), id()]" class="btn"><span i18n>Details</span></a>
+    <button class="btn settings-btn" (click)="toggleSettings()" title="Settings" i18n-title>
+      ⚙️ <span i18n>Settings</span>
     </button>
   </div>
 
@@ -59,24 +59,24 @@
             [class.active]="settingsTab() === 'audio'" 
             (click)="setSettingsTab('audio')"
             [disabled]="audioTracks().length <= 1">
-            🔊 Audio
+            🔊 <span i18n>Audio</span>
           </button>
           <button 
             class="tab-btn" 
             [class.active]="settingsTab() === 'subtitles'" 
             (click)="setSettingsTab('subtitles')"
             [disabled]="subtitleTracks().length === 0 && !canSearchOpenSubtitles()">
-            💬 Subtítulos
+            💬 <span i18n>Subtitles</span>
           </button>
           <button 
             class="tab-btn" 
             [class.active]="settingsTab() === 'appearance'" 
             (click)="setSettingsTab('appearance')"
             [disabled]="subtitleTracks().length === 0">
-            🎨 Apariencia
+            🎨 <span i18n>Appearance</span>
           </button>
         </div>
-        <button class="close-btn" (click)="toggleSettings()" title="Cerrar">✕</button>
+        <button class="close-btn" (click)="toggleSettings()" title="Close" i18n-title>✕</button>
       </div>
       
       <div class="settings-content">
@@ -85,14 +85,14 @@
           <div class="tab-content">
             @if (audioTracks().length > 1) {
               <div class="setting-group">
-                <label class="group-label">Pista de audio</label>
+                <label class="group-label" i18n>Audio track</label>
                 <div class="audio-list">
                   <button 
                     class="audio-option" 
                     [class.active]="selectedAudioTrack() === 'auto'"
                     (click)="selectAudioTrack('auto')">
                     <span class="audio-icon">🔄</span>
-                    <span class="audio-name">Automático</span>
+                    <span class="audio-name" i18n>Auto</span>
                   </button>
                   @for (track of audioTracks(); track track.index) {
                     <button 
@@ -102,7 +102,7 @@
                       <span class="audio-icon">🔊</span>
                       <span class="audio-name">{{ formatAudioTrackLabel(track) }}</span>
                       @if (track.default) {
-                        <span class="audio-badge">Por defecto</span>
+                        <span class="audio-badge" i18n>Default</span>
                       }
                     </button>
                   }
@@ -111,7 +111,7 @@
             } @else {
               <div class="empty-state">
                 <span class="empty-icon">🔇</span>
-                <p>Solo hay una pista de audio disponible</p>
+                <p i18n>Only one audio track is available</p>
               </div>
             }
           </div>
@@ -122,14 +122,14 @@
           <div class="tab-content">
             @if (subtitleTracks().length > 0) {
               <div class="setting-group">
-                <label class="group-label">Pista de subtítulos</label>
+                <label class="group-label" i18n>Subtitle track</label>
                 <div class="subtitle-list">
                   <button 
                     class="subtitle-option" 
                     [class.active]="selectedSubtitleTrack() === -1"
                     (click)="selectSubtitleTrack(-1)">
                     <span class="sub-icon">🚫</span>
-                    <span class="sub-name">Desactivados</span>
+                    <span class="sub-name" i18n>Off</span>
                   </button>
                   @for (track of subtitleTracks(); track track.index; let i = $index) {
                     <button 
@@ -145,31 +145,32 @@
             } @else {
               <div class="empty-state">
                 <span class="empty-icon">💬</span>
-                <p>No hay subtítulos disponibles</p>
+                <p i18n>No subtitles available</p>
               </div>
             }
 
             <div class="setting-group">
-              <label class="group-label">Descargar desde OpenSubtitles</label>
+              <label class="group-label" i18n>Download from OpenSubtitles</label>
               @if (!canSearchOpenSubtitles()) {
-                <p class="open-subtitle-status">Carga un video para buscar subtítulos externos.</p>
+                <p class="open-subtitle-status" i18n>Load a video to search for external subtitles.</p>
               } @else {
                 <div class="open-subtitle-controls">
                   <input
                     class="lang-input"
                     type="text"
-                    placeholder="Idiomas (es,en)"
+                    placeholder="Languages (en,es)"
+                    i18n-placeholder
                     [value]="openSubtitlesLanguages()"
                     (input)="setOpenSubtitlesLanguages($any($event.target).value)">
                   <button
                     class="action-btn"
                     (click)="searchOpenSubtitles()"
                     [disabled]="openSubtitlesLoading()">
-                    Buscar
+                    <span i18n>Search</span>
                   </button>
                 </div>
                 @if (openSubtitlesLoading()) {
-                  <p class="open-subtitle-status">Buscando subtítulos...</p>
+                  <p class="open-subtitle-status" i18n>Searching for subtitles...</p>
                 }
                 @if (openSubtitlesError()) {
                   <p class="open-subtitle-status error">{{ openSubtitlesError() }}</p>
@@ -188,13 +189,13 @@
                           </div>
                           <div class="open-subtitle-actions">
                             <button class="download-btn" (click)="downloadOpenSubtitle(result)">
-                              Descargar
+                              <span i18n>Download</span>
                             </button>
                             <button
                               class="next-btn"
                               (click)="pickNextOpenSubtitle(languageKey)"
                               [disabled]="!hasNextOpenSubtitle(languageKey)">
-                              No funciona
+                              <span i18n>Doesn't work</span>
                             </button>
                           </div>
                         </div>
@@ -202,9 +203,7 @@
                     }
                   </div>
                 } @else if (!openSubtitlesLoading() && !openSubtitlesError()) {
-                  <p class="open-subtitle-status hint">
-                    Usa "Buscar" para consultar OpenSubtitles.
-                  </p>
+                  <p class="open-subtitle-status hint" i18n>Use "Search" to query OpenSubtitles.</p>
                 }
               }
             </div>
@@ -216,77 +215,77 @@
           <div class="tab-content">
             @if (subtitleTracks().length > 0) {
               <div class="setting-group">
-                <label class="group-label">Tamaño del texto</label>
+                <label class="group-label" i18n>Text size</label>
                 <div class="size-control">
                   <button class="size-btn" (click)="adjustSubtitleSize(-10)" [disabled]="subtitleSize() <= 50">−</button>
                   <span class="size-value">{{ subtitleSize() }}%</span>
                   <button class="size-btn" (click)="adjustSubtitleSize(10)" [disabled]="subtitleSize() >= 200">+</button>
                 </div>
                 <div class="size-presets">
-                  <button class="preset-btn" [class.active]="subtitleSize() === 75" (click)="setSubtitleSize(75)">Pequeño</button>
-                  <button class="preset-btn" [class.active]="subtitleSize() === 100" (click)="setSubtitleSize(100)">Normal</button>
-                  <button class="preset-btn" [class.active]="subtitleSize() === 125" (click)="setSubtitleSize(125)">Grande</button>
-                  <button class="preset-btn" [class.active]="subtitleSize() === 150" (click)="setSubtitleSize(150)">Muy grande</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 75" (click)="setSubtitleSize(75)" i18n>Small</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 100" (click)="setSubtitleSize(100)" i18n>Normal</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 125" (click)="setSubtitleSize(125)" i18n>Large</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 150" (click)="setSubtitleSize(150)" i18n>Extra large</button>
                 </div>
               </div>
 
               <div class="setting-group">
-                <label class="group-label">Color del texto</label>
+                <label class="group-label" i18n>Text color</label>
                 <div class="color-grid">
-                  <button class="color-option color-white" [class.active]="subtitleColor() === '#ffffff'" (click)="setSubtitleColor('#ffffff')" title="Blanco">
+                  <button class="color-option color-white" [class.active]="subtitleColor() === '#ffffff'" (click)="setSubtitleColor('#ffffff')" title="White" i18n-title>
                     <span class="check">✓</span>
                   </button>
-                  <button class="color-option color-yellow" [class.active]="subtitleColor() === '#ffff00'" (click)="setSubtitleColor('#ffff00')" title="Amarillo">
+                  <button class="color-option color-yellow" [class.active]="subtitleColor() === '#ffff00'" (click)="setSubtitleColor('#ffff00')" title="Yellow" i18n-title>
                     <span class="check">✓</span>
                   </button>
-                  <button class="color-option color-green" [class.active]="subtitleColor() === '#00ff00'" (click)="setSubtitleColor('#00ff00')" title="Verde">
+                  <button class="color-option color-green" [class.active]="subtitleColor() === '#00ff00'" (click)="setSubtitleColor('#00ff00')" title="Green" i18n-title>
                     <span class="check">✓</span>
                   </button>
-                  <button class="color-option color-cyan" [class.active]="subtitleColor() === '#00ffff'" (click)="setSubtitleColor('#00ffff')" title="Cian">
+                  <button class="color-option color-cyan" [class.active]="subtitleColor() === '#00ffff'" (click)="setSubtitleColor('#00ffff')" title="Cyan" i18n-title>
                     <span class="check">✓</span>
                   </button>
                 </div>
               </div>
 
               <div class="setting-group">
-                <label class="group-label">Fondo</label>
+                <label class="group-label" i18n>Background</label>
                 <div class="bg-options">
                   <button class="bg-option" [class.active]="subtitleBackground() === 'rgba(0,0,0,0.7)'" (click)="setSubtitleBackground('rgba(0,0,0,0.7)')">
                     <span class="bg-preview bg-semi"></span>
-                    <span>Semi</span>
+                    <span i18n>Semi</span>
                   </button>
                   <button class="bg-option" [class.active]="subtitleBackground() === 'rgba(0,0,0,0.9)'" (click)="setSubtitleBackground('rgba(0,0,0,0.9)')">
                     <span class="bg-preview bg-solid"></span>
-                    <span>Sólido</span>
+                    <span i18n>Solid</span>
                   </button>
                   <button class="bg-option" [class.active]="subtitleBackground() === 'transparent'" (click)="setSubtitleBackground('transparent')">
                     <span class="bg-preview bg-none"></span>
-                    <span>Ninguno</span>
+                    <span i18n>None</span>
                   </button>
                 </div>
               </div>
 
               <div class="setting-group">
-                <label class="group-label">Tipo de letra</label>
+                <label class="group-label" i18n>Font</label>
                 <div class="font-options">
                   <button class="font-option" [class.active]="subtitleFont() === 'sans-serif'" (click)="setSubtitleFont('sans-serif')">
                     <span class="font-preview font-sans">Aa</span>
-                    <span>Sans Serif</span>
+                    <span i18n>Sans Serif</span>
                   </button>
                   <button class="font-option" [class.active]="subtitleFont() === 'serif'" (click)="setSubtitleFont('serif')">
                     <span class="font-preview font-serif">Aa</span>
-                    <span>Serif</span>
+                    <span i18n>Serif</span>
                   </button>
                   <button class="font-option" [class.active]="subtitleFont() === 'monospace'" (click)="setSubtitleFont('monospace')">
                     <span class="font-preview font-mono">Aa</span>
-                    <span>Mono</span>
+                    <span i18n>Mono</span>
                   </button>
                 </div>
               </div>
             } @else {
               <div class="empty-state">
                 <span class="empty-icon">🎨</span>
-                <p>Activa los subtítulos para personalizar su apariencia</p>
+                <p i18n>Enable subtitles to customize their appearance</p>
               </div>
             }
           </div>

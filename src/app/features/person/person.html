@@ -2,9 +2,9 @@
   <!-- Error State -->
   <div class="error-state" *ngIf="error()">
     <mat-icon>error_outline</mat-icon>
-    <h2>Error al cargar</h2>
+    <h2 i18n>Error loading</h2>
     <p>{{ error() }}</p>
-    <button mat-flat-button routerLink="/">Volver al inicio</button>
+    <button mat-flat-button routerLink="/" i18n>Back to home</button>
   </div>
 
   <ng-container *ngIf="!error() && person() as p">
@@ -30,40 +30,49 @@
             </div>
             <div class="stat" *ngIf="totalMovies() > 0">
               <mat-icon>movie</mat-icon>
-              <span>{{ totalMovies() }} películas</span>
+              <span *ngIf="totalMovies() === 1" i18n>{{ totalMovies() }} movie</span>
+              <span *ngIf="totalMovies() !== 1" i18n>{{ totalMovies() }} movies</span>
             </div>
             <div class="stat" *ngIf="totalTvShows() > 0">
               <mat-icon>tv</mat-icon>
-              <span>{{ totalTvShows() }} series</span>
+              <span *ngIf="totalTvShows() === 1" i18n>{{ totalTvShows() }} TV show</span>
+              <span *ngIf="totalTvShows() !== 1" i18n>{{ totalTvShows() }} TV shows</span>
             </div>
           </div>
 
           <!-- Personal Info -->
           <div class="personal-info">
             <div class="info-item" *ngIf="birthDate() !== '—'">
-              <span class="info-label">Nacimiento</span>
+              <span class="info-label" i18n>Birth</span>
               <span class="info-value">{{ birthDate() }}</span>
             </div>
             <div class="info-item" *ngIf="deathDate()">
-              <span class="info-label">Fallecimiento</span>
+              <span class="info-label" i18n>Death</span>
               <span class="info-value">{{ deathDate() }}</span>
             </div>
             <div class="info-item" *ngIf="age()">
-              <span class="info-label">{{ deathDate() ? 'Edad al fallecer' : 'Edad' }}</span>
-              <span class="info-value">{{ age() }} años</span>
+              <span class="info-label" *ngIf="deathDate()" i18n>Age at death</span>
+              <span class="info-label" *ngIf="!deathDate()" i18n>Age</span>
+              <span class="info-value" *ngIf="age() === 1" i18n>{{ age() }} year</span>
+              <span class="info-value" *ngIf="age() !== 1" i18n>{{ age() }} years</span>
             </div>
             <div class="info-item wide" *ngIf="birthPlace()">
-              <span class="info-label">Lugar de nacimiento</span>
+              <span class="info-label" i18n>Place of birth</span>
               <span class="info-value">{{ birthPlace() }}</span>
             </div>
           </div>
 
           <!-- Biography -->
           <div class="biography">
-            <h3>Biografía</h3>
+            <h3 i18n>Biography</h3>
             <p class="bio-text">{{ showFullBio() ? biography() : shortBio() }}</p>
             <button class="bio-toggle" *ngIf="hasBioOverflow()" (click)="toggleBio()">
-              {{ showFullBio() ? 'Ver menos' : 'Ver más' }}
+              <ng-container *ngIf="showFullBio(); else showMoreBio">
+                <span i18n>Show less</span>
+              </ng-container>
+              <ng-template #showMoreBio>
+                <span i18n>Show more</span>
+              </ng-template>
             </button>
           </div>
         </div>
@@ -74,7 +83,7 @@
     <section class="section credits-section" *ngIf="actingCredits().length">
       <h2 class="section-title">
         <mat-icon>theater_comedy</mat-icon>
-        Actuación
+        <span i18n>Acting</span>
       </h2>
       <div class="credits-grid">
         <a 
@@ -101,7 +110,7 @@
     <section class="section credits-section" *ngIf="hasCrewCredits()">
       <h2 class="section-title">
         <mat-icon>videocam</mat-icon>
-        Detrás de cámaras
+        <span i18n>Crew</span>
       </h2>
       <div class="credits-grid">
         <a 
@@ -130,7 +139,7 @@
   <div class="person-page loading-state">
     <div class="loading-spinner">
       <div class="spinner"></div>
-      <p>Cargando...</p>
+      <p i18n>Loading...</p>
     </div>
   </div>
 </ng-template>
