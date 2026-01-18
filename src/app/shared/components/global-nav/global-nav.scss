@@ -53,10 +53,11 @@ $bg-primary: #0a0a0a;
   cursor: pointer;
   transition: opacity 0.2s ease;
 
-  mat-icon {
-    font-size: 28px;
+  .logo-img {
     width: 28px;
     height: 28px;
+    object-fit: contain;
+    display: block;
   }
 
   &:hover {
