@@ -1,6 +1,7 @@
 // ========================================
 // PirateFlix Details Page - Netflix/HBO Style
 // ========================================
+// Las variables de color se heredan del archivo global styles.scss
 
 $bg-primary: #0a0a0a;
 $bg-secondary: #141414;
@@ -8,8 +9,14 @@ $bg-card: #1a1a1a;
 $text-primary: #ffffff;
 $text-secondary: rgba(255, 255, 255, 0.7);
 $text-muted: rgba(255, 255, 255, 0.5);
-$accent-red: #e50914;
-$accent-gold: #f5c518;
+
+// Usar color primario (naranja) en lugar de rojo
+$accent-primary: #e5a00d;
+$accent-primary-light: #f5c518;
+$accent-error: #ff6b6b;
+
+// Backward compatibility
+$accent-gold: $accent-primary-light;
 
 :host {
   display: block;
@@ -52,7 +59,7 @@ $accent-gold: #f5c518;
     width: 48px;
     height: 48px;
     border: 3px solid rgba(255, 255, 255, 0.1);
-    border-top-color: $accent-red;
+    border-top-color: $accent-primary;
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 0 auto 16px;
@@ -85,7 +92,7 @@ $accent-gold: #f5c518;
     font-size: 64px;
     width: 64px;
     height: 64px;
-    color: $accent-red;
+    color: $accent-error;
     margin-bottom: 16px;
   }
 
@@ -211,7 +218,7 @@ $accent-gold: #f5c518;
   font-weight: 700;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: $accent-red;
+  color: $accent-primary;
   margin-bottom: 16px;
   padding-left: 2.5px;
 }
@@ -502,7 +509,7 @@ $accent-gold: #f5c518;
   }
 
   input:checked + .toggle-track {
-    background: $accent-red;
+    background: $accent-primary;
 
     &::after {
       transform: translateX(16px);
@@ -721,7 +728,7 @@ $accent-gold: #f5c518;
     font-size: 18px;
     width: 18px;
     height: 18px;
-    color: $accent-red;
+    color: $accent-primary;
   }
 }
 
@@ -766,8 +773,8 @@ $accent-gold: #f5c518;
   gap: 8px;
   margin-top: 24px;
   padding: 14px 24px;
-  background: linear-gradient(135deg, rgba(229, 9, 20, 0.15) 0%, rgba(229, 9, 20, 0.08) 100%);
-  border: 1px solid rgba(229, 9, 20, 0.3);
+  background: linear-gradient(135deg, rgba($accent-primary, 0.15) 0%, rgba($accent-primary, 0.08) 100%);
+  border: 1px solid rgba($accent-primary, 0.3);
   border-radius: 10px;
   color: $text-primary;
   font-size: 14px;
@@ -780,14 +787,14 @@ $accent-gold: #f5c518;
     font-size: 18px;
     width: 18px;
     height: 18px;
-    color: $accent-red;
+    color: $accent-primary;
   }
 
   &:hover {
-    background: linear-gradient(135deg, rgba(229, 9, 20, 0.25) 0%, rgba(229, 9, 20, 0.15) 100%);
-    border-color: rgba(229, 9, 20, 0.5);
+    background: linear-gradient(135deg, rgba(229, 160, 13, 0.25) 0%, rgba(229, 160, 13, 0.15) 100%);
+    border-color: rgba(229, 160, 13, 0.5);
     transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(229, 9, 20, 0.2);
+    box-shadow: 0 4px 16px rgba(229, 160, 13, 0.2);
   }
 }
 

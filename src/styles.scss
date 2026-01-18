@@ -1,15 +1,38 @@
 /* You can add global styles to this file, and also import other style files */
 
 // ========================================
-// PirateFlix Global Styles - Netflix/HBO Style
+// PirateFlix Global Color System
 // ========================================
+// Color principal de la marca: Naranja
+// Este sistema permite cambios globales fáciles
+// Modificar solo las variables BRAND-COLOR y ERROR-COLOR afecta toda la app
 
 $font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+
+// Backgrounds
 $bg-primary: #0a0a0a;
 $bg-secondary: #141414;
+$bg-card: #1a1a1a;
+$bg-card-hover: #252525;
+
+// Text
 $text-primary: #ffffff;
 $text-secondary: rgba(255, 255, 255, 0.7);
-$accent-red: #e50914;
+$text-muted: rgba(255, 255, 255, 0.5);
+
+// BRAND COLOR (Color principal - Naranja) - Cambia esto para cambiar el color de marca global
+$accent-primary: #e5a00d; // Naranja
+$accent-primary-dark: #d08c00; // Naranja oscuro para hover
+$accent-primary-light: #f5c518; // Dorado/naranja claro
+
+// ERROR COLOR (Rojo - Solo para errores y estados negativos)
+$accent-error: #ff6b6b; // Rojo para errores
+$accent-error-dark: #ff5252; // Rojo oscuro para hover en errores
+
+// Deprecated - mantener para compatibilidad, pero usar variables nuevas
+$accent-red: $accent-error;
+$accent-orange: $accent-primary;
+$accent-gold: $accent-primary-light;
 
 * {
   box-sizing: border-box;
@@ -92,7 +115,7 @@ button {
 
 // Selection
 ::selection {
-  background: $accent-red;
+  background: $accent-primary;
   color: white;
 }
 

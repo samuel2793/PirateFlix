@@ -1,10 +1,20 @@
-// Variables
+// ========================================
+// PirateFlix Person Page - Netflix/HBO Style
+// ========================================
+
+// Variables locales
 $bg-primary: #0a0a0a;
 $bg-secondary: #141414;
 $text-primary: #ffffff;
 $text-secondary: rgba(255, 255, 255, 0.7);
 $text-muted: rgba(255, 255, 255, 0.5);
-$accent: #e50914;
+
+// Usar color primario (naranja) en lugar de rojo
+$accent-primary: #e5a00d;
+$accent-error: #ff6b6b;
+
+// Backward compatibility
+$accent: $accent-primary;
 
 .person-page {
   min-height: 100vh;
@@ -39,7 +49,7 @@ $accent: #e50914;
     width: 48px;
     height: 48px;
     border: 3px solid rgba(255, 255, 255, 0.1);
-    border-top-color: $accent;
+    border-top-color: $accent-primary;
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 0 auto 16px;
@@ -63,7 +73,7 @@ $accent: #e50914;
     font-size: 64px;
     width: 64px;
     height: 64px;
-    color: $accent;
+    color: $accent-primary;
     margin-bottom: 24px;
   }
 
@@ -92,7 +102,7 @@ $accent: #e50914;
   inset: 0;
   background: linear-gradient(
     135deg,
-    rgba($accent, 0.15) 0%,
+    rgba($accent-primary, 0.15) 0%,
     transparent 50%,
     rgba(0, 0, 0, 0.9) 100%
   );
@@ -175,7 +185,7 @@ $accent: #e50914;
     font-size: 22px;
     width: 22px;
     height: 22px;
-    color: $accent;
+    color: $accent-primary;
   }
 }
 
@@ -234,7 +244,7 @@ $accent: #e50914;
 .bio-toggle {
   background: none;
   border: none;
-  color: $accent;
+  color: $accent-primary;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -264,7 +274,7 @@ $accent: #e50914;
     font-size: 30px;
     width: 30px;
     height: 30px;
-    color: $accent;
+    color: $accent-primary;
   }
 }
 
@@ -325,7 +335,7 @@ $accent: #e50914;
   font-size: 12px;
   font-weight: 600;
   padding: 5px 12px;
-  background: $accent;
+  background: $accent-primary;
   color: #fff;
   border-radius: 4px;
   text-transform: uppercase;

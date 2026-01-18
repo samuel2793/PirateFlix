@@ -5,6 +5,9 @@
   animation: playerEnter 0.4s ease-out;
 }
 
+// Color principal (naranja)
+$accent-primary: #e5a00d;
+
 @keyframes playerEnter {
   from {
     opacity: 0;
@@ -516,7 +519,7 @@
     }
 
     &.active {
-      border-color: #e50914;
+      border-color: $accent-primary;
       transform: scale(1.1);
 
       .check {
@@ -561,7 +564,7 @@
     }
 
     &.active {
-      border-color: #e50914;
+      border-color: $accent-primary;
       color: #fff;
     }
 
@@ -606,7 +609,7 @@
     }
 
     &.active {
-      border-color: #e50914;
+      border-color: $accent-primary;
       color: #fff;
     }
 

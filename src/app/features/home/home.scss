@@ -1,7 +1,9 @@
 // ========================================
 // PirateFlix Home Page - Plex Style
 // ========================================
+// Las variables de color se heredan del archivo global styles.scss
 
+// Variables locales (mantener para compatibilidad)
 $bg-primary: #0a0a0a;
 $bg-secondary: #141414;
 $bg-card: #1a1a1a;
@@ -9,9 +11,15 @@ $bg-card-hover: #252525;
 $text-primary: #ffffff;
 $text-secondary: rgba(255, 255, 255, 0.7);
 $text-muted: rgba(255, 255, 255, 0.5);
-$accent-red: #e50914;
-$accent-gold: #f5c518;
-$accent-orange: #e5a00d;
+
+// Usar color primario (naranja) en lugar de rojo
+$accent-primary: #e5a00d;
+$accent-primary-light: #f5c518;
+$accent-error: #ff6b6b;
+
+// Backward compatibility
+$accent-orange: $accent-primary;
+$accent-gold: $accent-primary-light;
 
 :host {
   display: block;
