@@ -248,7 +248,9 @@ export class PlayerComponent implements OnDestroy {
       this.loadingPhase.set('searching');
       // Intentar queries de más a menos específicas para ampliar resultados
       const normalizeQuery = (value: string) => value.replace(/\s+/g, ' ').trim();
-      const normalizedTitle = normalizeQuery(title.replace(/[^\w\s]/g, ' '));
+      const normalizedTitle = normalizeQuery(
+        title.replace(/['\u2019`\u00b4]/g, '').replace(/[^\w\s]/g, ' ')
+      );
       const queryTitle = normalizedTitle || title;
       const searchQueries = [
         normalizeQuery(`${queryTitle} ${year} 1080p`),
