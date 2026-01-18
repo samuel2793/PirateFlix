@@ -96,6 +96,11 @@
             <span class="toggle-track"></span>
             <span class="toggle-label">Solo seekable</span>
           </label>
+          <label class="option-toggle">
+            <input type="checkbox" [checked]="preferYearInSearch()" (change)="toggleYearInSearch($any($event.target).checked)" />
+            <span class="toggle-track"></span>
+            <span class="toggle-label">Forzar año en búsqueda</span>
+          </label>
         </div>
       </div>
 

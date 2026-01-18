@@ -41,6 +41,7 @@ export class DetailsComponent {
   preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
   preferSeekable = signal(this.loadPref('preferSeekable'));
   preferSubtitles = signal(this.loadPref('preferSubtitles'));
+  preferYearInSearch = signal(this.loadPref('preferYearInSearch'));
   showInfo = signal(false);
 
   // Load preference from localStorage
@@ -75,6 +76,11 @@ export class DetailsComponent {
   toggleSubtitles(value: boolean) {
     this.preferSubtitles.set(value);
     this.savePref('preferSubtitles', value);
+  }
+
+  toggleYearInSearch(value: boolean) {
+    this.preferYearInSearch.set(value);
+    this.savePref('preferYearInSearch', value);
   }
 
   async ngOnInit() {
@@ -265,6 +271,7 @@ export class DetailsComponent {
     if (this.preferMultiAudio()) queryParams['multiAudio'] = '1';
     if (this.preferSeekable()) queryParams['seekable'] = '1';
     if (this.preferSubtitles()) queryParams['subtitles'] = '1';
+    if (this.preferYearInSearch()) queryParams['forceYear'] = '1';
     this.router.navigate(
       [
         '/play',

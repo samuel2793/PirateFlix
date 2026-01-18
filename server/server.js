@@ -12,6 +12,8 @@ import axios from 'axios';
 import fs from 'fs';
 import os from 'os';
 import dns from 'dns';
+import * as zlib from 'zlib';
+import { fileURLToPath } from 'url';
 
 const app = express();
 const PORT = 3001;
@@ -108,6 +110,478 @@ function createAgents() {
 
 // Inicializar agentes al inicio
 createAgents();
+
+function stripJsComments(source) {
+  let out = '';
+  let i = 0;
+  let inLine = false;
+  let inBlock = false;
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  let escaped = false;
+
+  while (i < source.length) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (inLine) {
+      if (ch === '\n') {
+        inLine = false;
+        out += ch;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (inBlock) {
+      if (ch === '*' && next === '/') {
+        inBlock = false;
+        i += 2;
+        continue;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (inSingle || inDouble || inTemplate) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+        i += 1;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        i += 1;
+        continue;
+      }
+      if (inSingle && ch === "'") inSingle = false;
+      else if (inDouble && ch === '"') inDouble = false;
+      else if (inTemplate && ch === '`') inTemplate = false;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '/' && next === '/') {
+      inLine = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      inBlock = true;
+      i += 2;
+      continue;
+    }
+
+    if (ch === "'") {
+      inSingle = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDouble = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '`') {
+      inTemplate = true;
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    out += ch;
+    i += 1;
+  }
+
+  return out;
+}
+
+function loadAppConfigFromFile() {
+  try {
+    const serverDir = path.dirname(fileURLToPath(import.meta.url));
+    const appRoot = path.resolve(serverDir, '..');
+    const configPath =
+      process.env.PIRATEFLIX_APP_CONFIG_PATH ||
+      path.resolve(appRoot, 'src/app/core/config/app-config.ts');
+    const source = fs.readFileSync(configPath, 'utf-8');
+    const match = source.match(/export const APP_CONFIG\s*=\s*([\s\S]*?)\s*as const\s*;/);
+    if (!match) return null;
+    const rawObject = stripJsComments(match[1]);
+    return new Function(`"use strict"; return (${rawObject});`)();
+  } catch (err) {
+    console.warn('No se pudo leer app-config.ts:', err?.message || err);
+    return null;
+  }
+}
+
+const appConfig = loadAppConfigFromFile();
+
+// =====================
+// OpenSubtitles config
+// =====================
+const OPENSUBTITLES_BASE_URL = 'https://api.opensubtitles.com/api/v1';
+const appConfigTimeout = Number(appConfig?.openSubtitles?.timeoutMs);
+const OPENSUBTITLES_TIMEOUT_MS = Number.isFinite(appConfigTimeout)
+  ? appConfigTimeout
+  : parseInt(process.env.OPEN_SUBTITLES_TIMEOUT_MS || '15000', 10);
+const OPEN_SUBTITLES_TOKEN_TTL_MS = parseInt(
+  process.env.OPEN_SUBTITLES_TOKEN_TTL_MS || '43200000',
+  10
+);
+const OPEN_SUBTITLES_DOWNLOAD_CACHE_MS = parseInt(
+  process.env.OPEN_SUBTITLES_DOWNLOAD_CACHE_MS || '3600000',
+  10
+);
+
+function buildOpenSubtitlesConfigs() {
+  const envApiKey = process.env.OPEN_SUBTITLES_API_KEY;
+  if (envApiKey) {
+    return [
+      {
+        apiKey: String(envApiKey),
+        userAgent: String(process.env.OPEN_SUBTITLES_USER_AGENT || 'PirateFlix'),
+        username: String(process.env.OPEN_SUBTITLES_USERNAME || ''),
+        password: String(process.env.OPEN_SUBTITLES_PASSWORD || ''),
+        label: 'env',
+      },
+    ];
+  }
+
+  const openSubtitles = appConfig?.openSubtitles || {};
+  const apis = Array.isArray(openSubtitles.apis) ? openSubtitles.apis : [];
+  const configs = apis
+    .map((entry, idx) => {
+      const apiKey = String(entry?.apiKey || '').trim();
+      if (!apiKey) return null;
+      const userAgent = entry?.userAgent || openSubtitles.userAgent || 'PirateFlix';
+      const username = entry?.username || openSubtitles.username || '';
+      const password = entry?.password || openSubtitles.password || '';
+      return {
+        apiKey,
+        userAgent: String(userAgent),
+        username: String(username),
+        password: String(password),
+        label: entry?.label ? String(entry.label) : `app-config#${idx + 1}`,
+      };
+    })
+    .filter(Boolean);
+
+  if (configs.length > 0) return configs;
+
+  if (openSubtitles?.apiKey) {
+    return [
+      {
+        apiKey: String(openSubtitles.apiKey),
+        userAgent: String(openSubtitles.userAgent || 'PirateFlix'),
+        username: String(openSubtitles.username || ''),
+        password: String(openSubtitles.password || ''),
+        label: 'app-config',
+      },
+    ];
+  }
+
+  return [];
+}
+
+const openSubtitlesConfigs = buildOpenSubtitlesConfigs();
+const openSubtitlesAuthStates = openSubtitlesConfigs.map(() => ({
+  token: null,
+  lastLoginAt: 0,
+}));
+let openSubtitlesActiveIndex = 0;
+const openSubtitlesDownloadCache = new Map();
+
+function hasOpenSubtitlesConfig() {
+  return openSubtitlesConfigs.length > 0;
+}
+
+function getOpenSubtitlesConfig(index) {
+  return openSubtitlesConfigs[index];
+}
+
+function getOpenSubtitlesAuthState(index) {
+  if (!openSubtitlesAuthStates[index]) {
+    openSubtitlesAuthStates[index] = { token: null, lastLoginAt: 0 };
+  }
+  return openSubtitlesAuthStates[index];
+}
+
+function getOpenSubtitlesConfigCandidates() {
+  const total = openSubtitlesConfigs.length;
+  if (total === 0) return [];
+  const start = Math.min(Math.max(openSubtitlesActiveIndex, 0), total - 1);
+  const indices = [];
+  for (let i = 0; i < total; i += 1) {
+    indices.push((start + i) % total);
+  }
+  return indices;
+}
+
+function shouldRotateOpenSubtitlesConfig(error) {
+  const status = error?.response?.status;
+  return status === 401 || status === 403 || status === 406 || status === 429;
+}
+
+function rotateOpenSubtitlesConfig(index) {
+  const total = openSubtitlesConfigs.length;
+  if (total <= 1) return index;
+  const nextIndex = (index + 1) % total;
+  openSubtitlesActiveIndex = nextIndex;
+  return nextIndex;
+}
+
+async function withOpenSubtitlesConfig(action, context) {
+  const candidates = getOpenSubtitlesConfigCandidates();
+  if (candidates.length === 0) {
+    throw new Error('OpenSubtitles API key no configurada');
+  }
+  let lastError = null;
+  for (const index of candidates) {
+    try {
+      const result = await action(index);
+      openSubtitlesActiveIndex = index;
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (!shouldRotateOpenSubtitlesConfig(error)) throw error;
+      const status = error?.response?.status;
+      const nextIndex = rotateOpenSubtitlesConfig(index);
+      console.warn('[OpenSubtitles] config fallback:', {
+        context,
+        status,
+        from: index + 1,
+        to: nextIndex + 1,
+      });
+    }
+  }
+  throw lastError;
+}
+
+function buildOpenSubtitlesHeaders(configIndex, includeAuth = false) {
+  const config = getOpenSubtitlesConfig(configIndex);
+  const headers = {
+    'Api-Key': config?.apiKey || '',
+    'User-Agent': config?.userAgent || 'PirateFlix',
+    Accept: 'application/json',
+  };
+  const authState = getOpenSubtitlesAuthState(configIndex);
+  if (includeAuth && authState?.token) {
+    headers.Authorization = `Bearer ${authState.token}`;
+  }
+  return headers;
+}
+
+async function loginOpenSubtitles(configIndex) {
+  const config = getOpenSubtitlesConfig(configIndex);
+  if (!config?.username || !config?.password) return null;
+  try {
+    console.log('[OpenSubtitles] login start:', {
+      index: configIndex + 1,
+      user: config.username ? 'set' : 'missing',
+      userAgent: config.userAgent,
+    });
+    const response = await axios.post(
+      `${OPENSUBTITLES_BASE_URL}/login`,
+      {
+        username: config.username,
+        password: config.password,
+      },
+      {
+        headers: buildOpenSubtitlesHeaders(configIndex, false),
+        timeout: OPENSUBTITLES_TIMEOUT_MS,
+        httpAgent: httpAgentGlobal,
+        httpsAgent: httpsAgentGlobal,
+      }
+    );
+
+    const token = response?.data?.token;
+    if (token) {
+      const authState = getOpenSubtitlesAuthState(configIndex);
+      authState.token = token;
+      authState.lastLoginAt = Date.now();
+      console.log('[OpenSubtitles] login ok');
+      return token;
+    }
+  } catch (err) {
+    const status = err?.response?.status;
+    const data = err?.response?.data;
+    console.warn(
+      'OpenSubtitles login falló:',
+      status ? `status=${status}` : '',
+      err?.message || err
+    );
+    if (data) {
+      console.warn('[OpenSubtitles] login error payload:', data);
+    }
+  }
+  const authState = getOpenSubtitlesAuthState(configIndex);
+  authState.token = null;
+  return null;
+}
+
+async function ensureOpenSubtitlesToken(configIndex) {
+  const config = getOpenSubtitlesConfig(configIndex);
+  if (!config?.username || !config?.password) return null;
+  const authState = getOpenSubtitlesAuthState(configIndex);
+  const fresh =
+    authState.token && Date.now() - authState.lastLoginAt < OPEN_SUBTITLES_TOKEN_TTL_MS;
+  if (fresh) return authState.token;
+  return await loginOpenSubtitles(configIndex);
+}
+
+function pickOpenSubtitlesFile(files) {
+  if (!Array.isArray(files)) return null;
+  for (const file of files) {
+    const formatRaw = String(file?.format || '').toLowerCase();
+    let format = formatRaw;
+    if (format === 'webvtt') format = 'vtt';
+    if (format === 'srt' || format === 'vtt') {
+      return { file, format };
+    }
+
+    if (file?.file_name) {
+      const lowerName = String(file.file_name).toLowerCase();
+      if (lowerName.endsWith('.srt.gz')) return { file, format: 'srt' };
+      if (lowerName.endsWith('.vtt.gz')) return { file, format: 'vtt' };
+
+      const ext = lowerName.split('.').pop() || '';
+      if (ext === 'webvtt') return { file, format: 'vtt' };
+      if (ext === 'srt' || ext === 'vtt') return { file, format: ext };
+    }
+  }
+  for (const file of files) {
+    if (file?.file_id) return { file, format: '' };
+  }
+  return null;
+}
+
+function sanitizeFileName(fileName) {
+  if (!fileName) return '';
+  return String(fileName).split(/[\\/]/).pop() || '';
+}
+
+function extractFilenameFromDisposition(disposition) {
+  if (!disposition) return '';
+  const match =
+    /filename\*?=(?:UTF-8'')?\"?([^\";]+)\"?/i.exec(String(disposition)) ||
+    /filename\*?=([^;]+)/i.exec(String(disposition));
+  if (!match) return '';
+  try {
+    return sanitizeFileName(decodeURIComponent(match[1]));
+  } catch (_) {
+    return sanitizeFileName(match[1]);
+  }
+}
+
+function guessSubtitleExtension(fileName, fallbackUrl, contentType) {
+  const base =
+    sanitizeFileName(fileName) ||
+    sanitizeFileName(fallbackUrl) ||
+    '';
+  const ext = base.toLowerCase().split('.').pop() || '';
+  if (ext) return ext;
+  const ct = String(contentType || '').toLowerCase();
+  if (ct.includes('vtt')) return 'vtt';
+  if (ct.includes('srt') || ct.includes('subtitle')) return 'srt';
+  if (ct.includes('gzip')) return 'gz';
+  if (ct.includes('zip')) return 'zip';
+  return '';
+}
+
+function getOpenSubtitlesDownloadCacheKey(configIndex, fileId) {
+  return `${configIndex}:${fileId}`;
+}
+
+function getCachedOpenSubtitlesDownload(configIndex, fileId) {
+  const cacheKey = getOpenSubtitlesDownloadCacheKey(configIndex, fileId);
+  const cached = openSubtitlesDownloadCache.get(cacheKey);
+  if (!cached) return null;
+  if (Date.now() - cached.ts > OPEN_SUBTITLES_DOWNLOAD_CACHE_MS) {
+    openSubtitlesDownloadCache.delete(cacheKey);
+    return null;
+  }
+  return cached;
+}
+
+async function resolveOpenSubtitlesDownload(
+  configIndex,
+  fileId,
+  subFormat = '',
+  inFps = null,
+  outFps = null
+) {
+  const cached = getCachedOpenSubtitlesDownload(configIndex, fileId);
+  if (cached) return cached;
+
+  const config = getOpenSubtitlesConfig(configIndex);
+  const authState = getOpenSubtitlesAuthState(configIndex);
+  await ensureOpenSubtitlesToken(configIndex);
+  let response = null;
+  const payload = {
+    file_id: fileId,
+    ...(subFormat ? { sub_format: subFormat } : {}),
+    ...(Number.isFinite(inFps) ? { in_fps: inFps } : {}),
+    ...(Number.isFinite(outFps) ? { out_fps: outFps } : {}),
+  };
+  try {
+    console.log('[OpenSubtitles] download request:', payload);
+    response = await axios.post(
+      `${OPENSUBTITLES_BASE_URL}/download`,
+      payload,
+      {
+        headers: buildOpenSubtitlesHeaders(configIndex, true),
+        timeout: OPENSUBTITLES_TIMEOUT_MS,
+        httpAgent: httpAgentGlobal,
+        httpsAgent: httpsAgentGlobal,
+      }
+    );
+  } catch (err) {
+    const status = err?.response?.status;
+    if (status === 401 && config?.username && config?.password) {
+      authState.token = null;
+      await loginOpenSubtitles(configIndex);
+      response = await axios.post(
+        `${OPENSUBTITLES_BASE_URL}/download`,
+        payload,
+        {
+          headers: buildOpenSubtitlesHeaders(configIndex, true),
+          timeout: OPENSUBTITLES_TIMEOUT_MS,
+          httpAgent: httpAgentGlobal,
+          httpsAgent: httpsAgentGlobal,
+        }
+      );
+    } else {
+      const data = err?.response?.data;
+      console.warn(
+        '[OpenSubtitles] download error:',
+        status ? `status=${status}` : '',
+        err?.message || err
+      );
+      if (data) {
+        console.warn('[OpenSubtitles] download error payload:', data);
+      }
+      throw err;
+    }
+  }
+
+  const link = response?.data?.link;
+  const fileName = sanitizeFileName(response?.data?.file_name || '');
+  if (!link) {
+    throw new Error('OpenSubtitles no devolvió un link de descarga');
+  }
+
+  const cacheKey = getOpenSubtitlesDownloadCacheKey(configIndex, fileId);
+  const info = { link, fileName, ts: Date.now() };
+  openSubtitlesDownloadCache.set(cacheKey, info);
+  return info;
+}
 
 // Track active search AbortControllers so we can abort searches on-demand
 const activeSearchControllers = new Set();
@@ -1067,6 +1541,271 @@ app.get('/api/search-torrent', async (req, res) => {
     });
   } finally {
     cleanupSearch();
+  }
+});
+
+// =====================
+// OpenSubtitles
+// =====================
+app.get('/api/opensubtitles/search', async (req, res) => {
+  if (!hasOpenSubtitlesConfig()) {
+    return res.status(500).json({ error: 'OpenSubtitles API key no configurada' });
+  }
+
+  const { query, tmdbId, type, season, episode, languages } = req.query;
+  if (!query && !tmdbId) {
+    return res.status(400).json({ error: 'query o tmdbId es requerido' });
+  }
+
+  const params = {
+    query: query ? String(query) : undefined,
+    tmdb_id: tmdbId ? String(tmdbId) : undefined,
+    languages: languages ? String(languages) : undefined,
+    season_number: season ? String(season) : undefined,
+    episode_number: episode ? String(episode) : undefined,
+    order_by: 'download_count',
+    order_direction: 'desc',
+    limit: 50,
+  };
+
+  if (type === 'tv') {
+    params.type = 'episode';
+  } else if (type === 'movie') {
+    params.type = 'movie';
+  }
+
+  try {
+    console.log('[OpenSubtitles] search params:', {
+      query: params.query,
+      tmdb_id: params.tmdb_id,
+      type: params.type,
+      season_number: params.season_number,
+      episode_number: params.episode_number,
+      languages: params.languages,
+    });
+    const response = await withOpenSubtitlesConfig(
+      (configIndex) =>
+        axios.get(`${OPENSUBTITLES_BASE_URL}/subtitles`, {
+          params,
+          headers: buildOpenSubtitlesHeaders(configIndex, false),
+          timeout: OPENSUBTITLES_TIMEOUT_MS,
+          httpAgent: httpAgentGlobal,
+          httpsAgent: httpsAgentGlobal,
+        }),
+      'search'
+    );
+
+    const items = Array.isArray(response?.data?.data) ? response.data.data : [];
+    const results = [];
+    const sampleFiles = Array.isArray(items?.[0]?.attributes?.files)
+      ? items[0].attributes.files.slice(0, 3)
+      : [];
+    console.log(
+      '[OpenSubtitles] response:',
+      `status=${response.status}`,
+      `total=${response?.data?.total_count || 0}`,
+      `items=${items.length}`,
+      `sampleFiles=${sampleFiles.length}`
+    );
+    if (sampleFiles.length > 0) {
+      console.log('[OpenSubtitles] sample files:', sampleFiles);
+    }
+
+    for (const item of items) {
+      const attrs = item?.attributes || {};
+      const picked = pickOpenSubtitlesFile(attrs.files);
+      if (!picked?.file?.file_id) continue;
+
+      results.push({
+        id: item?.id || null,
+        language: attrs.language || 'und',
+        format: picked.format,
+        fileId: picked.file.file_id,
+        fileName: sanitizeFileName(picked.file.file_name || ''),
+        downloads: Number(attrs.download_count) || 0,
+        hearingImpaired: Boolean(attrs.hearing_impaired),
+        fps: attrs.fps || null,
+        release: attrs.release || '',
+        uploader: attrs.uploader?.name || '',
+      });
+    }
+
+    console.log('[OpenSubtitles] results:', results.slice(0, 3));
+    res.json({
+      results,
+      total: response?.data?.total_count || results.length,
+    });
+  } catch (error) {
+    if (error?.code === 'OPENSUBTITLES_AUTH_REQUIRED') {
+      return res.status(403).send(error.message);
+    }
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+    console.error(
+      'Error al buscar en OpenSubtitles:',
+      status ? `status=${status}` : '',
+      error?.message || error
+    );
+    if (data) {
+      console.error('[OpenSubtitles] error payload:', data);
+    }
+    res.status(502).json({
+      error: 'Error al consultar OpenSubtitles',
+      message: error?.message || String(error),
+    });
+  }
+});
+
+app.get('/api/opensubtitles/subtitle/:fileId', async (req, res) => {
+  if (!hasOpenSubtitlesConfig()) {
+    return res.status(500).send('OpenSubtitles API key no configurada');
+  }
+
+  const fileId = Number(req.params.fileId);
+  const requestedFormat = String(req.query.format || '').toLowerCase();
+  const subFormat = requestedFormat === 'vtt' ? 'vtt' : requestedFormat === 'srt' ? 'srt' : '';
+  const fpsRaw = Number(req.query.fps);
+  const fps = Number.isFinite(fpsRaw) ? fpsRaw : null;
+  if (!Number.isFinite(fileId)) {
+    return res.status(400).send('fileId inválido');
+  }
+
+  try {
+    const { subtitleResponse, downloadInfo } = await withOpenSubtitlesConfig(
+      async (configIndex) => {
+        const config = getOpenSubtitlesConfig(configIndex);
+        const authState = getOpenSubtitlesAuthState(configIndex);
+
+        const fetchSubtitle = async (link) =>
+          axios.get(link, {
+            responseType: 'arraybuffer',
+            timeout: OPENSUBTITLES_TIMEOUT_MS,
+            httpAgent: httpAgentGlobal,
+            httpsAgent: httpsAgentGlobal,
+            maxRedirects: 5,
+            headers: {
+              'User-Agent': config?.userAgent || 'PirateFlix',
+              'Api-Key': config?.apiKey || '',
+              Accept: '*/*',
+              'Accept-Language': 'en-US,en;q=0.9',
+              ...(authState?.token ? { Authorization: `Bearer ${authState.token}` } : {}),
+            },
+          });
+
+        const fetchSubtitleWithRetry = async (link) => {
+          try {
+            return await fetchSubtitle(link);
+          } catch (err) {
+            const status = err?.response?.status;
+            if (status !== 503) throw err;
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            return await fetchSubtitle(link);
+          }
+        };
+
+        let downloadInfo = await resolveOpenSubtitlesDownload(
+          configIndex,
+          fileId,
+          subFormat,
+          fps,
+          fps
+        );
+        let subtitleResponse = null;
+
+        try {
+          subtitleResponse = await fetchSubtitleWithRetry(downloadInfo.link);
+        } catch (err) {
+          const status = err?.response?.status;
+          if (status === 401 || status === 403 || status === 503) {
+            if (!config?.username || !config?.password) {
+              const authError = new Error(
+                'OpenSubtitles requiere usuario y contraseña para descargar'
+              );
+              authError.code = 'OPENSUBTITLES_AUTH_REQUIRED';
+              authError.response = { status: 403 };
+              throw authError;
+            }
+
+            const cacheKey = getOpenSubtitlesDownloadCacheKey(configIndex, fileId);
+            openSubtitlesDownloadCache.delete(cacheKey);
+            authState.token = null;
+            await ensureOpenSubtitlesToken(configIndex);
+            downloadInfo = await resolveOpenSubtitlesDownload(
+              configIndex,
+              fileId,
+              subFormat,
+              fps,
+              fps
+            );
+            subtitleResponse = await fetchSubtitleWithRetry(downloadInfo.link);
+          } else {
+            throw err;
+          }
+        }
+
+        return { subtitleResponse, downloadInfo };
+      },
+      'download'
+    );
+
+    let buffer = Buffer.from(subtitleResponse.data);
+    let fileName =
+      downloadInfo.fileName ||
+      extractFilenameFromDisposition(subtitleResponse.headers?.['content-disposition']);
+    let ext = guessSubtitleExtension(
+      fileName,
+      downloadInfo.link,
+      subtitleResponse.headers?.['content-type']
+    );
+
+    if (ext === 'gz') {
+      try {
+        buffer = zlib.gunzipSync(buffer);
+        fileName = String(fileName).replace(/\.gz$/i, '');
+        ext = guessSubtitleExtension(
+          fileName,
+          downloadInfo.link,
+          subtitleResponse.headers?.['content-type']
+        );
+      } catch (err) {
+        console.error('Error al descomprimir subtítulo:', err?.message || err);
+        return res.status(500).send('Error al descomprimir subtítulo');
+      }
+    }
+
+    if (ext === 'zip') {
+      return res.status(415).send('Formato ZIP no soportado');
+    }
+
+    const content = buffer.toString('utf-8');
+    let vttData = '';
+
+    if (ext === 'vtt' || content.startsWith('WEBVTT')) {
+      vttData = content;
+    } else if (ext === 'srt' || /\d{2}:\d{2}:\d{2},\d{3}/.test(content)) {
+      vttData = convertSrtToVtt(content);
+    } else {
+      return res.status(415).send('Formato de subtítulo no soportado');
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/vtt; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=86400',
+    });
+    res.end(vttData);
+  } catch (error) {
+    const status = error?.response?.status;
+    const data = error?.response?.data;
+    console.error(
+      'Error al descargar subtítulo OpenSubtitles:',
+      status ? `status=${status}` : '',
+      error?.message || error
+    );
+    if (data) {
+      console.error('[OpenSubtitles] download fetch payload:', data);
+    }
+    res.status(502).send('Error al descargar subtítulo');
   }
 });
 
