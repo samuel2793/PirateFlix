@@ -15,7 +15,7 @@
         (click)="activeTab.set('movies')"
       >
         <mat-icon>movie</mat-icon>
-        <span>Películas</span>
+        <span i18n>Movies</span>
       </button>
       <button 
         class="nav-tab" 
@@ -23,7 +23,7 @@
         (click)="activeTab.set('tv')"
       >
         <mat-icon>tv</mat-icon>
-        <span>Series</span>
+        <span i18n>TV Shows</span>
       </button>
       <button 
         class="nav-tab" 
@@ -31,7 +31,7 @@
         (click)="activeTab.set('search')"
       >
         <mat-icon>search</mat-icon>
-        <span>Buscar</span>
+        <span i18n>Search</span>
       </button>
     </div>
 
@@ -42,7 +42,8 @@
           class="density-btn" 
           [class.active]="gridSize() === 1"
           (click)="setGridSize(1)"
-          title="Compacto"
+          title="Compact"
+          i18n-title
         >
           <mat-icon>grid_view</mat-icon>
         </button>
@@ -51,6 +52,7 @@
           [class.active]="gridSize() === 2"
           (click)="setGridSize(2)"
           title="Normal"
+          i18n-title
         >
           <mat-icon>view_comfy</mat-icon>
         </button>
@@ -58,7 +60,8 @@
           class="density-btn" 
           [class.active]="gridSize() === 3"
           (click)="setGridSize(3)"
-          title="Grande"
+          title="Large"
+          i18n-title
         >
           <mat-icon>view_module</mat-icon>
         </button>
@@ -86,7 +89,7 @@
       <div class="hero-content">
         <span class="hero-badge">
           <mat-icon>movie</mat-icon>
-          Película Destacada
+          <span i18n>Featured Movie</span>
         </span>
         <h1 class="hero-title">{{ getMovieHero()?.title }}</h1>
         <p class="hero-overview">{{ getMovieHero()?.overview }}</p>
@@ -100,11 +103,11 @@
         <div class="hero-actions">
           <button class="btn-play" (click)="openDetails('movie', getMovieHero()?.id)">
             <mat-icon>play_arrow</mat-icon>
-            <span>Ver ahora</span>
+            <span i18n>Watch now</span>
           </button>
           <button class="btn-info" (click)="openDetails('movie', getMovieHero()?.id)">
             <mat-icon>info_outline</mat-icon>
-            <span>Más info</span>
+            <span i18n>More info</span>
           </button>
         </div>
       </div>
@@ -114,8 +117,8 @@
     <main class="main-content">
       <section class="section" *ngIf="!loading() && !error()">
         <div class="section-header">
-          <h2 class="section-title">Películas en Tendencia</h2>
-          <span class="section-count">{{ movies().length }} títulos</span>
+          <h2 class="section-title" i18n>Trending Movies</h2>
+          <span class="section-count" i18n>{{ movies().length }} titles</span>
         </div>
         
         <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
@@ -154,7 +157,7 @@
       <div class="error-banner" *ngIf="error()">
         <mat-icon>error_outline</mat-icon>
         <span>{{ error() }}</span>
-        <button class="btn-retry" (click)="refreshTrending()">Reintentar</button>
+        <button class="btn-retry" (click)="refreshTrending()" i18n>Retry</button>
       </div>
     </main>
   </div>
@@ -170,7 +173,7 @@
       <div class="hero-content">
         <span class="hero-badge">
           <mat-icon>tv</mat-icon>
-          Serie Destacada
+          <span i18n>Featured TV Show</span>
         </span>
         <h1 class="hero-title">{{ getTvHero()?.name }}</h1>
         <p class="hero-overview">{{ getTvHero()?.overview }}</p>
@@ -184,11 +187,11 @@
         <div class="hero-actions">
           <button class="btn-play" (click)="openDetails('tv', getTvHero()?.id)">
             <mat-icon>play_arrow</mat-icon>
-            <span>Ver ahora</span>
+            <span i18n>Watch now</span>
           </button>
           <button class="btn-info" (click)="openDetails('tv', getTvHero()?.id)">
             <mat-icon>info_outline</mat-icon>
-            <span>Más info</span>
+            <span i18n>More info</span>
           </button>
         </div>
       </div>
@@ -198,8 +201,8 @@
     <main class="main-content">
       <section class="section" *ngIf="!loading() && !error()">
         <div class="section-header">
-          <h2 class="section-title">Series en Tendencia</h2>
-          <span class="section-count">{{ tv().length }} títulos</span>
+          <h2 class="section-title" i18n>Trending TV Shows</h2>
+          <span class="section-count" i18n>{{ tv().length }} titles</span>
         </div>
         
         <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
@@ -238,7 +241,7 @@
       <div class="error-banner" *ngIf="error()">
         <mat-icon>error_outline</mat-icon>
         <span>{{ error() }}</span>
-        <button class="btn-retry" (click)="refreshTrending()">Reintentar</button>
+        <button class="btn-retry" (click)="refreshTrending()" i18n>Retry</button>
       </div>
     </main>
   </div>
@@ -250,8 +253,8 @@
     <main class="main-content search-main">
       <section class="search-section">
         <div class="search-header">
-          <h1 class="search-page-title">Buscar</h1>
-          <p class="search-subtitle">Encuentra películas, series y personas</p>
+          <h1 class="search-page-title" i18n>Search</h1>
+          <p class="search-subtitle" i18n>Find movies, TV shows, and people</p>
         </div>
 
         <div class="search-container">
@@ -260,7 +263,8 @@
             <input
               type="text"
               class="search-input"
-              placeholder="Buscar..."
+              placeholder="Search..."
+              i18n-placeholder
               [ngModel]="query()"
               (ngModelChange)="setQuery($event)"
               (keydown.enter)="doSearch()"
@@ -276,29 +280,33 @@
               class="filter-chip" 
               [class.active]="searchFilter() === 'all'"
               (click)="setSearchFilter('all')"
-            >Todos</button>
+              i18n
+            >All</button>
             <button 
               class="filter-chip" 
               [class.active]="searchFilter() === 'movie'"
               (click)="setSearchFilter('movie')"
-            >Películas</button>
+              i18n
+            >Movies</button>
             <button 
               class="filter-chip" 
               [class.active]="searchFilter() === 'tv'"
               (click)="setSearchFilter('tv')"
-            >Series</button>
+              i18n
+            >TV Shows</button>
             <button 
               class="filter-chip" 
               [class.active]="searchFilter() === 'person'"
               (click)="setSearchFilter('person')"
-            >Personas</button>
+              i18n
+            >People</button>
           </div>
         </div>
 
         <!-- Search Loading -->
         <div class="search-loading" *ngIf="searchLoading()">
           <div class="spinner"></div>
-          <span>Buscando...</span>
+          <span i18n>Searching...</span>
         </div>
 
         <!-- Search Error -->
@@ -343,13 +351,13 @@
         <!-- No Results -->
         <div class="no-results" *ngIf="hasSearch() && !searchLoading() && !searchError() && !searchResultsFiltered().length">
           <mat-icon>search_off</mat-icon>
-          <p>No se encontraron resultados</p>
+          <p i18n>No results found</p>
         </div>
 
         <!-- Empty State -->
         <div class="empty-search" *ngIf="!hasSearch() && !searchLoading()">
           <mat-icon>movie_filter</mat-icon>
-          <p>Escribe algo para buscar</p>
+          <p i18n>Type something to search</p>
         </div>
       </section>
     </main>
