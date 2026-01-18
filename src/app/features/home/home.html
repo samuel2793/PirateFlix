@@ -36,6 +36,34 @@
     </div>
 
     <div class="nav-right">
+      <!-- Content Density Toggle -->
+      <div class="density-toggle">
+        <button 
+          class="density-btn" 
+          [class.active]="gridSize() === 1"
+          (click)="setGridSize(1)"
+          title="Compacto"
+        >
+          <mat-icon>grid_view</mat-icon>
+        </button>
+        <button 
+          class="density-btn" 
+          [class.active]="gridSize() === 2"
+          (click)="setGridSize(2)"
+          title="Normal"
+        >
+          <mat-icon>view_comfy</mat-icon>
+        </button>
+        <button 
+          class="density-btn" 
+          [class.active]="gridSize() === 3"
+          (click)="setGridSize(3)"
+          title="Grande"
+        >
+          <mat-icon>view_module</mat-icon>
+        </button>
+      </div>
+
       <button class="nav-icon-btn" (click)="refreshTrending()">
         <mat-icon>refresh</mat-icon>
       </button>
@@ -90,7 +118,7 @@
           <span class="section-count">{{ movies().length }} títulos</span>
         </div>
         
-        <div class="content-grid">
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
           <div 
             class="grid-card" 
             *ngFor="let item of movies(); let i = index"
@@ -174,7 +202,7 @@
           <span class="section-count">{{ tv().length }} títulos</span>
         </div>
         
-        <div class="content-grid">
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
           <div 
             class="grid-card" 
             *ngFor="let item of tv(); let i = index"
@@ -280,7 +308,7 @@
         </div>
 
         <!-- Search Results Grid -->
-        <div class="content-grid search-grid" *ngIf="hasSearch() && !searchLoading() && !searchError() && searchResultsFiltered().length">
+        <div class="content-grid search-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3" *ngIf="hasSearch() && !searchLoading() && !searchError() && searchResultsFiltered().length">
           <div 
             class="grid-card" 
             *ngFor="let item of searchResultsFiltered()"
@@ -326,9 +354,4 @@
       </section>
     </main>
   </div>
-
-  <!-- Footer -->
-  <footer class="footer">
-    <p>Datos proporcionados por TMDB</p>
-  </footer>
 </div>

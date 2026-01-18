@@ -23,6 +23,7 @@ $accent-orange: #e5a00d;
   background: $bg-primary;
   color: $text-primary;
   min-height: 100vh;
+  animation: fadeIn 0.4s ease-out;
 }
 
 // ========================================
@@ -115,6 +116,55 @@ $accent-orange: #e5a00d;
 .nav-right {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+// Content Density Toggle
+.density-toggle {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.density-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  mat-icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.2s ease;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+
+    mat-icon {
+      color: rgba(255, 255, 255, 0.7);
+    }
+  }
+
+  &.active {
+    background: rgba(255, 255, 255, 0.12);
+
+    mat-icon {
+      color: #fff;
+    }
+  }
 }
 
 .nav-icon-btn {
@@ -371,6 +421,60 @@ $accent-orange: #e5a00d;
 
   @media (min-width: 1200px) {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+
+  // Size variants
+  &.size-small {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 14px;
+
+    @media (min-width: 640px) {
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    }
+
+    @media (min-width: 900px) {
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    }
+
+    .card-title {
+      font-size: 12px;
+    }
+
+    .card-year {
+      font-size: 11px;
+    }
+  }
+
+  // size-medium uses default grid sizing
+
+  &.size-large {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 28px;
+
+    @media (min-width: 640px) {
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+
+    @media (min-width: 900px) {
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+
+    @media (min-width: 1200px) {
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    }
+
+    .card-title {
+      font-size: 16px;
+    }
+
+    .card-year {
+      font-size: 14px;
+    }
+
+    .card-rating {
+      font-size: 13px;
+      padding: 6px 10px;
+    }
   }
 }
 

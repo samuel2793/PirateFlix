@@ -76,6 +76,25 @@ export class HomeComponent implements OnDestroy {
   // Active tab: 'movies' | 'tv' | 'search'
   activeTab = signal<'movies' | 'tv' | 'search'>('movies');
 
+  // Grid size (content density): 1 = small, 2 = medium, 3 = large
+  gridSize = signal<number>(this.loadGridSize());
+
+  private loadGridSize(): number {
+    try {
+      const saved = localStorage.getItem('pirateflix_gridSize');
+      return saved ? Math.min(3, Math.max(1, Number(saved))) : 2;
+    } catch {
+      return 2;
+    }
+  }
+
+  setGridSize(size: number) {
+    this.gridSize.set(size);
+    try {
+      localStorage.setItem('pirateflix_gridSize', String(size));
+    } catch {}
+  }
+
   // Derived
   hasSearch = computed(() => this.query().trim().length > 0);
 
@@ -232,17 +251,15 @@ export class HomeComponent implements OnDestroy {
   openDetailsForResult(item: any) {
     if (item.media_type === 'movie') return this.openDetails('movie', item.id);
     if (item.media_type === 'tv') return this.openDetails('tv', item.id);
-
-    if (item.media_type === 'person' && Array.isArray(item.known_for)) {
-      const known = item.known_for.find(
-        (k: any) => k.media_type === 'movie' || k.media_type === 'tv'
-      );
-      if (known) return this.openDetails(known.media_type, known.id);
-    }
+    if (item.media_type === 'person') return this.openPerson(item.id);
   }
 
   openDetails(type: 'movie' | 'tv', id: number) {
     this.router.navigate(['/details', type, id]);
+  }
+
+  openPerson(id: number) {
+    this.router.navigate(['/person', id]);
   }
 
   scrollTo(id: string) {
