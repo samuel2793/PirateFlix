@@ -88,5 +88,5 @@ Configura estas variables de entorno para habilitar la descarga de subtítulos:
 - `OPEN_SUBTITLES_USER_AGENT` (opcional, por defecto `PirateFlix`)
 - `OPEN_SUBTITLES_USERNAME` / `OPEN_SUBTITLES_PASSWORD` (opcional, para token de descarga)
 
-También puedes definir `openSubtitles` en `src/app/core/config/app-config.ts`; el servidor lo usa
+También puedes definir `openSubtitles` en `src/app/core/config/app-config-public.ts`; el servidor lo usa
 como fallback si no hay variables de entorno.

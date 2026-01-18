@@ -1,6 +1,6 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { APP_CONFIG } from '../config/app-config';
+import { APP_CONFIG } from '../config/app-config-public';
 
 type MediaType = 'movie' | 'tv';
 

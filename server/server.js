@@ -209,14 +209,14 @@ function loadAppConfigFromFile() {
     const appRoot = path.resolve(serverDir, '..');
     const configPath =
       process.env.PIRATEFLIX_APP_CONFIG_PATH ||
-      path.resolve(appRoot, 'src/app/core/config/app-config.ts');
+      path.resolve(appRoot, 'src/app/core/config/app-config-public.ts');
     const source = fs.readFileSync(configPath, 'utf-8');
     const match = source.match(/export const APP_CONFIG\s*=\s*([\s\S]*?)\s*as const\s*;/);
     if (!match) return null;
     const rawObject = stripJsComments(match[1]);
     return new Function(`"use strict"; return (${rawObject});`)();
   } catch (err) {
-    console.warn('No se pudo leer app-config.ts:', err?.message || err);
+    console.warn('No se pudo leer app-config-public.ts:', err?.message || err);
     return null;
   }
 }
