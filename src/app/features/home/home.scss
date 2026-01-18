@@ -175,6 +175,59 @@ $accent-gold: $accent-primary-light;
   }
 }
 
+// Language Selector
+.language-selector {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.lang-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  .flag {
+    font-size: 16px;
+    display: inline-block;
+    transition: all 0.2s ease;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+
+    .flag {
+      transform: scale(1.1);
+    }
+  }
+
+  &.active {
+    background: rgba(255, 255, 255, 0.12);
+
+    .flag {
+      transform: scale(1.15);
+    }
+  }
+}
+
+.lang-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 2px;
+}
+
 .nav-icon-btn {
   display: flex;
   align-items: center;

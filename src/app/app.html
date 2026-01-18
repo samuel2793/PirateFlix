@@ -1,6 +1,9 @@
 <!-- Cinematic Intro (only first visit) -->
 <app-intro (introComplete)="onIntroComplete()"></app-intro>
 
+<!-- Global Navigation (shown on all pages except player) -->
+<app-global-nav *ngIf="showMainContent()"></app-global-nav>
+
 <!-- Main Application -->
 <div class="route-container" *ngIf="showMainContent()" [@routeAnimations]="getRouteAnimationData()">
   <router-outlet />

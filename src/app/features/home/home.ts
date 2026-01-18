@@ -1,4 +1,4 @@
-import { CommonModule, ViewportScroller } from '@angular/common';
+import { CommonModule, ViewportScroller, DOCUMENT } from '@angular/common';
 import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -55,6 +55,35 @@ export class HomeComponent implements OnDestroy {
   private readonly tmdb = inject(TmdbService);
   private readonly router = inject(Router);
   private readonly scroller = inject(ViewportScroller);
+  private readonly document = inject(DOCUMENT);
+
+  // Language
+  currentLang = signal<'en' | 'es'>(this.getInitialLang());
+
+  private getInitialLang(): 'en' | 'es' {
+    try {
+      const saved = localStorage.getItem('pirateflix_lang');
+      return (saved === 'es' || saved === 'en') ? saved : 'en';
+    } catch {
+      return 'en';
+    }
+  }
+
+  changeLang(lang: 'en' | 'es') {
+    if (lang === this.currentLang()) return;
+
+    this.currentLang.set(lang);
+    try {
+      localStorage.setItem('pirateflix_lang', lang);
+    } catch {}
+
+    // Cambiar el atributo lang del documento
+    this.document.documentElement.lang = lang;
+    
+    // Cambiar clase para CSS si es necesario
+    this.document.documentElement.classList.remove('lang-en', 'lang-es');
+    this.document.documentElement.classList.add(`lang-${lang}`);
+  }
 
   // Trending
   movies = signal<any[]>([]);

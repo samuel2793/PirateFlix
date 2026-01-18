@@ -20,6 +20,7 @@ $accent: $accent-primary;
   min-height: 100vh;
   background: $bg-primary;
   color: $text-primary;
+  padding-top: 64px; // Space for global navbar
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   animation: pageEnter 0.5s ease-out;
 }

@@ -8,10 +8,11 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatListModule } from '@angular/material/list';
 import { slideAnimation } from './core/animations/route-animations';
 import { IntroComponent } from './features/intro/intro';
+import { GlobalNavComponent } from './shared/components/global-nav/global-nav';
 
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, RouterOutlet, MatToolbarModule, MatSidenavModule, MatIconModule, MatButtonModule, MatListModule, IntroComponent],
+  imports: [CommonModule, RouterOutlet, MatToolbarModule, MatSidenavModule, MatIconModule, MatButtonModule, MatListModule, IntroComponent, GlobalNavComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   animations: [slideAnimation],

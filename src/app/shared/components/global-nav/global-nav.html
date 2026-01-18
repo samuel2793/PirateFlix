@@ -1,0 +1,30 @@
+<nav class="global-nav" *ngIf="showNav()">
+  <div class="nav-left">
+    <!-- Logo - always goes home -->
+    <a class="logo" routerLink="/" title="Ir al inicio">
+      <mat-icon>play_circle</mat-icon>
+      <span class="logo-text">PirateFlix</span>
+    </a>
+
+    <!-- Back button -->
+    <button 
+      class="back-btn" 
+      (click)="goBack()"
+      title="Volver"
+    >
+      <mat-icon>arrow_back</mat-icon>
+      <span class="back-text" i18n>Back</span>
+    </button>
+  </div>
+
+  <div class="nav-right">
+    <!-- Home button -->
+    <a 
+      class="home-btn" 
+      routerLink="/"
+      title="Ir al inicio"
+    >
+      <mat-icon>home</mat-icon>
+    </a>
+  </div>
+</nav>
