@@ -1,3 +1,7 @@
-<div class="route-container" [@routeAnimations]="getRouteAnimationData()">
+<!-- Cinematic Intro (only first visit) -->
+<app-intro (introComplete)="onIntroComplete()"></app-intro>
+
+<!-- Main Application -->
+<div class="route-container" *ngIf="showMainContent()" [@routeAnimations]="getRouteAnimationData()">
   <router-outlet />
 </div>

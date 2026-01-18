@@ -1,0 +1,27 @@
+<div class="intro-overlay" *ngIf="showIntro()" [class.fadeout]="phase() === 'fadeout'">
+  <!-- Cinematic light rays -->
+  <div class="light-rays">
+    <div class="ray"></div>
+    <div class="ray"></div>
+    <div class="ray"></div>
+  </div>
+
+  <!-- Ambient dust particles -->
+  <div class="dust-container">
+    <div class="dust" *ngFor="let i of [1,2,3,4,5,6,7,8]"></div>
+  </div>
+
+  <!-- Main content -->
+  <div class="intro-content">
+    <!-- Logo reveal -->
+    <div class="logo-wrapper" [class.visible]="phase() !== 'loading'">
+      <!-- Main logo -->
+      <div class="logo">
+        <span class="logo-pirate">PIRATE</span><span class="logo-flix">FLIX</span>
+      </div>
+      
+      <!-- Underline accent -->
+      <div class="logo-accent"></div>
+    </div>
+  </div>
+</div>
