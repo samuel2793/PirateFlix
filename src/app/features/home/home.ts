@@ -60,7 +60,9 @@ export class HomeComponent implements OnDestroy {
   movies = signal<any[]>([]);
   tv = signal<any[]>([]);
   loading = signal(true);
+  refreshing = signal(false);
   error = signal<string | null>(null);
+  lastRefresh = signal<Date | null>(null);
 
   // Search
   query = signal<string>('');
@@ -135,10 +137,37 @@ export class HomeComponent implements OnDestroy {
 
       this.movies.set(m?.results ?? []);
       this.tv.set(t?.results ?? []);
+      this.lastRefresh.set(new Date());
     } catch (e) {
       this.error.set(String(e));
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  async softRefresh() {
+    if (this.refreshing()) return;
+    
+    this.refreshing.set(true);
+    this.error.set(null);
+
+    // Delay mínimo para que la animación se vea suave
+    const minDelay = new Promise(resolve => setTimeout(resolve, 800));
+
+    try {
+      const [m, t] = await Promise.all([
+        this.tmdb.trending('movie', 'day').toPromise(),
+        this.tmdb.trending('tv', 'day').toPromise(),
+        minDelay, // Esperar al menos 800ms para una animación fluida
+      ]);
+
+      this.movies.set(m?.results ?? []);
+      this.tv.set(t?.results ?? []);
+      this.lastRefresh.set(new Date());
+    } catch (e) {
+      this.error.set(String(e));
+    } finally {
+      this.refreshing.set(false);
     }
   }
 

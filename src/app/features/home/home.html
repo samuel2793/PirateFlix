@@ -64,7 +64,13 @@
         </button>
       </div>
 
-      <button class="nav-icon-btn" (click)="refreshTrending()">
+      <button 
+        class="nav-icon-btn" 
+        [class.spinning]="refreshing()" 
+        (click)="softRefresh()" 
+        [disabled]="refreshing()"
+        [attr.title]="lastRefresh() ? 'Última actualización: ' + lastRefresh()?.toLocaleTimeString() : 'Recargar contenido'"
+      >
         <mat-icon>refresh</mat-icon>
       </button>
     </div>
