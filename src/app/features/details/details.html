@@ -77,8 +77,8 @@
             <mat-icon>movie</mat-icon>
             <span i18n>Watch Trailer</span>
           </button>
-          <button 
-            class="btn-secondary" 
+          <button
+            class="btn-secondary"
             [class.active]="inMyList()"
             (click)="toggleMyList()"
           >
@@ -129,8 +129,8 @@
       <div class="cast-scroll">
         <a class="cast-card" *ngFor="let person of cast()" [routerLink]="['/person', person.id]">
           <div class="cast-image">
-            <img 
-              [src]="person.profile || 'assets/placeholder.png'" 
+            <img
+              [src]="person.profile || 'assets/placeholders/placeholder_movie.png'"
               [alt]="person.name"
               loading="lazy"
             />
@@ -152,7 +152,7 @@
         </div>
         <mat-icon class="toggle-arrow" [class.expanded]="showInfo()">expand_more</mat-icon>
       </button>
-      
+
       <div class="info-content" *ngIf="showInfo()">
         <div class="info-chips">
           <!-- Quick Facts -->
@@ -216,7 +216,7 @@
       <button class="trailer-close" (click)="closeTrailer()">
         <mat-icon>close</mat-icon>
       </button>
-      <iframe 
+      <iframe
         title="Movie trailer"
         i18n-title
         [src]="trailerUrl() | safeUrl"
