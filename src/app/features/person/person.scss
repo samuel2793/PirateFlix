@@ -1,0 +1,451 @@
+// Variables
+$bg-primary: #0a0a0a;
+$bg-secondary: #141414;
+$text-primary: #ffffff;
+$text-secondary: rgba(255, 255, 255, 0.7);
+$text-muted: rgba(255, 255, 255, 0.5);
+$accent: #e50914;
+
+.person-page {
+  min-height: 100vh;
+  background: $bg-primary;
+  color: $text-primary;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  animation: pageEnter 0.5s ease-out;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+// Loading & Error States
+.loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.loading-spinner {
+  text-align: center;
+  color: $text-secondary;
+
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top-color: $accent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  text-align: center;
+  padding: 40px;
+
+  mat-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    color: $accent;
+    margin-bottom: 24px;
+  }
+
+  h2 {
+    font-size: 28px;
+    margin-bottom: 12px;
+  }
+
+  p {
+    color: $text-secondary;
+    margin-bottom: 24px;
+  }
+}
+
+// Hero Section
+.hero {
+  position: relative;
+  min-height: auto;
+  padding: 50px 4% 40px;
+  display: flex;
+  align-items: flex-start;
+}
+
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba($accent, 0.15) 0%,
+    transparent 50%,
+    rgba(0, 0, 0, 0.9) 100%
+  );
+  z-index: 0;
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 50px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+// Photo
+.photo-container {
+  flex-shrink: 0;
+}
+
+.photo {
+  width: 300px;
+  height: 450px;
+  object-fit: cover;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+// Info Container
+.info-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: $text-secondary;
+  text-decoration: none;
+  font-size: 14px;
+  margin-bottom: 20px;
+  transition: color 0.2s;
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+
+  &:hover {
+    color: $text-primary;
+  }
+}
+
+.name {
+  font-size: 48px;
+  font-weight: 800;
+  margin: 0 0 24px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+// Stats
+.stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: $text-secondary;
+  font-size: 16px;
+
+  mat-icon {
+    font-size: 22px;
+    width: 22px;
+    height: 22px;
+    color: $accent;
+  }
+}
+
+// Personal Info
+.personal-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  &.wide {
+    grid-column: span 2;
+  }
+}
+
+.info-label {
+  font-size: 13px;
+  color: $text-muted;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  font-size: 16px;
+  color: $text-primary;
+}
+
+// Biography
+.biography {
+  h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    color: $text-primary;
+  }
+}
+
+.bio-text {
+  font-size: 16px;
+  line-height: 1.7;
+  color: $text-secondary;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.bio-toggle {
+  background: none;
+  border: none;
+  color: $accent;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 12px;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// Sections
+.section {
+  padding: 24px 4% 40px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 26px;
+  font-weight: 700;
+  margin: 0 0 24px;
+  color: $text-primary;
+
+  mat-icon {
+    font-size: 30px;
+    width: 30px;
+    height: 30px;
+    color: $accent;
+  }
+}
+
+// Credits Grid
+.credits-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 24px;
+}
+
+.credit-card {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: transform 0.2s ease;
+
+  &:hover {
+    transform: translateY(-8px);
+
+    .credit-poster img {
+      transform: scale(1.05);
+    }
+
+    .credit-overlay {
+      opacity: 1;
+    }
+  }
+}
+
+.credit-poster {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: $bg-secondary;
+  margin-bottom: 12px;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+  }
+}
+
+.credit-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, transparent 50%);
+  display: flex;
+  align-items: flex-end;
+  padding: 12px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.media-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  background: $accent;
+  color: #fff;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.credit-info {
+  padding: 0 4px;
+}
+
+.credit-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 5px;
+  color: $text-primary;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.credit-role {
+  font-size: 14px;
+  color: $text-secondary;
+  margin: 0 0 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.credit-year {
+  font-size: 13px;
+  color: $text-muted;
+}
+
+// Responsive
+@media (max-width: 900px) {
+  .hero {
+    min-height: auto;
+    padding: 40px 5% 60px;
+  }
+
+  .hero-content {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 32px;
+  }
+
+  .photo {
+    width: 220px;
+    height: 330px;
+  }
+
+  .back-link {
+    justify-content: center;
+  }
+
+  .name {
+    font-size: 36px;
+  }
+
+  .stats {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .personal-info {
+    text-align: left;
+  }
+
+  .biography {
+    text-align: left;
+  }
+
+  .credits-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .photo {
+    width: 180px;
+    height: 270px;
+  }
+
+  .name {
+    font-size: 28px;
+  }
+
+  .stats {
+    gap: 16px;
+  }
+
+  .stat {
+    font-size: 13px;
+  }
+
+  .personal-info {
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .section-title {
+    font-size: 20px;
+  }
+
+  .credits-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .credit-title {
+    font-size: 12px;
+  }
+
+  .credit-role {
+    font-size: 11px;
+  }
+}

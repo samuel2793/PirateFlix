@@ -67,15 +67,17 @@
             <mat-icon>play_arrow</mat-icon>
             <span>Reproducir</span>
           </button>
-          <button class="btn-secondary">
-            <mat-icon>add</mat-icon>
-            <span>Mi lista</span>
+          <button class="btn-trailer" *ngIf="hasTrailer()" (click)="openTrailer()">
+            <mat-icon>movie</mat-icon>
+            <span>Ver Trailer</span>
           </button>
-          <button class="btn-icon" matTooltip="Me gusta">
-            <mat-icon>thumb_up</mat-icon>
-          </button>
-          <button class="btn-icon" matTooltip="Compartir">
-            <mat-icon>share</mat-icon>
+          <button 
+            class="btn-secondary" 
+            [class.active]="inMyList()"
+            (click)="toggleMyList()"
+          >
+            <mat-icon>{{ inMyList() ? 'check' : 'add' }}</mat-icon>
+            <span>{{ inMyList() ? 'En mi lista' : 'Mi lista' }}</span>
           </button>
         </div>
 
@@ -114,7 +116,7 @@
     <section class="section cast-section" *ngIf="cast().length">
       <h2 class="section-title">Reparto</h2>
       <div class="cast-scroll">
-        <div class="cast-card" *ngFor="let person of cast()">
+        <a class="cast-card" *ngFor="let person of cast()" [routerLink]="['/person', person.id]">
           <div class="cast-image">
             <img 
               [src]="person.profile || 'assets/placeholder.png'" 
@@ -126,7 +128,7 @@
             <div class="cast-name">{{ person.name }}</div>
             <div class="cast-role">{{ person.character }}</div>
           </div>
-        </div>
+        </a>
       </div>
     </section>
 
@@ -195,6 +197,22 @@
       </div>
     </section>
   </ng-container>
+
+  <!-- Trailer Modal -->
+  <div class="trailer-modal" *ngIf="showTrailer()" (click)="closeTrailer()">
+    <div class="trailer-container" (click)="$event.stopPropagation()">
+      <button class="trailer-close" (click)="closeTrailer()">
+        <mat-icon>close</mat-icon>
+      </button>
+      <iframe 
+        title="Trailer de la película"
+        [src]="trailerUrl() | safeUrl"
+        frameborder="0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowfullscreen>
+      </iframe>
+    </div>
+  </div>
 </div>
 
 <ng-template #loadingTpl>

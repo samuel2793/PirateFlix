@@ -7,6 +7,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
+import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 
@@ -23,6 +24,7 @@ type MediaType = 'movie' | 'tv';
     MatIconModule,
     MatButtonToggleModule,
     MatTooltipModule,
+    SafeUrlPipe,
   ],
   templateUrl: './details.html',
   styleUrl: './details.scss',
@@ -36,6 +38,8 @@ export class DetailsComponent {
   error = signal<string | null>(null);
   item = signal<any | null>(null);
   credits = signal<any | null>(null);
+  videos = signal<any[]>([]);
+  showTrailer = signal(false);
   
   // Preferences with localStorage persistence
   preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
@@ -43,6 +47,7 @@ export class DetailsComponent {
   preferSubtitles = signal(this.loadPref('preferSubtitles'));
   preferYearInSearch = signal(this.loadPref('preferYearInSearch'));
   showInfo = signal(false);
+  inMyList = signal(false);
 
   // Load preference from localStorage
   private loadPref(key: string): boolean {
@@ -94,12 +99,17 @@ export class DetailsComponent {
         return;
       }
 
-      const [data, creditsData] = await Promise.all([
+      const [data, creditsData, videosData] = await Promise.all([
         firstValueFrom(this.tmdb.details(type, id)),
         firstValueFrom(this.tmdb.credits(type, id)),
+        firstValueFrom(this.tmdb.videos(type, id)),
       ]);
       this.item.set(data);
       this.credits.set(creditsData);
+      this.videos.set(videosData?.results || []);
+      
+      // Check if item is in My List
+      this.inMyList.set(this.isInMyList());
     } catch (e: any) {
       this.error.set(e?.message ?? String(e));
     } finally {
@@ -280,6 +290,105 @@ export class DetailsComponent {
       ],
       { queryParams }
     );
+  }
+
+  // Trailer methods
+  mainTrailer() {
+    const vids = this.videos();
+    if (!vids.length) return null;
+    
+    // Prioritize: Official Trailer > Trailer > Teaser > any YouTube video
+    const priorities = ['Trailer', 'Official Trailer', 'Teaser', 'Clip'];
+    
+    for (const priority of priorities) {
+      const found = vids.find(
+        (v: any) => v.site === 'YouTube' && v.type === priority
+      );
+      if (found) return found;
+    }
+    
+    // Fallback to any YouTube video
+    return vids.find((v: any) => v.site === 'YouTube') || null;
+  }
+
+  trailerUrl() {
+    const trailer = this.mainTrailer();
+    if (!trailer) return '';
+    return `https://www.youtube.com/embed/${trailer.key}?autoplay=1&rel=0`;
+  }
+
+  hasTrailer() {
+    return !!this.mainTrailer();
+  }
+
+  openTrailer() {
+    if (this.hasTrailer()) {
+      this.showTrailer.set(true);
+    }
+  }
+
+  closeTrailer() {
+    this.showTrailer.set(false);
+  }
+
+  // My List functionality
+  toggleMyList() {
+    const type = this.route.snapshot.paramMap.get('type');
+    const id = this.route.snapshot.paramMap.get('id');
+    const it = this.item();
+    
+    if (!type || !id || !it) return;
+
+    const myList = this.getMyList();
+    const itemKey = `${type}_${id}`;
+    
+    if (this.inMyList()) {
+      // Remove from list
+      delete myList[itemKey];
+      this.inMyList.set(false);
+    } else {
+      // Add to list
+      myList[itemKey] = {
+        id: Number(id),
+        type,
+        title: this.title(),
+        poster: it.poster_path,
+        backdrop: it.backdrop_path,
+        rating: it.vote_average,
+        year: this.year(),
+        addedAt: new Date().toISOString(),
+      };
+      this.inMyList.set(true);
+    }
+
+    this.saveMyList(myList);
+  }
+
+  private isInMyList(): boolean {
+    const type = this.route.snapshot.paramMap.get('type');
+    const id = this.route.snapshot.paramMap.get('id');
+    
+    if (!type || !id) return false;
+    
+    const myList = this.getMyList();
+    return `${type}_${id}` in myList;
+  }
+
+  private getMyList(): Record<string, any> {
+    try {
+      const data = localStorage.getItem('pirateflix_myList');
+      return data ? JSON.parse(data) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private saveMyList(list: Record<string, any>) {
+    try {
+      localStorage.setItem('pirateflix_myList', JSON.stringify(list));
+    } catch {
+      // Ignore storage errors
+    }
   }
 
   private formatDate(value: string | null | undefined) {

@@ -40,6 +40,15 @@ export class TmdbService {
     });
   }
 
+  videos(type: MediaType, id: number) {
+    return this.http.get<any>(`${this.baseUrl}/${type}/${id}/videos`, {
+      params: {
+        api_key: this.key,
+        language: this.lang,
+      },
+    });
+  }
+
   searchMulti(query: string, page = 1) {
     return this.http.get<any>(`${this.baseUrl}/search/multi`, {
       params: {
@@ -51,6 +60,38 @@ export class TmdbService {
         region: this.region,
       },
     });
+  }
+
+  // Person endpoints
+  personDetails(id: number) {
+    return this.http.get<any>(`${this.baseUrl}/person/${id}`, {
+      params: {
+        api_key: this.key,
+        language: this.lang,
+      },
+    });
+  }
+
+  personCredits(id: number) {
+    return this.http.get<any>(`${this.baseUrl}/person/${id}/combined_credits`, {
+      params: {
+        api_key: this.key,
+        language: this.lang,
+      },
+    });
+  }
+
+  personImages(id: number) {
+    return this.http.get<any>(`${this.baseUrl}/person/${id}/images`, {
+      params: {
+        api_key: this.key,
+      },
+    });
+  }
+
+  profileUrl(path: string | null | undefined, size: 'w185' | 'w300' | 'h632' | 'original' = 'w300') {
+    if (!path) return '';
+    return `https://image.tmdb.org/t/p/${size}${path}`;
   }
 
   posterUrl(path: string | null | undefined) {
