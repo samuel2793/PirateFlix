@@ -67,23 +67,68 @@ $accent-primary: #e5a00d;
 }
 
 .loading-content {
-  text-align: center;
+  text-align: left;
   color: #fff;
   padding: 20px;
+  width: min(560px, 90vw);
 
   h2 {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     font-size: 24px;
-  }
-
-  p {
-    margin-bottom: 16px;
-    font-size: 18px;
   }
 }
 
+.loading-logs {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 220px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.loading-log {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+
+  &.warn {
+    color: #f3c76b;
+  }
+
+  &.error {
+    color: #ff8a8a;
+  }
+
+  &.muted {
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.log-icon {
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  min-width: 12px;
+  text-transform: uppercase;
+}
+
+.log-message {
+  flex: 1;
+  word-break: break-word;
+}
+
 .progress-bar {
-  width: 300px;
+  width: 100%;
+  margin-top: 12px;
   height: 8px;
   background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;

@@ -103,6 +103,14 @@ interface LoadMagnetOptions {
   minAudioTracks?: number;
 }
 
+type LoadingLogLevel = 'info' | 'warn' | 'error';
+
+interface LoadingLogEntry {
+  id: number;
+  level: LoadingLogLevel;
+  message: string;
+}
+
 @Component({
   selector: 'app-player',
   standalone: true,
@@ -133,6 +141,7 @@ export class PlayerComponent implements OnDestroy {
   loading = signal<boolean>(false);
   loadingProgress = signal<number>(0);
   loadingPhase = signal<'idle'|'resetting'|'searching'|'streaming'>('idle');
+  loadingLogs = signal<LoadingLogEntry[]>([]);
   errorMessage = signal<string>('');
   videoSrc = signal<string>('');
   subtitleTracks = signal<SubtitleTrack[]>([]);
@@ -163,11 +172,14 @@ export class PlayerComponent implements OnDestroy {
   openSubtitlesBuckets = signal<Record<string, OpenSubtitleResult[]>>({});
 
   private readonly API_URL = 'http://localhost:3001/api';
+  private readonly maxLoadingLogEntries = 8;
   private currentTorrentHash: string | null = null;
   private currentVideoFileIndex: number | null = null;
   private currentTitle: string | null = null;
   private currentYear: string | null = null;
   private progressInterval: any = null;
+  private loadingLogCounter = 0;
+  private lastProgressLog = -1;
   private pendingSeekTime: number | null = null;
   private pendingWasPlaying = false;
   private playbackSession = 0;
@@ -193,6 +205,32 @@ export class PlayerComponent implements OnDestroy {
     }
     this.searchAbortController = new AbortController();
     return this.searchAbortController;
+  }
+
+  private resetLoadingLogs() {
+    this.loadingLogCounter = 0;
+    this.lastProgressLog = -1;
+    this.loadingLogs.set([]);
+  }
+
+  private pushLoadingLog(message: string, level: LoadingLogLevel = 'info') {
+    const trimmed = String(message || '').trim();
+    if (!trimmed) return;
+
+    const current = this.loadingLogs();
+    const last = current[current.length - 1];
+    if (last && last.message === trimmed && last.level === level) return;
+
+    const entry: LoadingLogEntry = {
+      id: ++this.loadingLogCounter,
+      level,
+      message: trimmed,
+    };
+    const next = current.concat(entry);
+    if (next.length > this.maxLoadingLogEntries) {
+      next.splice(0, next.length - this.maxLoadingLogEntries);
+    }
+    this.loadingLogs.set(next);
   }
 
   async ngOnInit() {
@@ -260,6 +298,8 @@ export class PlayerComponent implements OnDestroy {
     this.loadingProgress.set(0);
     this.errorMessage.set('');
     this.showPlayer.set(true);
+    this.resetLoadingLogs();
+    this.pushLoadingLog('Preparando servidor para la reproducción...');
 
     const type = this.type();
     const id = this.id();
@@ -275,6 +315,7 @@ export class PlayerComponent implements OnDestroy {
 
       // 2. Obtener información de la película/serie desde TMDB
       console.log(`Obteniendo datos de TMDB: ${type}/${id}`);
+      this.pushLoadingLog(`Obteniendo datos de TMDB: ${type}/${id}`);
       const movieData = await firstValueFrom(this.tmdb.details(type, id));
       if (!this.isSessionActive(sessionId)) return;
 
@@ -289,9 +330,11 @@ export class PlayerComponent implements OnDestroy {
       this.currentYear = year || null;
 
       console.log(`Buscando torrent para: ${title} (${year})`);
+      this.pushLoadingLog(`Buscando torrent para: ${title} (${year})`);
 
       // 3. Mostrar fase de búsqueda inmediatamente
       this.loadingPhase.set('searching');
+      this.pushLoadingLog('Buscando torrents disponibles...');
       // Intentar queries de más a menos específicas para ampliar resultados
       const normalizeQuery = (value: string) => value.replace(/\s+/g, ' ').trim();
       const normalizedTitle = normalizeQuery(
@@ -357,6 +400,7 @@ export class PlayerComponent implements OnDestroy {
 
         if (cacheFresh && cachedSearch) {
           console.log('✅ Usando resultados en cache para esta película');
+          this.pushLoadingLog('Usando resultados en cache para esta película');
           aggregatedResults.push(...cachedSearch.results);
           sawSeeded = cachedSearch.sawSeeded;
         }
@@ -442,6 +486,10 @@ export class PlayerComponent implements OnDestroy {
 
         if (!sawSeeded) {
           console.warn('⚠️ No se encontraron torrents con seeders, usando el mejor disponible');
+          this.pushLoadingLog(
+            'No se encontraron torrents con seeders, usando el mejor disponible',
+            'warn'
+          );
         }
 
         // Preferir torrents con formatos compatibles con navegadores
@@ -456,6 +504,7 @@ export class PlayerComponent implements OnDestroy {
         }
 
         console.log(`📋 Torrents disponibles (cat ${category}):`);
+        this.pushLoadingLog(`Torrents encontrados: ${torrents.length} (cat ${category})`);
         torrents.forEach((t: any, i: number) => {
           console.log(`  ${i + 1}. ${t.name}`);
         });
@@ -604,9 +653,11 @@ export class PlayerComponent implements OnDestroy {
         }
         console.log(`Torrent seleccionado: ${bestTorrent.name}`);
         console.log(`Seeders: ${bestTorrent.seeders}, Tamaño: ${bestTorrent.size}`);
+        this.pushLoadingLog(`Torrent seleccionado: ${bestTorrent.name}`);
 
         // Mostrar fase de streaming
         this.loadingPhase.set('streaming');
+        this.pushLoadingLog('Conectando al torrent...');
         // Cargar el magnet link (con fallback si no hay video compatible)
         if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
 
@@ -665,31 +716,52 @@ export class PlayerComponent implements OnDestroy {
           } catch (error: any) {
             if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
             if (error?.code === NO_COMPATIBLE_VIDEO_CODE) {
+              if (!sawNoCompatible) {
+                this.pushLoadingLog(
+                  'Torrent incompatible (ISO/BDMV), probando otro...',
+                  'warn'
+                );
+              }
               sawNoCompatible = true;
               console.warn('⚠️ Torrent incompatible (ISO/BDMV), probando otro:', candidate.name);
               continue;
-              } else {
-                if (error?.code === NO_MULTI_AUDIO_CODE) {
-                  sawNoMultiAudio = true;
-                  console.warn(
-                    '⚠️ Torrent sin varias pistas de audio, probando otro:',
-                    candidate.name
+            } else {
+              if (error?.code === NO_MULTI_AUDIO_CODE) {
+                if (!sawNoMultiAudio) {
+                  this.pushLoadingLog(
+                    'Torrent sin varias pistas de audio, probando otro...',
+                    'warn'
                   );
-                  continue;
                 }
-                if (error?.code === NO_SUBTITLES_CODE) {
-                  sawNoSubtitles = true;
-                  console.warn('⚠️ Torrent sin subtítulos, probando otro:', candidate.name);
-                  continue;
+                sawNoMultiAudio = true;
+                console.warn(
+                  '⚠️ Torrent sin varias pistas de audio, probando otro:',
+                  candidate.name
+                );
+                continue;
+              }
+              if (error?.code === NO_SUBTITLES_CODE) {
+                if (!sawNoSubtitles) {
+                  this.pushLoadingLog('Torrent sin subtítulos, probando otro...', 'warn');
                 }
-                if (error?.code === NO_SEEKABLE_CODE) {
-                  sawNoSeekable = true;
-                  console.warn(
-                    '⚠️ Torrent sin seeking disponible, probando otro:',
-                    candidate.name
+                sawNoSubtitles = true;
+                console.warn('⚠️ Torrent sin subtítulos, probando otro:', candidate.name);
+                continue;
+              }
+              if (error?.code === NO_SEEKABLE_CODE) {
+                if (!sawNoSeekable) {
+                  this.pushLoadingLog(
+                    'Torrent sin seeking disponible, probando otro...',
+                    'warn'
                   );
-                  continue;
                 }
+                sawNoSeekable = true;
+                console.warn(
+                  '⚠️ Torrent sin seeking disponible, probando otro:',
+                  candidate.name
+                );
+                continue;
+              }
               lastError = error;
             }
             console.warn('⚠️ Error al cargar torrent, intentando otro:', error);
@@ -722,6 +794,7 @@ export class PlayerComponent implements OnDestroy {
       for (const category of categoriesToTry) {
         if (!this.isSessionActive(sessionId)) return;
         console.log(`🔎 Buscando en categoría ${category}...`);
+        this.pushLoadingLog(`Buscando en categoría ${category}...`);
         const result = await attemptCategory(category);
         if (result.status === 'aborted') {
           return;
@@ -825,6 +898,8 @@ export class PlayerComponent implements OnDestroy {
           text: 'Reproducir',
           handler: (data) => {
             if (data.magnetLink && data.magnetLink.trim()) {
+              this.resetLoadingLogs();
+              this.pushLoadingLog('Usando magnet link manual...');
               this.loadMagnetLink(data.magnetLink.trim(), this.playbackSession, {
                 requireMultiAudio: this.preferMultiAudio(),
                 requireSeekable: this.preferSeekable(),
@@ -861,11 +936,14 @@ export class PlayerComponent implements OnDestroy {
       if (response.ok) {
         const result = await response.json();
         console.log(`⚡ Quick-switch completado en ${result.time}ms`);
+        this.pushLoadingLog(`Servidor preparado en ${result.time}ms`);
         return true;
       }
+      this.pushLoadingLog('Quick-switch sin respuesta, continuando...', 'warn');
       return false;
     } catch (err) {
       console.warn('Quick-switch falló, continuando:', err);
+      this.pushLoadingLog('Quick-switch falló, continuando...', 'warn');
       return false;
     }
   }
@@ -911,6 +989,7 @@ export class PlayerComponent implements OnDestroy {
     );
     if (!this.isSessionActive(sessionId)) return false;
     this.loading.set(true);
+    this.loadingPhase.set('streaming');
     this.errorMessage.set('');
     this.showPlayer.set(true);
     this.subtitleTracks.set([]);
@@ -922,9 +1001,11 @@ export class PlayerComponent implements OnDestroy {
     this.openSubtitlesLanguageOrder.set([]);
     this.openSubtitlesLanguageIndices.set({});
     this.openSubtitlesBuckets.set({});
+    this.pushLoadingLog('Conectando al torrent...');
 
     try {
       console.log('Enviando torrent al backend:', magnetUri);
+      this.pushLoadingLog('Enviando torrent al backend...');
 
       // Agregar torrent en el backend
       const response = await fetch(`${this.API_URL}/torrent/add`, {
@@ -946,6 +1027,7 @@ export class PlayerComponent implements OnDestroy {
       console.log('Torrent agregado:', torrentInfo.name);
       console.log('InfoHash:', torrentInfo.infoHash);
       console.log('Archivos:', torrentInfo.files.length);
+      this.pushLoadingLog(`Torrent agregado: ${torrentInfo.name}`);
 
       const isVideoFile = (file: TorrentFile) => {
         if (file.type === 'video') return true;
@@ -998,6 +1080,7 @@ export class PlayerComponent implements OnDestroy {
       }
 
       console.log('Archivo seleccionado:', videoFile.name);
+      this.pushLoadingLog(`Archivo seleccionado: ${videoFile.name}`);
       this.currentVideoFileIndex = videoFile.index;
 
       // ✅ TRANSCODIFICACIÓN AUTOMÁTICA: el backend detecta y decide si transcodificar
@@ -1086,12 +1169,14 @@ export class PlayerComponent implements OnDestroy {
       }
 
       this.subtitleTracks.set(subtitles);
+      this.pushLoadingLog(`Total de subtítulos disponibles: ${subtitles.length}`);
 
       // Construir URL de streaming (con transcodificación si es necesario)
       const streamUrl = this.buildStreamUrl('auto');
       this.videoSrc.set(streamUrl);
 
       console.log('URL de streaming:', streamUrl);
+      this.pushLoadingLog('Iniciando streaming...');
       if (subtitles.length > 0) {
         console.log('Total de subtítulos disponibles:', subtitles.length);
         console.log(
@@ -1595,7 +1680,13 @@ export class PlayerComponent implements OnDestroy {
           const progress = Math.round((info.progress || 0) * 100);
           this.loadingProgress.set(progress);
 
-          if (progress % 10 === 0 && progress > 0) {
+          if (progress % 10 === 0 && progress > 0 && progress !== this.lastProgressLog) {
+            this.lastProgressLog = progress;
+            this.pushLoadingLog(
+              `Progreso ${progress}% | Peers ${info.numPeers || 0} | Velocidad ${Math.round(
+                (info.downloadSpeed || 0) / 1024
+              )} KB/s`
+            );
             console.log(
               `Progreso: ${progress}% | Peers: ${info.numPeers} | Velocidad: ${Math.round(
                 (info.downloadSpeed || 0) / 1024

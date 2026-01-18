@@ -5,17 +5,34 @@
         <div class="loading-content">
           @if (loadingPhase() === 'resetting') {
             <h2 i18n>Preparing the server for the next stream...</h2>
-            <p i18n>Resetting connections, clearing torrents, and warming up mirrors.</p>
           } @else if (loadingPhase() === 'searching') {
             <h2 i18n>Searching for available torrents...</h2>
-            <p i18n>Checking mirrors and external sources.</p>
           } @else {
-            <h2 i18n>Loading torrent...</h2>
-            <p i18n>Progress: {{ loadingProgress() }}%</p>
+            <h2 i18n>Connecting to the torrent...</h2>
+          }
+
+          <ul class="loading-logs" aria-live="polite">
+            @if (loadingLogs().length === 0) {
+              <li class="loading-log muted" i18n>Gathering status updates...</li>
+            } @else {
+              @for (entry of loadingLogs(); track entry.id) {
+                <li class="loading-log" [class.warn]="entry.level === 'warn'" [class.error]="entry.level === 'error'">
+                  <span class="log-icon" aria-hidden="true">
+                    @if (entry.level === 'error') { x }
+                    @else if (entry.level === 'warn') { ! }
+                    @else { > }
+                  </span>
+                  <span class="log-message">{{ entry.message }}</span>
+                </li>
+              }
+            }
+          </ul>
+
+          <!-- @if (loadingPhase() === 'streaming') {
             <div class="progress-bar">
               <div class="progress-fill" [style.width.%]="loadingProgress()"></div>
             </div>
-          }
+          } -->
         </div>
       </div>
     }
@@ -54,23 +71,23 @@
     <div class="settings-panel">
       <div class="settings-header">
         <div class="settings-tabs">
-          <button 
-            class="tab-btn" 
-            [class.active]="settingsTab() === 'audio'" 
+          <button
+            class="tab-btn"
+            [class.active]="settingsTab() === 'audio'"
             (click)="setSettingsTab('audio')"
             [disabled]="audioTracks().length <= 1">
             🔊 <span i18n>Audio</span>
           </button>
-          <button 
-            class="tab-btn" 
-            [class.active]="settingsTab() === 'subtitles'" 
+          <button
+            class="tab-btn"
+            [class.active]="settingsTab() === 'subtitles'"
             (click)="setSettingsTab('subtitles')"
             [disabled]="subtitleTracks().length === 0 && !canSearchOpenSubtitles()">
             💬 <span i18n>Subtitles</span>
           </button>
-          <button 
-            class="tab-btn" 
-            [class.active]="settingsTab() === 'appearance'" 
+          <button
+            class="tab-btn"
+            [class.active]="settingsTab() === 'appearance'"
             (click)="setSettingsTab('appearance')"
             [disabled]="subtitleTracks().length === 0">
             🎨 <span i18n>Appearance</span>
@@ -78,7 +95,7 @@
         </div>
         <button class="close-btn" (click)="toggleSettings()" title="Close" i18n-title>✕</button>
       </div>
-      
+
       <div class="settings-content">
         <!-- Audio Tab -->
         @if (settingsTab() === 'audio') {
@@ -87,16 +104,16 @@
               <div class="setting-group">
                 <label class="group-label" i18n>Audio track</label>
                 <div class="audio-list">
-                  <button 
-                    class="audio-option" 
+                  <button
+                    class="audio-option"
                     [class.active]="selectedAudioTrack() === 'auto'"
                     (click)="selectAudioTrack('auto')">
                     <span class="audio-icon">🔄</span>
                     <span class="audio-name" i18n>Auto</span>
                   </button>
                   @for (track of audioTracks(); track track.index) {
-                    <button 
-                      class="audio-option" 
+                    <button
+                      class="audio-option"
                       [class.active]="selectedAudioTrack() === track.index"
                       (click)="selectAudioTrack(track.index)">
                       <span class="audio-icon">🔊</span>
@@ -124,16 +141,16 @@
               <div class="setting-group">
                 <label class="group-label" i18n>Subtitle track</label>
                 <div class="subtitle-list">
-                  <button 
-                    class="subtitle-option" 
+                  <button
+                    class="subtitle-option"
                     [class.active]="selectedSubtitleTrack() === -1"
                     (click)="selectSubtitleTrack(-1)">
                     <span class="sub-icon">🚫</span>
                     <span class="sub-name" i18n>Off</span>
                   </button>
                   @for (track of subtitleTracks(); track track.index; let i = $index) {
-                    <button 
-                      class="subtitle-option" 
+                    <button
+                      class="subtitle-option"
                       [class.active]="selectedSubtitleTrack() === i"
                       (click)="selectSubtitleTrack(i)">
                       <span class="sub-icon">💬</span>
