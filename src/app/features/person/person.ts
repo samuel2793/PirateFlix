@@ -108,14 +108,14 @@ export class PersonComponent {
 
     const birthDate = new Date(birth);
     const endDate = death ? new Date(death) : new Date();
-    
+
     let age = endDate.getFullYear() - birthDate.getFullYear();
     const monthDiff = endDate.getMonth() - birthDate.getMonth();
-    
+
     if (monthDiff < 0 || (monthDiff === 0 && endDate.getDate() < birthDate.getDate())) {
       age--;
     }
-    
+
     return age;
   }
 
@@ -145,7 +145,7 @@ export class PersonComponent {
   actingCredits(): Credit[] {
     const creds = this.credits();
     if (!creds?.cast) return [];
-    
+
     return [...creds.cast]
       .filter((c: Credit) => c.poster_path) // Only with posters
       .sort((a: Credit, b: Credit) => {
@@ -199,7 +199,7 @@ export class PersonComponent {
 
   // Helpers
   getPoster(credit: Credit) {
-    return this.tmdb.posterUrl(credit.poster_path) || 'assets/placeholder.png';
+    return this.tmdb.posterUrl(credit.poster_path) || 'assets/placeholders/placeholder_movie.png';
   }
 
   getTitle(credit: Credit) {

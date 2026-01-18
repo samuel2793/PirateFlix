@@ -2,9 +2,9 @@
   <!-- Error State -->
   <div class="error-state" *ngIf="error()">
     <mat-icon>error_outline</mat-icon>
-    <h2>Error al cargar</h2>
+    <h2 i18n>Error loading</h2>
     <p>{{ error() }}</p>
-    <button mat-flat-button routerLink="/">Volver al inicio</button>
+    <button mat-flat-button routerLink="/" i18n>Back to home</button>
   </div>
 
   <ng-container *ngIf="!error() && item() as it">
@@ -32,7 +32,8 @@
           <span class="meta-divider" *ngIf="year() && runtimeLabel()"></span>
           <span class="meta-item" *ngIf="runtimeLabel()">{{ runtimeLabel() }}</span>
           <span class="meta-divider" *ngIf="seasonsLabel()"></span>
-          <span class="meta-item" *ngIf="seasonsLabel()">{{ seasonsLabel() }} temporada{{ seasonsLabel() !== '1' ? 's' : '' }}</span>
+          <span class="meta-item" *ngIf="seasonsLabel() === '1'" i18n>{{ seasonsLabel() }} season</span>
+          <span class="meta-item" *ngIf="seasonsLabel() && seasonsLabel() !== '1'" i18n>{{ seasonsLabel() }} seasons</span>
         </div>
 
         <!-- Genres -->
@@ -43,20 +44,25 @@
         </div>
 
         <!-- Overview -->
-        <p class="overview">{{ overview() || 'Sin sinopsis disponible.' }}</p>
+        <p class="overview" *ngIf="overview(); else noOverview">{{ overview() }}</p>
+        <ng-template #noOverview>
+          <p class="overview" i18n>No synopsis available.</p>
+        </ng-template>
 
         <!-- Crew Info -->
         <div class="crew-info">
           <div class="crew-item" *ngIf="directors().length">
-            <span class="crew-label">{{ directors().length > 1 ? 'Directores:' : 'Director:' }}</span>
+            <span class="crew-label" *ngIf="directors().length > 1" i18n>Directors:</span>
+            <span class="crew-label" *ngIf="directors().length === 1" i18n>Director:</span>
             <span class="crew-value">{{ directors().join(', ') }}</span>
           </div>
           <div class="crew-item" *ngIf="creators().length">
-            <span class="crew-label">{{ creators().length > 1 ? 'Creadores:' : 'Creador:' }}</span>
+            <span class="crew-label" *ngIf="creators().length > 1" i18n>Creators:</span>
+            <span class="crew-label" *ngIf="creators().length === 1" i18n>Creator:</span>
             <span class="crew-value">{{ creators().join(', ') }}</span>
           </div>
           <div class="crew-item" *ngIf="writers().length">
-            <span class="crew-label">Guión:</span>
+            <span class="crew-label" i18n>Writers:</span>
             <span class="crew-value">{{ writers().join(', ') }}</span>
           </div>
         </div>
@@ -65,19 +71,24 @@
         <div class="actions">
           <button class="btn-play" (click)="play()">
             <mat-icon>play_arrow</mat-icon>
-            <span>Reproducir</span>
+            <span i18n>Play</span>
           </button>
           <button class="btn-trailer" *ngIf="hasTrailer()" (click)="openTrailer()">
             <mat-icon>movie</mat-icon>
-            <span>Ver Trailer</span>
+            <span i18n>Watch Trailer</span>
           </button>
-          <button 
-            class="btn-secondary" 
+          <button
+            class="btn-secondary"
             [class.active]="inMyList()"
             (click)="toggleMyList()"
           >
             <mat-icon>{{ inMyList() ? 'check' : 'add' }}</mat-icon>
-            <span>{{ inMyList() ? 'En mi lista' : 'Mi lista' }}</span>
+            <ng-container *ngIf="inMyList(); else addToList">
+              <span i18n>In My List</span>
+            </ng-container>
+            <ng-template #addToList>
+              <span i18n>My List</span>
+            </ng-template>
           </button>
         </div>
 
@@ -86,22 +97,22 @@
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferMultiAudio()" (change)="toggleMultiAudio($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label">Multi-audio</span>
+            <span class="toggle-label" i18n>Multi-audio</span>
           </label>
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferSubtitles()" (change)="toggleSubtitles($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label">Con subtítulos</span>
+            <span class="toggle-label" i18n>With subtitles</span>
           </label>
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferSeekable()" (change)="toggleSeekable($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label">Solo seekable</span>
+            <span class="toggle-label" i18n>Seekable only</span>
           </label>
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferYearInSearch()" (change)="toggleYearInSearch($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label">Forzar año en búsqueda</span>
+            <span class="toggle-label" i18n>Force year in search</span>
           </label>
         </div>
       </div>
@@ -114,12 +125,12 @@
 
     <!-- Cast Section -->
     <section class="section cast-section" *ngIf="cast().length">
-      <h2 class="section-title">Reparto</h2>
+      <h2 class="section-title" i18n>Cast</h2>
       <div class="cast-scroll">
         <a class="cast-card" *ngFor="let person of cast()" [routerLink]="['/person', person.id]">
           <div class="cast-image">
-            <img 
-              [src]="person.profile || 'assets/placeholder.png'" 
+            <img
+              [src]="person.profile || 'assets/placeholders/placeholder_movie.png'"
               [alt]="person.name"
               loading="lazy"
             />
@@ -137,11 +148,11 @@
       <button class="info-toggle" (click)="showInfo.set(!showInfo())">
         <div class="toggle-left">
           <mat-icon>info_outline</mat-icon>
-          <span>Información adicional</span>
+          <span i18n>Additional information</span>
         </div>
         <mat-icon class="toggle-arrow" [class.expanded]="showInfo()">expand_more</mat-icon>
       </button>
-      
+
       <div class="info-content" *ngIf="showInfo()">
         <div class="info-chips">
           <!-- Quick Facts -->
@@ -155,11 +166,12 @@
           </div>
           <div class="info-chip" *ngIf="seasonsLabel()">
             <mat-icon>tv</mat-icon>
-            <span>{{ seasonsLabel() }} temporada{{ seasonsLabel() !== '1' ? 's' : '' }}</span>
+            <span *ngIf="seasonsLabel() === '1'" i18n>{{ seasonsLabel() }} season</span>
+            <span *ngIf="seasonsLabel() !== '1'" i18n>{{ seasonsLabel() }} seasons</span>
           </div>
           <div class="info-chip" *ngIf="episodesLabel()">
             <mat-icon>video_library</mat-icon>
-            <span>{{ episodesLabel() }} episodios</span>
+            <span i18n>{{ episodesLabel() }} episodes</span>
           </div>
           <div class="info-chip" *ngIf="languageLabel()">
             <mat-icon>language</mat-icon>
@@ -177,22 +189,22 @@
 
         <div class="info-details">
           <div class="info-column" *ngIf="companiesLabel()">
-            <span class="info-label">Estudios</span>
+            <span class="info-label" i18n>Studios</span>
             <span class="info-value">{{ companiesLabel() }}</span>
           </div>
           <div class="info-column" *ngIf="budgetLabel() !== '—'">
-            <span class="info-label">Presupuesto</span>
+            <span class="info-label" i18n>Budget</span>
             <span class="info-value">{{ budgetLabel() }}</span>
           </div>
           <div class="info-column" *ngIf="revenueLabel() !== '—'">
-            <span class="info-label">Recaudación</span>
+            <span class="info-label" i18n>Revenue</span>
             <span class="info-value">{{ revenueLabel() }}</span>
           </div>
         </div>
 
         <a class="official-link" *ngIf="homepageLabel()" [href]="homepageLabel()" target="_blank" rel="noreferrer">
           <mat-icon>open_in_new</mat-icon>
-          Visitar sitio oficial
+          <span i18n>Visit official site</span>
         </a>
       </div>
     </section>
@@ -204,8 +216,9 @@
       <button class="trailer-close" (click)="closeTrailer()">
         <mat-icon>close</mat-icon>
       </button>
-      <iframe 
-        title="Trailer de la película"
+      <iframe
+        title="Movie trailer"
+        i18n-title
         [src]="trailerUrl() | safeUrl"
         frameborder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -219,7 +232,7 @@
   <div class="details-page loading-state">
     <div class="loading-spinner">
       <div class="spinner"></div>
-      <p>Cargando...</p>
+      <p i18n>Loading...</p>
     </div>
   </div>
 </ng-template>

@@ -40,7 +40,7 @@ export class DetailsComponent {
   credits = signal<any | null>(null);
   videos = signal<any[]>([]);
   showTrailer = signal(false);
-  
+
   // Preferences with localStorage persistence
   preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
   preferSeekable = signal(this.loadPref('preferSeekable'));
@@ -107,7 +107,7 @@ export class DetailsComponent {
       this.item.set(data);
       this.credits.set(creditsData);
       this.videos.set(videosData?.results || []);
-      
+
       // Check if item is in My List
       this.inMyList.set(this.isInMyList());
     } catch (e: any) {
@@ -124,7 +124,7 @@ export class DetailsComponent {
 
   poster() {
     const it = this.item();
-    return this.tmdb.posterUrl(it?.poster_path) || 'assets/placeholder.png';
+    return this.tmdb.posterUrl(it?.poster_path) || 'assets/placeholders/placeholder_movie.png';
   }
 
   backdrop() {
@@ -132,7 +132,7 @@ export class DetailsComponent {
     return (
       this.tmdb.backdropUrl(it?.backdrop_path) ||
       this.tmdb.posterUrl(it?.poster_path) ||
-      'assets/placeholder.png'
+      'assets/placeholders/placeholder_movie.png'
     );
   }
 
@@ -296,17 +296,17 @@ export class DetailsComponent {
   mainTrailer() {
     const vids = this.videos();
     if (!vids.length) return null;
-    
+
     // Prioritize: Official Trailer > Trailer > Teaser > any YouTube video
     const priorities = ['Trailer', 'Official Trailer', 'Teaser', 'Clip'];
-    
+
     for (const priority of priorities) {
       const found = vids.find(
         (v: any) => v.site === 'YouTube' && v.type === priority
       );
       if (found) return found;
     }
-    
+
     // Fallback to any YouTube video
     return vids.find((v: any) => v.site === 'YouTube') || null;
   }
@@ -336,12 +336,12 @@ export class DetailsComponent {
     const type = this.route.snapshot.paramMap.get('type');
     const id = this.route.snapshot.paramMap.get('id');
     const it = this.item();
-    
+
     if (!type || !id || !it) return;
 
     const myList = this.getMyList();
     const itemKey = `${type}_${id}`;
-    
+
     if (this.inMyList()) {
       // Remove from list
       delete myList[itemKey];
@@ -367,9 +367,9 @@ export class DetailsComponent {
   private isInMyList(): boolean {
     const type = this.route.snapshot.paramMap.get('type');
     const id = this.route.snapshot.paramMap.get('id');
-    
+
     if (!type || !id) return false;
-    
+
     const myList = this.getMyList();
     return `${type}_${id}` in myList;
   }

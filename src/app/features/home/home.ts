@@ -74,7 +74,7 @@ export class HomeComponent implements OnDestroy {
   searchError = signal<string | null>(null);
 
   tabIndex = 0;
-  
+
   // Active tab: 'movies' | 'tv' | 'search'
   activeTab = signal<'movies' | 'tv' | 'search'>('movies');
 
@@ -204,7 +204,7 @@ export class HomeComponent implements OnDestroy {
   }
 
   posterOrPlaceholder(path: string | null | undefined) {
-    return this.poster(path) || 'assets/placeholder.png';
+    return this.poster(path) || 'assets/placeholders/placeholder_movie.png';
   }
 
   title(item: any) {
