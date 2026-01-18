@@ -1,0 +1,136 @@
+<div class="person-page" *ngIf="!loading(); else loadingTpl">
+  <!-- Error State -->
+  <div class="error-state" *ngIf="error()">
+    <mat-icon>error_outline</mat-icon>
+    <h2>Error al cargar</h2>
+    <p>{{ error() }}</p>
+    <button mat-flat-button routerLink="/">Volver al inicio</button>
+  </div>
+
+  <ng-container *ngIf="!error() && person() as p">
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-bg"></div>
+      
+      <div class="hero-content">
+        <!-- Photo -->
+        <div class="photo-container">
+          <img [src]="photo()" [alt]="name()" class="photo" />
+        </div>
+
+        <!-- Info -->
+        <div class="info-container">
+          <h1 class="name">{{ name() }}</h1>
+
+          <!-- Quick Stats -->
+          <div class="stats">
+            <div class="stat" *ngIf="knownFor()">
+              <mat-icon>work</mat-icon>
+              <span>{{ knownFor() }}</span>
+            </div>
+            <div class="stat" *ngIf="totalMovies() > 0">
+              <mat-icon>movie</mat-icon>
+              <span>{{ totalMovies() }} películas</span>
+            </div>
+            <div class="stat" *ngIf="totalTvShows() > 0">
+              <mat-icon>tv</mat-icon>
+              <span>{{ totalTvShows() }} series</span>
+            </div>
+          </div>
+
+          <!-- Personal Info -->
+          <div class="personal-info">
+            <div class="info-item" *ngIf="birthDate() !== '—'">
+              <span class="info-label">Nacimiento</span>
+              <span class="info-value">{{ birthDate() }}</span>
+            </div>
+            <div class="info-item" *ngIf="deathDate()">
+              <span class="info-label">Fallecimiento</span>
+              <span class="info-value">{{ deathDate() }}</span>
+            </div>
+            <div class="info-item" *ngIf="age()">
+              <span class="info-label">{{ deathDate() ? 'Edad al fallecer' : 'Edad' }}</span>
+              <span class="info-value">{{ age() }} años</span>
+            </div>
+            <div class="info-item wide" *ngIf="birthPlace()">
+              <span class="info-label">Lugar de nacimiento</span>
+              <span class="info-value">{{ birthPlace() }}</span>
+            </div>
+          </div>
+
+          <!-- Biography -->
+          <div class="biography">
+            <h3>Biografía</h3>
+            <p class="bio-text">{{ showFullBio() ? biography() : shortBio() }}</p>
+            <button class="bio-toggle" *ngIf="hasBioOverflow()" (click)="toggleBio()">
+              {{ showFullBio() ? 'Ver menos' : 'Ver más' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Acting Credits -->
+    <section class="section credits-section" *ngIf="actingCredits().length">
+      <h2 class="section-title">
+        <mat-icon>theater_comedy</mat-icon>
+        Actuación
+      </h2>
+      <div class="credits-grid">
+        <a 
+          class="credit-card" 
+          *ngFor="let credit of actingCredits()" 
+          [routerLink]="['/details', credit.media_type, credit.id]"
+        >
+          <div class="credit-poster">
+            <img [src]="getPoster(credit)" [alt]="getTitle(credit)" loading="lazy" />
+            <div class="credit-overlay">
+              <span class="media-badge">{{ getMediaType(credit) }}</span>
+            </div>
+          </div>
+          <div class="credit-info">
+            <h4 class="credit-title">{{ getTitle(credit) }}</h4>
+            <p class="credit-role" *ngIf="getRole(credit)">{{ getRole(credit) }}</p>
+            <span class="credit-year" *ngIf="getYear(credit)">{{ getYear(credit) }}</span>
+          </div>
+        </a>
+      </div>
+    </section>
+
+    <!-- Crew Credits -->
+    <section class="section credits-section" *ngIf="hasCrewCredits()">
+      <h2 class="section-title">
+        <mat-icon>videocam</mat-icon>
+        Detrás de cámaras
+      </h2>
+      <div class="credits-grid">
+        <a 
+          class="credit-card" 
+          *ngFor="let credit of crewCredits()" 
+          [routerLink]="['/details', credit.media_type, credit.id]"
+        >
+          <div class="credit-poster">
+            <img [src]="getPoster(credit)" [alt]="getTitle(credit)" loading="lazy" />
+            <div class="credit-overlay">
+              <span class="media-badge">{{ getMediaType(credit) }}</span>
+            </div>
+          </div>
+          <div class="credit-info">
+            <h4 class="credit-title">{{ getTitle(credit) }}</h4>
+            <p class="credit-role" *ngIf="getRole(credit)">{{ getRole(credit) }}</p>
+            <span class="credit-year" *ngIf="getYear(credit)">{{ getYear(credit) }}</span>
+          </div>
+        </a>
+      </div>
+    </section>
+  </ng-container>
+</div>
+
+<ng-template #loadingTpl>
+  <div class="person-page loading-state">
+    <div class="loading-spinner">
+      <div class="spinner"></div>
+      <p>Cargando...</p>
+    </div>
+  </div>
+</ng-template>
