@@ -95,6 +95,9 @@ export class HomeComponent implements OnDestroy {
     } catch {}
   }
 
+  // Skeletons
+  skeletonCount = Array(12).fill(0);
+
   // Derived
   hasSearch = computed(() => this.query().trim().length > 0);
 

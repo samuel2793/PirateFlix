@@ -110,9 +110,30 @@
       </div>
     </section>
 
+    <!-- Movies Loading Skeleton -->
+    <main class="main-content" *ngIf="loading()">
+      <section class="section">
+        <div class="section-header skeleton-header">
+          <div class="skeleton-title"></div>
+          <div class="skeleton-count"></div>
+        </div>
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+          <div class="grid-card skeleton-card" *ngFor="let _ of skeletonCount">
+            <div class="card-poster skeleton-poster">
+              <div class="skeleton-shimmer"></div>
+            </div>
+            <div class="card-info">
+              <div class="skeleton-text skeleton-text-title"></div>
+              <div class="skeleton-text skeleton-text-year"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <!-- Movies Grid -->
-    <main class="main-content">
-      <section class="section" *ngIf="!loading() && !error()">
+    <main class="main-content" *ngIf="!loading()">
+      <section class="section" *ngIf="!error()">
         <div class="section-header">
           <h2 class="section-title">Películas en Tendencia</h2>
           <span class="section-count">{{ movies().length }} títulos</span>
@@ -194,9 +215,30 @@
       </div>
     </section>
 
+    <!-- TV Loading Skeleton -->
+    <main class="main-content" *ngIf="loading()">
+      <section class="section">
+        <div class="section-header skeleton-header">
+          <div class="skeleton-title"></div>
+          <div class="skeleton-count"></div>
+        </div>
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+          <div class="grid-card skeleton-card" *ngFor="let _ of skeletonCount">
+            <div class="card-poster skeleton-poster">
+              <div class="skeleton-shimmer"></div>
+            </div>
+            <div class="card-info">
+              <div class="skeleton-text skeleton-text-title"></div>
+              <div class="skeleton-text skeleton-text-year"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <!-- TV Grid -->
-    <main class="main-content">
-      <section class="section" *ngIf="!loading() && !error()">
+    <main class="main-content" *ngIf="!loading()">
+      <section class="section" *ngIf="!error()">
         <div class="section-header">
           <h2 class="section-title">Series en Tendencia</h2>
           <span class="section-count">{{ tv().length }} títulos</span>
@@ -295,10 +337,19 @@
           </div>
         </div>
 
-        <!-- Search Loading -->
-        <div class="search-loading" *ngIf="searchLoading()">
-          <div class="spinner"></div>
-          <span>Buscando...</span>
+        <!-- Search Loading Skeleton -->
+        <div class="search-skeleton-grid" *ngIf="searchLoading()">
+          <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+            <div class="grid-card skeleton-card" *ngFor="let _ of skeletonCount.slice(0, 8)">
+              <div class="card-poster skeleton-poster">
+                <div class="skeleton-shimmer"></div>
+              </div>
+              <div class="card-info">
+                <div class="skeleton-text skeleton-text-title"></div>
+                <div class="skeleton-text skeleton-text-year"></div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Search Error -->
@@ -354,4 +405,9 @@
       </section>
     </main>
   </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>Datos proporcionados por TMDB</p>
+  </footer>
 </div>

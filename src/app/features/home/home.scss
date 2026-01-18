@@ -859,3 +859,77 @@ $accent-orange: #e5a00d;
     margin: 0;
   }
 }
+
+// ========================================
+// Skeleton Loading
+// ========================================
+.skeleton-header {
+  .skeleton-title {
+    width: 200px;
+    height: 24px;
+    background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 6px;
+  }
+
+  .skeleton-count {
+    width: 80px;
+    height: 16px;
+    background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+  }
+}
+
+.skeleton-card {
+  pointer-events: none;
+}
+
+.skeleton-poster {
+  position: relative;
+  aspect-ratio: 2/3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: $bg-card;
+}
+
+.skeleton-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-text {
+  background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+.skeleton-text-title {
+  width: 80%;
+  height: 14px;
+  margin-bottom: 6px;
+}
+
+.skeleton-text-year {
+  width: 40%;
+  height: 12px;
+}
+
+.search-skeleton-grid {
+  margin-top: 20px;
+}
