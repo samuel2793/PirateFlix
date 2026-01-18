@@ -5,7 +5,6 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
-    "extract-i18n": "ng extract-i18n --output-path src/locale --format xlf",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },

@@ -1,9 +1,10 @@
-import { CommonModule, ViewportScroller, DOCUMENT } from '@angular/common';
+import { CommonModule, ViewportScroller } from '@angular/common';
 import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { TmdbService } from '../../core/services/tmdb';
+import { LanguageService, SupportedLang } from '../../shared/services/language.service';
 
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -55,34 +56,13 @@ export class HomeComponent implements OnDestroy {
   private readonly tmdb = inject(TmdbService);
   private readonly router = inject(Router);
   private readonly scroller = inject(ViewportScroller);
-  private readonly document = inject(DOCUMENT);
+  private readonly language = inject(LanguageService);
 
   // Language
-  currentLang = signal<'en' | 'es'>(this.getInitialLang());
+  currentLang = this.language.currentLang;
 
-  private getInitialLang(): 'en' | 'es' {
-    try {
-      const saved = localStorage.getItem('pirateflix_lang');
-      return (saved === 'es' || saved === 'en') ? saved : 'en';
-    } catch {
-      return 'en';
-    }
-  }
-
-  changeLang(lang: 'en' | 'es') {
-    if (lang === this.currentLang()) return;
-
-    this.currentLang.set(lang);
-    try {
-      localStorage.setItem('pirateflix_lang', lang);
-    } catch {}
-
-    // Cambiar el atributo lang del documento
-    this.document.documentElement.lang = lang;
-    
-    // Cambiar clase para CSS si es necesario
-    this.document.documentElement.classList.remove('lang-en', 'lang-es');
-    this.document.documentElement.classList.add(`lang-${lang}`);
+  changeLang(lang: SupportedLang) {
+    this.language.setLang(lang);
   }
 
   // Trending
@@ -241,9 +221,10 @@ export class HomeComponent implements OnDestroy {
   }
 
   labelMediaType(mt: string) {
-    if (mt === 'movie') return 'Movie';
-    if (mt === 'tv') return 'TV';
-    if (mt === 'person') return 'Persona';
+    const lang = this.currentLang();
+    if (mt === 'movie') return lang === 'es' ? 'Película' : 'Movie';
+    if (mt === 'tv') return lang === 'es' ? 'Serie' : 'TV';
+    if (mt === 'person') return lang === 'es' ? 'Persona' : 'Person';
     return mt ?? '—';
   }
 

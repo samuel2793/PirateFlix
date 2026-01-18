@@ -7,26 +7,26 @@
         <span>PirateFlix</span>
       </div>
     </div>
-    
+
     <div class="nav-tabs">
-      <button 
-        class="nav-tab" 
+      <button
+        class="nav-tab"
         [class.active]="activeTab() === 'movies'"
         (click)="activeTab.set('movies')"
       >
         <mat-icon>movie</mat-icon>
         <span i18n>Movies</span>
       </button>
-      <button 
-        class="nav-tab" 
+      <button
+        class="nav-tab"
         [class.active]="activeTab() === 'tv'"
         (click)="activeTab.set('tv')"
       >
         <mat-icon>tv</mat-icon>
         <span i18n>TV Shows</span>
       </button>
-      <button 
-        class="nav-tab" 
+      <button
+        class="nav-tab"
         [class.active]="activeTab() === 'search'"
         (click)="activeTab.set('search')"
       >
@@ -38,8 +38,8 @@
     <div class="nav-right">
       <!-- Content Density Toggle -->
       <div class="density-toggle">
-        <button 
-          class="density-btn" 
+        <button
+          class="density-btn"
           [class.active]="gridSize() === 1"
           (click)="setGridSize(1)"
           title="Compact"
@@ -47,8 +47,8 @@
         >
           <mat-icon>grid_view</mat-icon>
         </button>
-        <button 
-          class="density-btn" 
+        <button
+          class="density-btn"
           [class.active]="gridSize() === 2"
           (click)="setGridSize(2)"
           title="Normal"
@@ -56,8 +56,8 @@
         >
           <mat-icon>view_comfy</mat-icon>
         </button>
-        <button 
-          class="density-btn" 
+        <button
+          class="density-btn"
           [class.active]="gridSize() === 3"
           (click)="setGridSize(3)"
           title="Large"
@@ -88,10 +88,10 @@
         </button>
       </div>
 
-      <button 
-        class="nav-icon-btn" 
-        [class.spinning]="refreshing()" 
-        (click)="softRefresh()" 
+      <button
+        class="nav-icon-btn"
+        [class.spinning]="refreshing()"
+        (click)="softRefresh()"
         [disabled]="refreshing()"
         [attr.title]="lastRefresh() ? 'Última actualización: ' + lastRefresh()?.toLocaleTimeString() : 'Recargar contenido'"
       >
@@ -168,10 +168,10 @@
           <h2 class="section-title" i18n>Trending Movies</h2>
           <span class="section-count" i18n>{{ movies().length }} titles</span>
         </div>
-        
+
         <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
-          <div 
-            class="grid-card" 
+          <div
+            class="grid-card"
             *ngFor="let item of movies(); let i = index"
             (click)="openDetails('movie', item.id)"
             [class.featured]="i === 0"
@@ -273,10 +273,10 @@
           <h2 class="section-title" i18n>Trending TV Shows</h2>
           <span class="section-count" i18n>{{ tv().length }} titles</span>
         </div>
-        
+
         <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
-          <div 
-            class="grid-card" 
+          <div
+            class="grid-card"
             *ngFor="let item of tv(); let i = index"
             (click)="openDetails('tv', item.id)"
             [class.featured]="i === 0"
@@ -343,28 +343,28 @@
               <mat-icon>close</mat-icon>
             </button>
           </div>
-          
+
           <div class="search-filters">
-            <button 
-              class="filter-chip" 
+            <button
+              class="filter-chip"
               [class.active]="searchFilter() === 'all'"
               (click)="setSearchFilter('all')"
               i18n
             >All</button>
-            <button 
-              class="filter-chip" 
+            <button
+              class="filter-chip"
               [class.active]="searchFilter() === 'movie'"
               (click)="setSearchFilter('movie')"
               i18n
             >Movies</button>
-            <button 
-              class="filter-chip" 
+            <button
+              class="filter-chip"
               [class.active]="searchFilter() === 'tv'"
               (click)="setSearchFilter('tv')"
               i18n
             >TV Shows</button>
-            <button 
-              class="filter-chip" 
+            <button
+              class="filter-chip"
               [class.active]="searchFilter() === 'person'"
               (click)="setSearchFilter('person')"
               i18n
@@ -395,8 +395,8 @@
 
         <!-- Search Results Grid -->
         <div class="content-grid search-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3" *ngIf="hasSearch() && !searchLoading() && !searchError() && searchResultsFiltered().length">
-          <div 
-            class="grid-card" 
+          <div
+            class="grid-card"
             *ngFor="let item of searchResultsFiltered()"
             (click)="openDetailsForResult(item)"
           >
