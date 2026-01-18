@@ -67,6 +67,27 @@
         </button>
       </div>
 
+      <!-- Language Selector -->
+      <div class="language-selector">
+        <button
+          class="lang-btn"
+          [class.active]="currentLang() === 'en'"
+          (click)="changeLang('en')"
+          title="English"
+        >
+          <span class="flag">🇬🇧</span>
+        </button>
+        <div class="lang-divider"></div>
+        <button
+          class="lang-btn"
+          [class.active]="currentLang() === 'es'"
+          (click)="changeLang('es')"
+          title="Español"
+        >
+          <span class="flag">🇪🇸</span>
+        </button>
+      </div>
+
       <button 
         class="nav-icon-btn" 
         [class.spinning]="refreshing()" 

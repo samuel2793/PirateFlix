@@ -28,6 +28,7 @@ $accent-gold: $accent-primary-light;
   background: $bg-primary;
   color: $text-primary;
   min-height: 100vh;
+  padding-top: 64px; // Space for global navbar
   animation: pageEnter 0.5s ease-out;
 }
 
