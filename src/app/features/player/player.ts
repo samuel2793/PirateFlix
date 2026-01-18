@@ -11,6 +11,7 @@ type MediaType = 'movie' | 'tv';
 const NO_COMPATIBLE_VIDEO_CODE = 'NO_COMPATIBLE_VIDEO';
 const NO_SEEKABLE_CODE = 'NO_SEEKABLE';
 const NO_MULTI_AUDIO_CODE = 'NO_MULTI_AUDIO';
+const NO_SUBTITLES_CODE = 'NO_SUBTITLES';
 
 function buildNoCompatibleVideoError(): Error {
   const error = new Error(NO_COMPATIBLE_VIDEO_CODE);
@@ -30,6 +31,12 @@ function buildNoMultiAudioError(): Error {
   return error;
 }
 
+function buildNoSubtitlesError(): Error {
+  const error = new Error(NO_SUBTITLES_CODE);
+  (error as any).code = NO_SUBTITLES_CODE;
+  return error;
+}
+
 interface TorrentFile {
   index: number;
   name: string;
@@ -44,6 +51,8 @@ interface SubtitleTrack {
   url: string;
   isEmbedded?: boolean;
   streamIndex?: number;
+  provider?: 'torrent' | 'embedded' | 'opensubtitles';
+  fileId?: number;
 }
 
 interface AudioTrack {
@@ -64,6 +73,19 @@ interface EmbeddedSubtitle {
   default: boolean;
 }
 
+interface OpenSubtitleResult {
+  id: string | null;
+  language: string;
+  format: string;
+  fileId: number;
+  fileName: string;
+  downloads: number;
+  hearingImpaired?: boolean;
+  fps?: number | null;
+  release?: string;
+  uploader?: string;
+}
+
 interface TorrentInfo {
   infoHash: string;
   name: string;
@@ -77,6 +99,7 @@ interface LoadMagnetOptions {
   throwOnError?: boolean;
   requireMultiAudio?: boolean;
   requireSeekable?: boolean;
+  requireSubtitles?: boolean;
   minAudioTracks?: number;
 }
 
@@ -118,6 +141,7 @@ export class PlayerComponent implements OnDestroy {
   preferMultiAudio = signal<boolean>(false);
   preferSeekable = signal<boolean>(false);
   preferSubtitles = signal<boolean>(false);
+  forceYearInSearch = signal<boolean>(false);
   
   // Subtitle customization
   subtitleSize = signal<number>(this.loadSubtitlePref('size', 100));
@@ -130,10 +154,19 @@ export class PlayerComponent implements OnDestroy {
   showSettings = signal<boolean>(false);
   settingsTab = signal<'audio' | 'subtitles' | 'appearance'>('audio');
   selectedSubtitleTrack = signal<number>(-1);
+  openSubtitlesResults = signal<OpenSubtitleResult[]>([]);
+  openSubtitlesLoading = signal<boolean>(false);
+  openSubtitlesError = signal<string>('');
+  openSubtitlesLanguages = signal<string>('es,en');
+  openSubtitlesLanguageOrder = signal<string[]>([]);
+  openSubtitlesLanguageIndices = signal<Record<string, number>>({});
+  openSubtitlesBuckets = signal<Record<string, OpenSubtitleResult[]>>({});
 
   private readonly API_URL = 'http://localhost:3001/api';
   private currentTorrentHash: string | null = null;
   private currentVideoFileIndex: number | null = null;
+  private currentTitle: string | null = null;
+  private currentYear: string | null = null;
   private progressInterval: any = null;
   private pendingSeekTime: number | null = null;
   private pendingWasPlaying = false;
@@ -170,6 +203,7 @@ export class PlayerComponent implements OnDestroy {
     const preferMultiAudioParam = this.route.snapshot.queryParamMap.get('multiAudio');
     const preferSeekableParam = this.route.snapshot.queryParamMap.get('seekable');
     const preferSubtitlesParam = this.route.snapshot.queryParamMap.get('subtitles');
+    const forceYearParam = this.route.snapshot.queryParamMap.get('forceYear');
 
     if (type === 'movie' || type === 'tv') this.type.set(type);
     if (idStr) this.id.set(Number(idStr));
@@ -178,6 +212,7 @@ export class PlayerComponent implements OnDestroy {
     this.preferMultiAudio.set(preferMultiAudioParam === '1' || preferMultiAudioParam === 'true');
     this.preferSeekable.set(preferSeekableParam === '1' || preferSeekableParam === 'true');
     this.preferSubtitles.set(preferSubtitlesParam === '1' || preferSubtitlesParam === 'true');
+    this.forceYearInSearch.set(forceYearParam === '1' || forceYearParam === 'true');
 
     await this.searchAndPlayTorrent();
   }
@@ -193,6 +228,13 @@ export class PlayerComponent implements OnDestroy {
     this.subtitleTracks.set([]);
     this.audioTracks.set([]);
     this.selectedAudioTrack.set('auto');
+    this.selectedSubtitleTrack.set(-1);
+    this.openSubtitlesResults.set([]);
+    this.openSubtitlesError.set('');
+    this.openSubtitlesLoading.set(false);
+    this.openSubtitlesLanguageOrder.set([]);
+    this.openSubtitlesLanguageIndices.set({});
+    this.openSubtitlesBuckets.set({});
     this.currentTorrentHash = null;
     this.currentVideoFileIndex = null;
 
@@ -224,6 +266,7 @@ export class PlayerComponent implements OnDestroy {
     const preferMultiAudio = this.preferMultiAudio();
     const preferSeekable = this.preferSeekable();
     const preferSubtitles = this.preferSubtitles();
+    const forceYearInSearch = this.forceYearInSearch();
 
     try {
       // 1. Quick-switch: limpiar streams/ffmpeg anteriores (muy rápido, ~50ms)
@@ -242,20 +285,28 @@ export class PlayerComponent implements OnDestroy {
         throw new Error('No se pudo obtener el título de la película');
       }
 
+      this.currentTitle = title;
+      this.currentYear = year || null;
+
       console.log(`Buscando torrent para: ${title} (${year})`);
 
       // 3. Mostrar fase de búsqueda inmediatamente
       this.loadingPhase.set('searching');
       // Intentar queries de más a menos específicas para ampliar resultados
       const normalizeQuery = (value: string) => value.replace(/\s+/g, ' ').trim();
-      const normalizedTitle = normalizeQuery(title.replace(/[^\w\s]/g, ' '));
+      const normalizedTitle = normalizeQuery(
+        title.replace(/['\u2019`\u00b4]/g, '').replace(/[^\w\s]/g, ' ')
+      );
       const queryTitle = normalizedTitle || title;
-      const searchQueries = [
+      const baseQueries = [
         normalizeQuery(`${queryTitle} ${year} 1080p`),
         normalizeQuery(`${queryTitle} ${year} 720p`),
         normalizeQuery(`${queryTitle} ${year}`),
-        normalizeQuery(`${queryTitle}`),
-      ].filter((q, index, arr) => q && arr.indexOf(q) === index);
+      ];
+      const searchQueries = (forceYearInSearch && year
+        ? baseQueries
+        : baseQueries.concat([normalizeQuery(`${queryTitle}`)])
+      ).filter((q, index, arr) => q && arr.indexOf(q) === index);
 
       const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
       const multiAudioHintRegex =
@@ -273,13 +324,14 @@ export class PlayerComponent implements OnDestroy {
       let lastCategoryError: any = null;
       let sawNoMultiAudio = false;
       let sawNoSeekable = false;
+      let sawNoSubtitles = false;
 
       const attemptCategory = async (category: number) => {
         const searchStartTime = Date.now();
         const overallTimeoutMs = 35000;
         let timedOut = false;
         let didSearch = false;
-        const cacheKey = `${type}:${id}:${category}`;
+        const cacheKey = `${type}:${id}:${category}:${forceYearInSearch ? 'year' : 'any'}`;
         const cachedSearch = PlayerComponent.searchCache.get(cacheKey);
         const cacheFresh =
           cachedSearch && Date.now() - cachedSearch.ts < PlayerComponent.SEARCH_CACHE_TTL_MS;
@@ -289,6 +341,7 @@ export class PlayerComponent implements OnDestroy {
         let sawSeeded = false;
         let sawNoMultiAudio = false;
         let sawNoSeekable = false;
+        let sawNoSubtitles = false;
         let attempts = 0;
         const maxAttempts = searchQueries.length;
 
@@ -602,6 +655,7 @@ export class PlayerComponent implements OnDestroy {
               throwOnError: true,
               requireMultiAudio: preferMultiAudio,
               requireSeekable: preferSeekable,
+              requireSubtitles: preferSubtitles,
             });
             if (loaded) {
               lastError = null;
@@ -614,23 +668,28 @@ export class PlayerComponent implements OnDestroy {
               sawNoCompatible = true;
               console.warn('⚠️ Torrent incompatible (ISO/BDMV), probando otro:', candidate.name);
               continue;
-            } else {
-              if (error?.code === NO_MULTI_AUDIO_CODE) {
-                sawNoMultiAudio = true;
-                console.warn(
-                  '⚠️ Torrent sin varias pistas de audio, probando otro:',
-                  candidate.name
-                );
-                continue;
-              }
-              if (error?.code === NO_SEEKABLE_CODE) {
-                sawNoSeekable = true;
-                console.warn(
-                  '⚠️ Torrent sin seeking disponible, probando otro:',
-                  candidate.name
-                );
-                continue;
-              }
+              } else {
+                if (error?.code === NO_MULTI_AUDIO_CODE) {
+                  sawNoMultiAudio = true;
+                  console.warn(
+                    '⚠️ Torrent sin varias pistas de audio, probando otro:',
+                    candidate.name
+                  );
+                  continue;
+                }
+                if (error?.code === NO_SUBTITLES_CODE) {
+                  sawNoSubtitles = true;
+                  console.warn('⚠️ Torrent sin subtítulos, probando otro:', candidate.name);
+                  continue;
+                }
+                if (error?.code === NO_SEEKABLE_CODE) {
+                  sawNoSeekable = true;
+                  console.warn(
+                    '⚠️ Torrent sin seeking disponible, probando otro:',
+                    candidate.name
+                  );
+                  continue;
+                }
               lastError = error;
             }
             console.warn('⚠️ Error al cargar torrent, intentando otro:', error);
@@ -643,6 +702,9 @@ export class PlayerComponent implements OnDestroy {
           }
           if (preferMultiAudio && sawNoMultiAudio) {
             return { status: 'no-multi-audio' };
+          }
+          if (preferSubtitles && sawNoSubtitles) {
+            return { status: 'no-subtitles' };
           }
           if (preferSeekable && sawNoSeekable) {
             return { status: 'no-seekable' };
@@ -671,6 +733,10 @@ export class PlayerComponent implements OnDestroy {
           sawNoMultiAudio = true;
           continue;
         }
+        if (result.status === 'no-subtitles') {
+          sawNoSubtitles = true;
+          continue;
+        }
         if (result.status === 'no-seekable') {
           sawNoSeekable = true;
           continue;
@@ -693,6 +759,9 @@ export class PlayerComponent implements OnDestroy {
       if (preferMultiAudio && sawNoMultiAudio) {
         throw buildNoMultiAudioError();
       }
+      if (preferSubtitles && sawNoSubtitles) {
+        throw buildNoSubtitlesError();
+      }
       if (preferSeekable && sawNoSeekable) {
         throw buildNoSeekableError();
       }
@@ -710,6 +779,9 @@ export class PlayerComponent implements OnDestroy {
       } else if (error?.code === NO_MULTI_AUDIO_CODE) {
         errorMsg =
           'No se encontraron torrents con varias pistas de audio. Desactiva el filtro e intenta de nuevo.';
+      } else if (error?.code === NO_SUBTITLES_CODE) {
+        errorMsg =
+          'No se encontraron torrents con subtítulos. Desactiva el filtro e intenta de nuevo.';
       } else if (error?.code === NO_SEEKABLE_CODE) {
         errorMsg =
           'No se encontraron torrents con seeking disponible. Desactiva el filtro e intenta de nuevo.';
@@ -756,6 +828,7 @@ export class PlayerComponent implements OnDestroy {
               this.loadMagnetLink(data.magnetLink.trim(), this.playbackSession, {
                 requireMultiAudio: this.preferMultiAudio(),
                 requireSeekable: this.preferSeekable(),
+                requireSubtitles: this.preferSubtitles(),
               });
               return true;
             }
@@ -831,6 +904,7 @@ export class PlayerComponent implements OnDestroy {
   ): Promise<boolean> {
     const throwOnError = options.throwOnError === true;
     const requireSeekable = options.requireSeekable === true;
+    const requireSubtitles = options.requireSubtitles === true;
     const minAudioTracks = Math.max(
       0,
       options.minAudioTracks ?? (options.requireMultiAudio ? 2 : 0)
@@ -842,6 +916,12 @@ export class PlayerComponent implements OnDestroy {
     this.subtitleTracks.set([]);
     this.audioTracks.set([]);
     this.selectedAudioTrack.set('auto');
+    this.selectedSubtitleTrack.set(-1);
+    this.openSubtitlesResults.set([]);
+    this.openSubtitlesError.set('');
+    this.openSubtitlesLanguageOrder.set([]);
+    this.openSubtitlesLanguageIndices.set({});
+    this.openSubtitlesBuckets.set({});
 
     try {
       console.log('Enviando torrent al backend:', magnetUri);
@@ -968,6 +1048,7 @@ export class PlayerComponent implements OnDestroy {
           language: language,
           url: `${this.API_URL}/subtitle/${torrentInfo.infoHash}/${file.index}`,
           isEmbedded: false,
+          provider: 'torrent',
         };
       });
 
@@ -992,11 +1073,16 @@ export class PlayerComponent implements OnDestroy {
               url: `${this.API_URL}/embedded-subtitle/${torrentInfo.infoHash}/${videoFile.index}/${sub.index}`,
               isEmbedded: true,
               streamIndex: sub.index,
+              provider: 'embedded',
             });
           });
         }
       } catch (error) {
         console.error('Error al detectar subtítulos embebidos:', error);
+      }
+
+      if (requireSubtitles && subtitles.length === 0) {
+        throw buildNoSubtitlesError();
       }
 
       this.subtitleTracks.set(subtitles);
@@ -1042,6 +1128,10 @@ export class PlayerComponent implements OnDestroy {
       if (error?.code === NO_MULTI_AUDIO_CODE) {
         this.errorMessage.set(
           'El torrent no tiene varias pistas de audio. Desactiva el filtro e intenta de nuevo.'
+        );
+      } else if (error?.code === NO_SUBTITLES_CODE) {
+        this.errorMessage.set(
+          'El torrent no tiene subtítulos. Desactiva el filtro e intenta de nuevo.'
         );
       } else if (error?.code === NO_SEEKABLE_CODE) {
         this.errorMessage.set(
@@ -1190,6 +1280,301 @@ export class PlayerComponent implements OnDestroy {
     if (track.codec) pieces.push(track.codec.toUpperCase());
     if (track.default) pieces.push('predeterminado');
     return pieces.filter(Boolean).join(' - ');
+  }
+
+  canSearchOpenSubtitles(): boolean {
+    return Boolean(this.currentTitle);
+  }
+
+  currentOpenSubtitleResult(languageKey: string): OpenSubtitleResult | null {
+    const buckets = this.openSubtitlesBuckets();
+    const list = buckets[languageKey] || [];
+    const indices = this.openSubtitlesLanguageIndices();
+    const idx = indices[languageKey] ?? 0;
+    if (!list.length || idx < 0 || idx >= list.length) return null;
+    return list[idx];
+  }
+
+  hasNextOpenSubtitle(languageKey: string): boolean {
+    const buckets = this.openSubtitlesBuckets();
+    const list = buckets[languageKey] || [];
+    const indices = this.openSubtitlesLanguageIndices();
+    const idx = indices[languageKey] ?? 0;
+    return idx + 1 < list.length;
+  }
+
+  pickNextOpenSubtitle(languageKey: string) {
+    const buckets = this.openSubtitlesBuckets();
+    const list = buckets[languageKey] || [];
+    const indices = { ...this.openSubtitlesLanguageIndices() };
+    const idx = indices[languageKey] ?? 0;
+    if (idx + 1 >= list.length) {
+      const label =
+        languageKey === 'all'
+          ? 'todos los idiomas'
+          : this.getLanguageName(languageKey);
+      this.openSubtitlesError.set(`No hay más subtítulos para ${label}.`);
+      return;
+    }
+    indices[languageKey] = idx + 1;
+    this.openSubtitlesLanguageIndices.set(indices);
+    this.openSubtitlesError.set('');
+  }
+
+  setOpenSubtitlesLanguages(value: string) {
+    this.openSubtitlesLanguages.set(value);
+  }
+
+  private parseOpenSubtitlesLanguages(value: string) {
+    const parts = String(value || '')
+      .split(',')
+      .map((lang) => this.normalizeOpenSubtitlesLanguage(lang))
+      .filter(Boolean);
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const lang of parts) {
+      if (seen.has(lang)) continue;
+      seen.add(lang);
+      unique.push(lang);
+    }
+    return unique;
+  }
+
+  private normalizeOpenSubtitlesLanguage(value: string) {
+    return String(value || '').trim().toLowerCase().replace(/_/g, '-');
+  }
+
+  private matchesOpenSubtitlesLanguage(resultLang: string, queryLang: string) {
+    const normalizedResult = this.normalizeOpenSubtitlesLanguage(resultLang);
+    const normalizedQuery = this.normalizeOpenSubtitlesLanguage(queryLang);
+    if (!normalizedResult || !normalizedQuery) return false;
+    if (normalizedResult === normalizedQuery) return true;
+    const resultBase = normalizedResult.split('-')[0];
+    const queryBase = normalizedQuery.split('-')[0];
+    return (
+      resultBase === normalizedQuery ||
+      normalizedResult === queryBase ||
+      resultBase === queryBase
+    );
+  }
+
+  private buildOpenSubtitlesBuckets(
+    results: OpenSubtitleResult[],
+    languages: string[]
+  ): { buckets: Record<string, OpenSubtitleResult[]>; order: string[] } {
+    const sorted = results.slice().sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+    if (!languages.length) {
+      if (!sorted.length) return { buckets: {}, order: [] };
+      return { buckets: { all: sorted }, order: ['all'] };
+    }
+
+    const buckets: Record<string, OpenSubtitleResult[]> = {};
+    for (const lang of languages) {
+      buckets[lang] = [];
+    }
+
+    for (const result of sorted) {
+      const match = languages.find((lang) =>
+        this.matchesOpenSubtitlesLanguage(result.language, lang)
+      );
+      if (match) buckets[match].push(result);
+    }
+
+    const order = languages.filter((lang) => buckets[lang] && buckets[lang].length > 0);
+    return { buckets, order };
+  }
+
+  private buildOpenSubtitlesQuery(includeYear = true) {
+    const title = this.currentTitle || '';
+    if (!title) return '';
+
+    if (this.type() === 'tv') {
+      const season = this.season();
+      const episode = this.episode();
+      if (season !== null && episode !== null) {
+        const seasonTag = String(season).padStart(2, '0');
+        const episodeTag = String(episode).padStart(2, '0');
+        return `${title} S${seasonTag}E${episodeTag}`;
+      }
+    }
+
+    if (this.currentYear && includeYear) return `${title} ${this.currentYear}`;
+    return title;
+  }
+
+  private async fetchOpenSubtitles(params: URLSearchParams): Promise<OpenSubtitleResult[]> {
+    const response = await fetch(`${this.API_URL}/opensubtitles/search?${params.toString()}`);
+    if (!response.ok) {
+      let message = `HTTP ${response.status}`;
+      try {
+        const errorData = await response.json();
+        message = errorData?.message || errorData?.error || message;
+      } catch {}
+      throw new Error(message);
+    }
+
+    const data = await response.json();
+    return Array.isArray(data?.results) ? data.results : [];
+  }
+
+  async searchOpenSubtitles() {
+    if (this.openSubtitlesLoading()) return;
+
+    const query = this.buildOpenSubtitlesQuery(true);
+    const tmdbId = this.id();
+    if (!query && !tmdbId) {
+      this.openSubtitlesError.set('No hay información suficiente para buscar subtítulos.');
+      return;
+    }
+
+    this.openSubtitlesLoading.set(true);
+    this.openSubtitlesError.set('');
+
+    try {
+      const params = new URLSearchParams();
+      if (query) params.set('query', query);
+      if (tmdbId) params.set('tmdbId', String(tmdbId));
+      params.set('type', this.type());
+
+      const season = this.season();
+      const episode = this.episode();
+      if (season !== null) params.set('season', String(season));
+      if (episode !== null) params.set('episode', String(episode));
+
+      const languageList = this.parseOpenSubtitlesLanguages(this.openSubtitlesLanguages());
+      const languages = languageList.join(',');
+      let usedLanguagesFilter = false;
+      if (languages) {
+        params.set('languages', languages);
+        usedLanguagesFilter = true;
+      }
+
+      console.log('[OpenSubtitles] search start:', {
+        query: params.get('query'),
+        tmdbId: params.get('tmdbId'),
+        type: params.get('type'),
+        season: params.get('season'),
+        episode: params.get('episode'),
+        languages: params.get('languages'),
+      });
+      let results = await this.fetchOpenSubtitles(params);
+      console.log('[OpenSubtitles] initial results:', results.length);
+
+      if (results.length === 0) {
+        const fallbackParams = new URLSearchParams(params);
+        let fallbackUsedLanguages = usedLanguagesFilter;
+        if (fallbackParams.has('tmdbId')) {
+          fallbackParams.delete('tmdbId');
+          console.log('[OpenSubtitles] retry without tmdbId:', {
+            query: fallbackParams.get('query'),
+            type: fallbackParams.get('type'),
+            season: fallbackParams.get('season'),
+            episode: fallbackParams.get('episode'),
+            languages: fallbackParams.get('languages'),
+          });
+          results = await this.fetchOpenSubtitles(fallbackParams);
+          fallbackUsedLanguages = fallbackParams.has('languages');
+          console.log('[OpenSubtitles] results without tmdbId:', results.length);
+        }
+
+        if (results.length === 0) {
+          const fallbackQuery = this.buildOpenSubtitlesQuery(false);
+          if (fallbackQuery && fallbackQuery !== query) {
+            fallbackParams.set('query', fallbackQuery);
+            console.log('[OpenSubtitles] retry without year:', fallbackQuery);
+            results = await this.fetchOpenSubtitles(fallbackParams);
+            fallbackUsedLanguages = fallbackParams.has('languages');
+            console.log('[OpenSubtitles] results without year:', results.length);
+          }
+        }
+
+        if (results.length === 0 && fallbackParams.has('languages')) {
+          fallbackParams.delete('languages');
+          console.log('[OpenSubtitles] retry without languages:', fallbackParams.get('query'));
+          results = await this.fetchOpenSubtitles(fallbackParams);
+          fallbackUsedLanguages = fallbackParams.has('languages');
+          console.log('[OpenSubtitles] results without languages:', results.length);
+        }
+        usedLanguagesFilter = fallbackUsedLanguages;
+      }
+
+      const groupingLanguages = usedLanguagesFilter ? languageList : [];
+      const grouped = this.buildOpenSubtitlesBuckets(results, groupingLanguages);
+      const nextIndices: Record<string, number> = {};
+      for (const key of grouped.order) {
+        nextIndices[key] = 0;
+      }
+      this.openSubtitlesResults.set(results);
+      this.openSubtitlesBuckets.set(grouped.buckets);
+      this.openSubtitlesLanguageOrder.set(grouped.order);
+      this.openSubtitlesLanguageIndices.set(nextIndices);
+
+      if (grouped.order.length === 0) {
+        this.openSubtitlesError.set('No se encontraron subtítulos en OpenSubtitles.');
+      }
+    } catch (error: any) {
+      console.error('Error al buscar subtítulos externos:', error);
+      this.openSubtitlesError.set(
+        error?.message || 'No se pudo consultar OpenSubtitles en este momento.'
+      );
+      this.openSubtitlesResults.set([]);
+      this.openSubtitlesBuckets.set({});
+      this.openSubtitlesLanguageOrder.set([]);
+      this.openSubtitlesLanguageIndices.set({});
+    } finally {
+      this.openSubtitlesLoading.set(false);
+    }
+  }
+
+  downloadOpenSubtitle(result: OpenSubtitleResult) {
+    if (!result?.fileId) return;
+
+    const params = new URLSearchParams();
+    if (result.format) params.set('format', result.format);
+    if (result.fps) params.set('fps', String(result.fps));
+    const query = params.toString();
+    const url = `${this.API_URL}/opensubtitles/subtitle/${result.fileId}${query ? `?${query}` : ''}`;
+    const existing = this.subtitleTracks();
+    const existingIndex = existing.findIndex((track) => track.url === url);
+    if (existingIndex >= 0) {
+      this.selectSubtitleTrack(existingIndex);
+      return;
+    }
+
+    const language = this.getLanguageName(result.language || 'und');
+    const titleBits = [language];
+    if (result.release) titleBits.push(result.release);
+
+    const nextTrack: SubtitleTrack = {
+      index: existing.length,
+      name: `OpenSubtitles - ${titleBits.join(' - ')}`,
+      language,
+      url,
+      isEmbedded: false,
+      provider: 'opensubtitles',
+      fileId: result.fileId,
+    };
+
+    const nextTracks = existing.concat(nextTrack);
+    const newIndex = nextTracks.length - 1;
+    this.subtitleTracks.set(nextTracks);
+    this.openSubtitlesError.set('');
+    setTimeout(() => this.selectSubtitleTrack(newIndex), 0);
+  }
+
+  formatOpenSubtitleTitle(result: OpenSubtitleResult) {
+    const language = this.getLanguageName(result.language || 'und');
+    const label = result.release || result.fileName || '';
+    return [language, label].filter(Boolean).join(' - ');
+  }
+
+  formatOpenSubtitleMeta(result: OpenSubtitleResult) {
+    const meta: string[] = [];
+    if (result.format) meta.push(result.format.toUpperCase());
+    if (result.downloads) meta.push(`${result.downloads} descargas`);
+    if (result.hearingImpaired) meta.push('SDH');
+    if (result.fps) meta.push(`${result.fps}fps`);
+    return meta.join(' • ');
   }
 
   startProgressMonitoring() {
@@ -1424,7 +1809,7 @@ export class PlayerComponent implements OnDestroy {
     if (this.showSettings()) {
       if (this.audioTracks().length > 1) {
         this.settingsTab.set('audio');
-      } else if (this.subtitleTracks().length > 0) {
+      } else if (this.subtitleTracks().length > 0 || this.canSearchOpenSubtitles()) {
         this.settingsTab.set('subtitles');
       }
     }

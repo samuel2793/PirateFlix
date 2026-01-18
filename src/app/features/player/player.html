@@ -65,7 +65,7 @@
             class="tab-btn" 
             [class.active]="settingsTab() === 'subtitles'" 
             (click)="setSettingsTab('subtitles')"
-            [disabled]="subtitleTracks().length === 0">
+            [disabled]="subtitleTracks().length === 0 && !canSearchOpenSubtitles()">
             💬 Subtítulos
           </button>
           <button 
@@ -148,6 +148,66 @@
                 <p>No hay subtítulos disponibles</p>
               </div>
             }
+
+            <div class="setting-group">
+              <label class="group-label">Descargar desde OpenSubtitles</label>
+              @if (!canSearchOpenSubtitles()) {
+                <p class="open-subtitle-status">Carga un video para buscar subtítulos externos.</p>
+              } @else {
+                <div class="open-subtitle-controls">
+                  <input
+                    class="lang-input"
+                    type="text"
+                    placeholder="Idiomas (es,en)"
+                    [value]="openSubtitlesLanguages()"
+                    (input)="setOpenSubtitlesLanguages($any($event.target).value)">
+                  <button
+                    class="action-btn"
+                    (click)="searchOpenSubtitles()"
+                    [disabled]="openSubtitlesLoading()">
+                    Buscar
+                  </button>
+                </div>
+                @if (openSubtitlesLoading()) {
+                  <p class="open-subtitle-status">Buscando subtítulos...</p>
+                }
+                @if (openSubtitlesError()) {
+                  <p class="open-subtitle-status error">{{ openSubtitlesError() }}</p>
+                }
+                @if (!openSubtitlesLoading() && openSubtitlesLanguageOrder().length > 0) {
+                  <div class="open-subtitle-list">
+                    @for (languageKey of openSubtitlesLanguageOrder(); track languageKey) {
+                      @if (currentOpenSubtitleResult(languageKey); as result) {
+                        <div class="open-subtitle-item">
+                          <span class="sub-icon">🌐</span>
+                          <div class="open-subtitle-info">
+                            <div class="open-subtitle-title">{{ formatOpenSubtitleTitle(result) }}</div>
+                            @if (formatOpenSubtitleMeta(result)) {
+                              <div class="open-subtitle-meta">{{ formatOpenSubtitleMeta(result) }}</div>
+                            }
+                          </div>
+                          <div class="open-subtitle-actions">
+                            <button class="download-btn" (click)="downloadOpenSubtitle(result)">
+                              Descargar
+                            </button>
+                            <button
+                              class="next-btn"
+                              (click)="pickNextOpenSubtitle(languageKey)"
+                              [disabled]="!hasNextOpenSubtitle(languageKey)">
+                              No funciona
+                            </button>
+                          </div>
+                        </div>
+                      }
+                    }
+                  </div>
+                } @else if (!openSubtitlesLoading() && !openSubtitlesError()) {
+                  <p class="open-subtitle-status hint">
+                    Usa "Buscar" para consultar OpenSubtitles.
+                  </p>
+                }
+              }
+            </div>
           </div>
         }
 
