@@ -69,8 +69,10 @@ $accent-gold: $accent-primary-light;
   .logo-img {
     width: 28px;
     height: 28px;
-    object-fit: contain;
     display: block;
+    background-color: $accent-primary;
+    -webkit-mask: url('/assets/logo.png') no-repeat center / contain;
+    mask: url('/assets/logo.png') no-repeat center / contain;
   }
 }
 

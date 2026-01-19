@@ -4,7 +4,8 @@
 $bg-nav: #141414;
 $text-primary: #ffffff;
 $text-secondary: rgba(255, 255, 255, 0.7);
-$accent-orange: #e5a00d;
+$accent-primary: #e5a00d;
+$accent-orange: $accent-primary;
 $bg-primary: #0a0a0a;
 
 .global-nav {
@@ -56,8 +57,10 @@ $bg-primary: #0a0a0a;
   .logo-img {
     width: 28px;
     height: 28px;
-    object-fit: contain;
     display: block;
+    background-color: $accent-primary;
+    -webkit-mask: url('/assets/logo.png') no-repeat center / contain;
+    mask: url('/assets/logo.png') no-repeat center / contain;
   }
 
   &:hover {
