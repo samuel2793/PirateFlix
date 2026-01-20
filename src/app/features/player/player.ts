@@ -84,6 +84,8 @@ interface OpenSubtitleResult {
   fps?: number | null;
   release?: string;
   uploader?: string;
+  season?: number | null;
+  episode?: number | null;
 }
 
 interface TorrentInfo {
@@ -559,10 +561,14 @@ export class PlayerComponent implements OnDestroy {
           const episodeMatches = scored
             .filter((item) => item.score >= 2)
             .map((item) => item.torrent);
-          if (episodeMatches.length > 0) return { results: episodeMatches, matchType: 'episode' };
           const seasonMatches = scored
             .filter((item) => item.score === 1)
             .map((item) => item.torrent);
+          if (episodeMatches.length > 0)
+            return {
+              results: episodeMatches.concat(seasonMatches),
+              matchType: 'episode',
+            };
           if (seasonMatches.length > 0) return { results: seasonMatches, matchType: 'season' };
           return { results: [], matchType: 'none' };
         };
@@ -1512,15 +1518,16 @@ export class PlayerComponent implements OnDestroy {
     name: string,
     season: number,
     episode: number
-  ): { episode: boolean; season: boolean } {
+  ): { episode: boolean; season: boolean; explicitEpisodeFound: boolean } {
     const text = String(name || '').toLowerCase();
     const seasonNum = Number(season);
     const episodeNum = Number(episode);
     if (!text || !Number.isFinite(seasonNum) || !Number.isFinite(episodeNum)) {
-      return { episode: false, season: false };
+      return { episode: false, season: false, explicitEpisodeFound: false };
     }
 
     const normalized = text.replace(/[\s._\/\\-]+/g, ' ');
+    const explicitSource = text.replace(/[\s._\/\\]+/g, ' ');
     const inRange = (value: number, start: number, end?: number) => {
       if (!Number.isFinite(start)) return false;
       if (!Number.isFinite(end)) return value === start;
@@ -1532,8 +1539,10 @@ export class PlayerComponent implements OnDestroy {
 
     let seasonMatch = false;
     let episodeMatch = false;
+    let explicitEpisodeFound = false;
 
     const checkEpisode = (s: number, e1: number, e2?: number) => {
+      explicitEpisodeFound = true;
       if (s !== seasonNum) return false;
       seasonMatch = true;
       if (inRange(episodeNum, e1, e2)) {
@@ -1546,7 +1555,7 @@ export class PlayerComponent implements OnDestroy {
     const seRegex =
       /\bs(?:eason)?\s*0?(\d{1,3})\s*[.\-_ ]*e(?:p(?:isode)?)?\s*0?(\d{1,3})(?:\s*(?:-|to|e)\s*0?(\d{1,3}))?/gi;
     let match;
-    while ((match = seRegex.exec(normalized)) !== null) {
+    while ((match = seRegex.exec(explicitSource)) !== null) {
       const s = Number(match[1]);
       const e1 = Number(match[2]);
       const e2 = match[3] ? Number(match[3]) : undefined;
@@ -1554,40 +1563,87 @@ export class PlayerComponent implements OnDestroy {
     }
 
     if (!episodeMatch) {
+      const hasCodecX = /\bx26[45]\b/.test(normalized);
       const xRegex =
-        /\b(\d{1,3})\s*x\s*0?(\d{1,3})(?:\s*(?:-|to|x)\s*0?(\d{1,3}))?/gi;
-      while ((match = xRegex.exec(normalized)) !== null) {
+        /\b(\d{1,3})\s*x\s*0?(\d{1,3})\b(?:\s*(?:-|to|x)\s*0?(\d{1,3}))?/gi;
+      while ((match = xRegex.exec(explicitSource)) !== null) {
         const s = Number(match[1]);
         const e1 = Number(match[2]);
         const e2 = match[3] ? Number(match[3]) : undefined;
+        if (hasCodecX && (e1 === 264 || e1 === 265)) {
+          continue;
+        }
         if (checkEpisode(s, e1, e2)) break;
       }
     }
 
-    if (!seasonMatch) {
-      const seasonWordRegex = /\bseason\s*0?(\d{1,3})\b/gi;
-      while ((match = seasonWordRegex.exec(normalized)) !== null) {
-        if (Number(match[1]) === seasonNum) {
-          seasonMatch = true;
-          break;
-        }
+    if (explicitEpisodeFound) {
+      return { episode: episodeMatch, season: seasonMatch, explicitEpisodeFound: true };
+    }
+
+    let seasonMarkersFound = false;
+    const seasonRangeRegex =
+      /\bs(?:eason)?\s*0?(\d{1,3})\s*(?:-|to)\s*s?(?:eason)?\s*0?(\d{1,3})\b/gi;
+    while ((match = seasonRangeRegex.exec(text)) !== null) {
+      seasonMarkersFound = true;
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      if (inRange(seasonNum, start, end)) {
+        seasonMatch = true;
       }
     }
 
-    if (!seasonMatch) {
-      const seasonShortRegex = /\bs\s*0?(\d{1,3})\b/gi;
-      while ((match = seasonShortRegex.exec(normalized)) !== null) {
-        if (Number(match[1]) === seasonNum) {
-          seasonMatch = true;
+    const seasonWordRegex = /\bseason\s*0?(\d{1,3})\b/gi;
+    while ((match = seasonWordRegex.exec(normalized)) !== null) {
+      seasonMarkersFound = true;
+      if (Number(match[1]) === seasonNum) {
+        seasonMatch = true;
+      }
+    }
+
+    const seasonShortRegex = /\bs\s*0?(\d{1,3})\b/gi;
+    while ((match = seasonShortRegex.exec(normalized)) !== null) {
+      seasonMarkersFound = true;
+      if (Number(match[1]) === seasonNum) {
+        seasonMatch = true;
+      }
+    }
+
+    if (seasonMarkersFound && !seasonMatch) {
+      return { episode: false, season: false, explicitEpisodeFound: false };
+    }
+
+    const allowEpisodeOnly = seasonMatch || !seasonMarkersFound;
+    if (allowEpisodeOnly) {
+      const epRegex = /\b(?:episode|ep|e)\s*0?(\d{1,3})\b/gi;
+      let episodeMarkerFound = false;
+      while ((match = epRegex.exec(normalized)) !== null) {
+        episodeMarkerFound = true;
+        const e1 = Number(match[1]);
+        if (inRange(episodeNum, e1)) {
+          episodeMatch = true;
           break;
         }
+      }
+      if (episodeMarkerFound && !episodeMatch) {
+        return { episode: false, season: seasonMatch, explicitEpisodeFound: true };
       }
     }
 
     if (seasonMatch && !episodeMatch) {
       const fileSegment = text.split(/[\\/]/).pop() || text;
+      const scrubbed = fileSegment
+        .replace(/\.[a-z0-9]{2,4}$/i, ' ')
+        .replace(/\d+\.\d+/g, ' ')
+        .replace(/\b(19|20)\d{2}\b/g, ' ')
+        .replace(/\b(480|576|720|1080|2160|4320)p?\b/g, ' ')
+        .replace(/\b(4k|8k|10bit|12bit)\b/g, ' ')
+        .replace(/\d+ch/gi, ' ')
+        .replace(/\bseason\s*\d+\b/gi, ' ')
+        .replace(/\bs\s*\d+\b/gi, ' ')
+        .replace(/\b(x264|x265|h264|h265|hevc|av1|aac|ac3|eac3|ddp|dd|truehd|atmos)\b/g, ' ');
       const episodeOnlyRegex = /(?:^|[\s._-])0?(\d{1,3})(?:$|[\s._-])/g;
-      while ((match = episodeOnlyRegex.exec(fileSegment)) !== null) {
+      while ((match = episodeOnlyRegex.exec(scrubbed)) !== null) {
         const value = Number(match[1]);
         if (value === episodeNum) {
           episodeMatch = true;
@@ -1597,14 +1653,36 @@ export class PlayerComponent implements OnDestroy {
     }
 
     if (episodeMatch) seasonMatch = true;
-    return { episode: episodeMatch, season: seasonMatch };
+    return { episode: episodeMatch, season: seasonMatch, explicitEpisodeFound };
   }
 
   private getEpisodeMatchScore(name: string, season: number, episode: number): number {
     const match = this.getEpisodeMatchFlags(name, season, episode);
     if (match.episode) return 2;
-    if (match.season) return 1;
+    if (match.season && !match.explicitEpisodeFound) return 1;
     return 0;
+  }
+
+  private getOpenSubtitleMatchScore(
+    result: OpenSubtitleResult,
+    season: number,
+    episode: number
+  ): number {
+    const seasonValue = typeof result?.season === 'number' ? result.season : NaN;
+    const episodeValue = typeof result?.episode === 'number' ? result.episode : NaN;
+    if (
+      Number.isFinite(seasonValue) &&
+      seasonValue > 0 &&
+      Number.isFinite(episodeValue) &&
+      episodeValue > 0
+    ) {
+      if (seasonValue === season && episodeValue === episode) return 3;
+      if (seasonValue === season) return 1;
+      return 0;
+    }
+    const releaseScore = this.getEpisodeMatchScore(result.release || '', season, episode);
+    const fileScore = this.getEpisodeMatchScore(result.fileName || '', season, episode);
+    return Math.max(releaseScore, fileScore);
   }
 
   canSearchOpenSubtitles(): boolean {
@@ -1823,6 +1901,30 @@ export class PlayerComponent implements OnDestroy {
         usedLanguagesFilter = fallbackUsedLanguages;
       }
 
+      const seasonValue = this.season() ?? NaN;
+      const episodeValue = this.episode() ?? NaN;
+      const hasEpisodeTarget =
+        this.type() === 'tv' &&
+        Number.isFinite(seasonValue) &&
+        Number.isFinite(episodeValue);
+      let episodeFilterFailed = false;
+
+      if (hasEpisodeTarget && results.length > 0) {
+        const scored = results.map((result) => ({
+          result,
+          score: this.getOpenSubtitleMatchScore(result, seasonValue!, episodeValue!),
+        }));
+        const episodeMatches = scored
+          .filter((item) => item.score >= 2)
+          .map((item) => item.result);
+        if (episodeMatches.length > 0) {
+          results = episodeMatches;
+        } else {
+          results = [];
+          episodeFilterFailed = true;
+        }
+      }
+
       const groupingLanguages = usedLanguagesFilter ? languageList : [];
       const grouped = this.buildOpenSubtitlesBuckets(results, groupingLanguages);
       const nextIndices: Record<string, number> = {};
@@ -1835,7 +1937,15 @@ export class PlayerComponent implements OnDestroy {
       this.openSubtitlesLanguageIndices.set(nextIndices);
 
       if (grouped.order.length === 0) {
-        this.openSubtitlesError.set('No se encontraron subtítulos en OpenSubtitles.');
+        if (episodeFilterFailed && hasEpisodeTarget) {
+          const seasonTag = String(seasonValue).padStart(2, '0');
+          const episodeTag = String(episodeValue).padStart(2, '0');
+          this.openSubtitlesError.set(
+            `No se encontraron subtítulos del episodio S${seasonTag}E${episodeTag}.`
+          );
+        } else {
+          this.openSubtitlesError.set('No se encontraron subtítulos en OpenSubtitles.');
+        }
       }
     } catch (error: any) {
       console.error('Error al buscar subtítulos externos:', error);
@@ -1853,6 +1963,23 @@ export class PlayerComponent implements OnDestroy {
 
   downloadOpenSubtitle(result: OpenSubtitleResult) {
     if (!result?.fileId) return;
+    const seasonValue = this.season() ?? NaN;
+    const episodeValue = this.episode() ?? NaN;
+    const hasEpisodeTarget =
+      this.type() === 'tv' &&
+      Number.isFinite(seasonValue) &&
+      Number.isFinite(episodeValue);
+    if (hasEpisodeTarget) {
+      const score = this.getOpenSubtitleMatchScore(result, seasonValue!, episodeValue!);
+      if (score < 2) {
+        const seasonTag = String(seasonValue).padStart(2, '0');
+        const episodeTag = String(episodeValue).padStart(2, '0');
+        this.openSubtitlesError.set(
+          `El subtítulo seleccionado no coincide con el episodio S${seasonTag}E${episodeTag}.`
+        );
+        return;
+      }
+    }
 
     const params = new URLSearchParams();
     if (result.format) params.set('format', result.format);
