@@ -623,6 +623,7 @@ const CACHE_DIR = path.join(os.tmpdir(), 'pirateflix-transcoded');
 
 const activeFFmpegProcesses = new Map();
 const transcodeJobs = new Map();
+const transcodeStatusByKey = new Map();
 
 const MP4_LIKE_EXT_RE = /\.(mp4|mov|m4v)$/i;
 const INCOMPATIBLE_VIDEO_HINT_RE = /\b(hevc|x265|h265|av1)\b/i;
@@ -822,6 +823,43 @@ function hasIncompatibleVideoHint(name) {
   return INCOMPATIBLE_VIDEO_HINT_RE.test(String(name || '').toLowerCase());
 }
 
+function getTranscodeKey(infoHash, fileIndex, audioStreamIndex) {
+  const audioSuffix = Number.isFinite(audioStreamIndex) ? `_a${audioStreamIndex}` : '';
+  return `${infoHash}_${fileIndex}${audioSuffix}`;
+}
+
+function timemarkToSeconds(timemark) {
+  if (!timemark || typeof timemark !== 'string') return null;
+  const parts = timemark.trim().split(':');
+  if (parts.length < 2) return null;
+  const secondsPart = parts.pop();
+  const minutesPart = parts.pop();
+  const hoursPart = parts.pop();
+  const seconds = Number(secondsPart);
+  const minutes = Number(minutesPart);
+  const hours = hoursPart ? Number(hoursPart) : 0;
+  if (!Number.isFinite(seconds) || !Number.isFinite(minutes) || !Number.isFinite(hours)) {
+    return null;
+  }
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function upsertTranscodeStatus(cacheKey, patch) {
+  const current = transcodeStatusByKey.get(cacheKey) || {};
+  const next = { ...current, ...patch, updatedAt: Date.now() };
+  transcodeStatusByKey.set(cacheKey, next);
+  return next;
+}
+
+function clearTranscodeStatus(cacheKey, patch) {
+  if (!transcodeStatusByKey.has(cacheKey)) return;
+  if (patch) {
+    upsertTranscodeStatus(cacheKey, patch);
+    return;
+  }
+  transcodeStatusByKey.delete(cacheKey);
+}
+
 function getTranscodedCachePath(cacheKey) {
   return path.join(CACHE_DIR, `${cacheKey}.mp4`);
 }
@@ -863,6 +901,7 @@ function clearTranscodeEntry(cacheKey, reason) {
   abortTranscodeJob(cacheKey, reason);
   removeTranscodedFiles(cacheKey);
   transcodedCache.delete(cacheKey);
+  clearTranscodeStatus(cacheKey, { status: 'aborted', error: reason || 'aborted' });
 }
 
 function clearAllTranscodeEntries(reason) {
@@ -913,6 +952,7 @@ async function determineTranscodeMode(file, filePath, audioStreamIndex) {
 async function ensureTranscodedFile({
   cacheKey,
   infoHash,
+  fileIndex,
   file,
   filePath,
   mode,
@@ -921,11 +961,13 @@ async function ensureTranscodedFile({
   const cachedPath = getTranscodedCachePath(cacheKey);
 
   if (transcodedCache.get(cacheKey) === 'ready' && fs.existsSync(cachedPath)) {
+    upsertTranscodeStatus(cacheKey, { status: 'ready', percent: 100 });
     return cachedPath;
   }
 
   if (fs.existsSync(cachedPath)) {
     transcodedCache.set(cacheKey, 'ready');
+    upsertTranscodeStatus(cacheKey, { status: 'ready', percent: 100 });
     return cachedPath;
   }
 
@@ -933,6 +975,16 @@ async function ensureTranscodedFile({
   if (existingJob) {
     return existingJob.promise;
   }
+
+  upsertTranscodeStatus(cacheKey, {
+    status: 'queued',
+    mode,
+    infoHash,
+    fileIndex,
+    audioStreamIndex: Number.isFinite(audioStreamIndex) ? audioStreamIndex : null,
+    startedAt: Date.now(),
+    percent: 0,
+  });
 
   let resolveJob = null;
   let rejectJob = null;
@@ -969,6 +1021,14 @@ async function ensureTranscodedFile({
   const inputSource = useTorrentStream ? inputStream : filePath;
   const partialPath = `${cachedPath}.partial`;
 
+  ffmpeg.ffprobe(filePath, (err, metadata) => {
+    if (err) return;
+    const duration = metadata?.format?.duration;
+    if (Number.isFinite(duration)) {
+      upsertTranscodeStatus(cacheKey, { durationSec: duration });
+    }
+  });
+
   const mapOptions = [];
   if (Number.isFinite(audioStreamIndex)) {
     mapOptions.push('-map', '0:v:0', '-map', `0:${audioStreamIndex}?`);
@@ -985,6 +1045,52 @@ async function ensureTranscodedFile({
     .outputOptions(outputOptions)
     .on('start', () => {
       console.log('🔄 FFmpeg preparando MP4 seekable:', cacheKey, `(mode=${mode})`);
+      upsertTranscodeStatus(cacheKey, { status: 'running' });
+    })
+    .on('progress', (progress) => {
+      const current = transcodeStatusByKey.get(cacheKey) || {};
+      const rawPercent = Number(progress?.percent);
+      let percent = Number.isFinite(rawPercent) ? rawPercent : null;
+      if (percent === null) {
+        const durationSec = Number(current?.durationSec);
+        const markSec = timemarkToSeconds(progress?.timemark);
+        if (
+          Number.isFinite(durationSec) &&
+          Number.isFinite(markSec) &&
+          durationSec > 0
+        ) {
+          percent = (markSec / durationSec) * 100;
+        }
+      }
+
+      const next = upsertTranscodeStatus(cacheKey, {
+        status: 'running',
+        percent: percent !== null ? Math.max(0, Math.min(100, percent)) : null,
+        timemark: progress?.timemark || '',
+        outputBytes: Number.isFinite(progress?.targetSize)
+          ? Math.max(0, Math.round(progress.targetSize * 1024))
+          : null,
+      });
+
+      const percentInt =
+        Number.isFinite(next.percent) && next.percent !== null
+          ? Math.floor(next.percent)
+          : null;
+      const lastLoggedPercent = Number(next?.lastLoggedPercent) || 0;
+      const lastLoggedAt = Number(next?.lastLoggedAt) || 0;
+      const now = Date.now();
+
+      if (percentInt !== null) {
+        const bucket = Math.floor(percentInt / 5) * 5;
+        if (bucket >= lastLoggedPercent + 5) {
+          console.log(`⏳ Transcodificando ${cacheKey}: ${bucket}%`);
+          upsertTranscodeStatus(cacheKey, { lastLoggedPercent: bucket });
+        }
+      } else if (now - lastLoggedAt > 30000) {
+        const mark = next.timemark ? ` (${next.timemark})` : '';
+        console.log(`⏳ Transcodificando ${cacheKey}: en progreso${mark}`);
+        upsertTranscodeStatus(cacheKey, { lastLoggedAt: now });
+      }
     })
     .on('error', (err) => {
       if (!String(err.message || '').includes('SIGKILL')) {
@@ -999,6 +1105,7 @@ async function ensureTranscodedFile({
       transcodedCache.delete(cacheKey);
       removeTranscodedFiles(cacheKey);
       transcodeJobs.delete(cacheKey);
+      clearTranscodeStatus(cacheKey, { status: 'error', error: err.message || 'ffmpeg-error' });
       if (infoHash) {
         maybeDestroyPending(infoHash);
       }
@@ -1033,6 +1140,7 @@ async function ensureTranscodedFile({
       }
       transcodedCache.set(cacheKey, 'ready');
       transcodeJobs.delete(cacheKey);
+      upsertTranscodeStatus(cacheKey, { status: 'ready', percent: 100, completedAt: Date.now() });
       try {
         resolveJob(cachedPath);
       } catch (_) {}
@@ -2319,6 +2427,52 @@ app.get('/api/seekable/:infoHash/:fileIndex', async (req, res) => {
   });
 });
 
+// Endpoint para ver estado/progreso de transcodificacion
+app.get('/api/transcode-status/:infoHash/:fileIndex', (req, res) => {
+  const { infoHash, fileIndex } = req.params;
+  const audioStreamParam = req.query.audioStream;
+  const audioStreamIndex =
+    typeof audioStreamParam === 'string' && audioStreamParam.trim() !== ''
+      ? Number(audioStreamParam)
+      : null;
+  const cacheKey = getTranscodeKey(infoHash, fileIndex, audioStreamIndex);
+  const status = transcodeStatusByKey.get(cacheKey);
+
+  const torrent = client.get(infoHash);
+  let fileLength = null;
+  let downloadedBytes = null;
+  let downloadPercent = null;
+  if (torrent) {
+    const file = torrent.files[parseInt(fileIndex)];
+    if (file) {
+      fileLength = Number(file.length || 0);
+      downloadedBytes = Number(file.downloaded || 0);
+      if (fileLength > 0) {
+        downloadPercent = Math.max(0, Math.min(100, (downloadedBytes / fileLength) * 100));
+      }
+    }
+  }
+
+  if (!status) {
+    const cachedPath = getTranscodedCachePath(cacheKey);
+    const ready = transcodedCache.get(cacheKey) === 'ready' && fs.existsSync(cachedPath);
+    return res.json({
+      status: ready ? 'ready' : 'idle',
+      percent: ready ? 100 : null,
+      downloadPercent,
+      fileLength,
+      downloadedBytes,
+    });
+  }
+
+  res.json({
+    ...status,
+    downloadPercent,
+    fileLength,
+    downloadedBytes,
+  });
+});
+
 // =====================
 // Streaming
 // =====================
@@ -2355,12 +2509,16 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   );
 
   if (needsTranscode) {
-    const audioSuffix = forceTranscode ? `_a${audioStreamIndex}` : '';
-    const cacheKey = `${infoHash}_${fileIndex}${audioSuffix}`;
+    const cacheKey = getTranscodeKey(
+      infoHash,
+      fileIndex,
+      forceTranscode ? audioStreamIndex : null
+    );
     try {
       const cachedPath = await ensureTranscodedFile({
         cacheKey,
         infoHash,
+        fileIndex,
         file,
         filePath,
         mode: transcodeDecision.mode,
@@ -2678,6 +2836,7 @@ app.post('/api/quick-switch', async (req, res) => {
 
     // 2. Matar FFmpeg y limpiar transcodes activos
     clearAllTranscodeEntries('quick-switch');
+    transcodeStatusByKey.clear();
 
     // 3. Cerrar streams HTTP activos (sin esperar)
     for (const [infoHash, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
@@ -2753,6 +2912,7 @@ app.post('/api/reset-state', async (req, res) => {
 
     // 2. Matar FFmpeg y limpiar transcodes activos
     clearAllTranscodeEntries('reset-state');
+    transcodeStatusByKey.clear();
 
     // 3. Cerrar streams
     for (const [, resSet] of Array.from(activeResponsesByInfoHash.entries())) {

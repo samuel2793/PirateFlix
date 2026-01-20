@@ -141,6 +141,59 @@ $accent-primary: #e5a00d;
   transition: width 0.3s ease;
 }
 
+.progress-bar.indeterminate {
+  position: relative;
+  overflow: hidden;
+
+  .progress-fill {
+    width: 40% !important;
+    animation: progressIndeterminate 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes progressIndeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(20%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+.transcode-status {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+
+.transcode-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.transcode-meta {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.transcode-percent {
+  font-weight: 700;
+  color: #fff;
+}
+
+.transcode-eta {
+  color: rgba(255, 255, 255, 0.7);
+}
+
 .error-message {
   position: absolute;
   top: 50%;

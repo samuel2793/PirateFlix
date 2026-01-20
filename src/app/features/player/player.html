@@ -11,28 +11,41 @@
             <h2 i18n>Connecting to the torrent...</h2>
           }
 
-          <ul class="loading-logs" aria-live="polite">
-            @if (loadingLogs().length === 0) {
-              <li class="loading-log muted" i18n>Gathering status updates...</li>
-            } @else {
-              @for (entry of loadingLogs(); track entry.id) {
-                <li class="loading-log" [class.warn]="entry.level === 'warn'" [class.error]="entry.level === 'error'">
-                  <span class="log-icon" aria-hidden="true">
-                    @if (entry.level === 'error') { x }
-                    @else if (entry.level === 'warn') { ! }
-                    @else { > }
-                  </span>
-                  <span class="log-message">{{ entry.message }}</span>
-                </li>
-              }
-            }
-          </ul>
-
-          <!-- @if (loadingPhase() === 'streaming') {
-            <div class="progress-bar">
-              <div class="progress-fill" [style.width.%]="loadingProgress()"></div>
+          @if (showTranscodeUI()) {
+            <div class="transcode-status" aria-live="polite">
+              <div class="transcode-title">{{ transcodeLabel() }}</div>
+              <div class="transcode-meta">
+                @if (transcodePercent() !== null) {
+                  <span class="transcode-percent">{{ transcodePercent() | number:'1.0-0' }}%</span>
+                } @else {
+                  <span class="transcode-percent" i18n>Calculating...</span>
+                }
+                @if (transcodeEta()) {
+                  <span class="transcode-eta">{{ transcodeEta() }}</span>
+                }
+              </div>
+              <div class="progress-bar" [class.indeterminate]="transcodePercent() === null">
+                <div class="progress-fill" [style.width.%]="transcodePercent() ?? 0"></div>
+              </div>
             </div>
-          } -->
+          } @else {
+            <ul class="loading-logs" aria-live="polite">
+              @if (loadingLogs().length === 0) {
+                <li class="loading-log muted" i18n>Gathering status updates...</li>
+              } @else {
+                @for (entry of loadingLogs(); track entry.id) {
+                  <li class="loading-log" [class.warn]="entry.level === 'warn'" [class.error]="entry.level === 'error'">
+                    <span class="log-icon" aria-hidden="true">
+                      @if (entry.level === 'error') { x }
+                      @else if (entry.level === 'warn') { ! }
+                      @else { > }
+                    </span>
+                    <span class="log-message">{{ entry.message }}</span>
+                  </li>
+                }
+              }
+            </ul>
+          }
         </div>
       </div>
     }
@@ -45,7 +58,8 @@
 
     @if (videoSrc()) {
       <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()" crossorigin="anonymous"
-        (loadedmetadata)="onVideoLoadedMetadata()">
+        (loadedmetadata)="onVideoLoadedMetadata()"
+        (error)="onVideoError()">
         @for (subtitle of subtitleTracks(); track subtitle.index) {
           <track
             [label]="subtitle.language"

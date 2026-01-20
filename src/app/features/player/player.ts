@@ -172,6 +172,12 @@ export class PlayerComponent implements OnDestroy {
   openSubtitlesLanguageOrder = signal<string[]>([]);
   openSubtitlesLanguageIndices = signal<Record<string, number>>({});
   openSubtitlesBuckets = signal<Record<string, OpenSubtitleResult[]>>({});
+  transcodeStatus = signal<'idle' | 'queued' | 'running' | 'ready' | 'error' | 'aborted'>(
+    'idle'
+  );
+  transcodePercent = signal<number | null>(null);
+  transcodeEta = signal<string>('');
+  transcodeLabel = signal<string>('');
 
   private readonly API_URL = 'http://localhost:3001/api';
   private readonly maxLoadingLogEntries = 8;
@@ -182,6 +188,13 @@ export class PlayerComponent implements OnDestroy {
   private progressInterval: any = null;
   private loadingLogCounter = 0;
   private lastProgressLog = -1;
+  private transcodePolling = false;
+  private lastTranscodePercent = -1;
+  private lastTranscodeDownloadPercent = -1;
+  private lastTranscodeTimemark = '';
+  private lastTranscodeStatus = '';
+  private lastTranscodeLogAt = 0;
+  private transcodeStartedAt = 0;
   private pendingSeekTime: number | null = null;
   private pendingWasPlaying = false;
   private playbackSession = 0;
@@ -213,6 +226,19 @@ export class PlayerComponent implements OnDestroy {
     this.loadingLogCounter = 0;
     this.lastProgressLog = -1;
     this.loadingLogs.set([]);
+  }
+
+  private resetTranscodeTracking() {
+    this.lastTranscodePercent = -1;
+    this.lastTranscodeDownloadPercent = -1;
+    this.lastTranscodeTimemark = '';
+    this.lastTranscodeStatus = '';
+    this.lastTranscodeLogAt = 0;
+    this.transcodeStartedAt = 0;
+    this.transcodeStatus.set('idle');
+    this.transcodePercent.set(null);
+    this.transcodeEta.set('');
+    this.transcodeLabel.set('');
   }
 
   private pushLoadingLog(message: string, level: LoadingLogLevel = 'info') {
@@ -277,6 +303,7 @@ export class PlayerComponent implements OnDestroy {
     this.openSubtitlesBuckets.set({});
     this.currentTorrentHash = null;
     this.currentVideoFileIndex = null;
+    this.resetTranscodeTracking();
 
     // Cierra de verdad la conexión de vídeo y range-requests
     const v = this.videoPlayer?.nativeElement;
@@ -1110,6 +1137,7 @@ export class PlayerComponent implements OnDestroy {
     this.openSubtitlesLanguageIndices.set({});
     this.openSubtitlesBuckets.set({});
     this.pushLoadingLog('Conectando al torrent...');
+    this.resetTranscodeTracking();
 
     try {
       console.log('Enviando torrent al backend:', magnetUri);
@@ -1343,7 +1371,6 @@ export class PlayerComponent implements OnDestroy {
       this.startProgressMonitoring();
 
       if (!this.isSessionActive(sessionId)) return false;
-      this.loading.set(false);
       return true;
     } catch (error: any) {
       if (!this.isSessionActive(sessionId)) return false;
@@ -1475,6 +1502,11 @@ export class PlayerComponent implements OnDestroy {
       this.pendingWasPlaying = !v.paused;
     }
 
+    this.loading.set(true);
+    this.loadingPhase.set('streaming');
+    this.resetTranscodeTracking();
+    this.pushLoadingLog('Preparando audio seleccionado...');
+
     const nextUrl = this.buildStreamUrl(this.selectedAudioTrack(), true);
     this.videoSrc.set(nextUrl);
   }
@@ -1482,6 +1514,9 @@ export class PlayerComponent implements OnDestroy {
   onVideoLoadedMetadata() {
     // Apply subtitle styles
     this.applySubtitleStyles();
+
+    this.loading.set(false);
+    this.loadingPhase.set('idle');
     
     if (this.pendingSeekTime === null) return;
 
@@ -1502,6 +1537,15 @@ export class PlayerComponent implements OnDestroy {
     if (shouldPlay) {
       v.play().catch(() => {});
     }
+  }
+
+  onVideoError() {
+    this.loading.set(false);
+    this.loadingPhase.set('idle');
+    if (!this.errorMessage()) {
+      this.errorMessage.set('No se pudo cargar el video.');
+    }
+    this.pushLoadingLog('Error al cargar el video.', 'error');
   }
 
   formatAudioTrackLabel(track: AudioTrack): string {
@@ -2038,6 +2082,7 @@ export class PlayerComponent implements OnDestroy {
 
     if (!this.currentTorrentHash) return;
 
+    let lastTranscodePoll = 0;
     // Actualizar progreso cada segundo
     this.progressInterval = setInterval(async () => {
       try {
@@ -2061,10 +2106,177 @@ export class PlayerComponent implements OnDestroy {
             );
           }
         }
+
+        const now = Date.now();
+        if (now - lastTranscodePoll >= 2000) {
+          lastTranscodePoll = now;
+          await this.pollTranscodeStatus();
+        }
       } catch (error) {
         console.error('Error al obtener progreso:', error);
       }
     }, 1000);
+  }
+
+  private async pollTranscodeStatus() {
+    if (this.transcodePolling) return;
+    const infoHash = this.currentTorrentHash;
+    const fileIndex = this.currentVideoFileIndex;
+    if (!infoHash || fileIndex === null) return;
+
+    this.transcodePolling = true;
+    try {
+      const params = new URLSearchParams();
+      const audioSelection = this.selectedAudioTrack();
+      if (audioSelection !== 'auto') {
+        params.set('audioStream', String(audioSelection));
+      }
+      const query = params.toString();
+      const url = `${this.API_URL}/transcode-status/${infoHash}/${fileIndex}${
+        query ? `?${query}` : ''
+      }`;
+      const response = await fetch(url);
+      if (!response.ok) return;
+      const data = await response.json();
+
+      if (this.currentTorrentHash !== infoHash || this.currentVideoFileIndex !== fileIndex) {
+        return;
+      }
+      this.handleTranscodeStatus(data);
+    } catch (error) {
+      console.error('Error al obtener estado de transcodificación:', error);
+    } finally {
+      this.transcodePolling = false;
+    }
+  }
+
+  private handleTranscodeStatus(data: any) {
+    const status = String(data?.status || '');
+    const percent = Number(data?.percent);
+    const downloadPercent = Number(data?.downloadPercent);
+    const timemark = String(data?.timemark || '');
+    const mode = String(data?.mode || '');
+    const now = Date.now();
+
+    if (status && status !== this.lastTranscodeStatus) {
+      this.lastTranscodeStatus = status;
+      if (status === 'queued') {
+        this.pushLoadingLog('Preparando transcodificación para habilitar seeking...');
+      } else if (status === 'running') {
+        const label =
+          mode === 'remux'
+            ? 'Reempaquetando video para habilitar seeking...'
+            : 'Transcodificando video para habilitar seeking...';
+        this.pushLoadingLog(label);
+      } else if (status === 'ready') {
+        this.pushLoadingLog('Transcodificación completa, cargando video...');
+      } else if (status === 'error' || status === 'aborted') {
+        this.pushLoadingLog('Error al transcodificar el video.', 'error');
+      }
+    }
+
+    if (
+      status === 'queued' ||
+      status === 'running' ||
+      status === 'ready' ||
+      status === 'error' ||
+      status === 'aborted'
+    ) {
+      this.transcodeStatus.set(
+        status as 'queued' | 'running' | 'ready' | 'error' | 'aborted'
+      );
+    }
+
+    if (!this.transcodeStartedAt && Number.isFinite(data?.startedAt)) {
+      this.transcodeStartedAt = Number(data.startedAt);
+    }
+    if (!this.transcodeStartedAt && status === 'running') {
+      this.transcodeStartedAt = now;
+    }
+
+    if (status === 'queued') {
+      this.transcodeLabel.set('Preparando transcodificación...');
+    } else if (status === 'running') {
+      this.transcodeLabel.set(
+        mode === 'remux'
+          ? 'Reempaquetando video para habilitar seeking...'
+          : 'Transcodificando video para habilitar seeking...'
+      );
+    } else if (status === 'ready') {
+      this.transcodeLabel.set('Transcodificación completa.');
+    } else if (status === 'error' || status === 'aborted') {
+      this.transcodeLabel.set('Transcodificación fallida.');
+    }
+
+    if (Number.isFinite(percent)) {
+      const clamped = Math.max(0, Math.min(100, percent));
+      this.transcodePercent.set(clamped);
+      if (this.transcodeStartedAt > 0 && clamped > 0) {
+        const elapsed = (now - this.transcodeStartedAt) / 1000;
+        const total = elapsed / (clamped / 100);
+        const etaSeconds = total - elapsed;
+        if (Number.isFinite(etaSeconds) && etaSeconds > 0) {
+          this.transcodeEta.set(`ETA ${this.formatEta(etaSeconds)}`);
+        } else {
+          this.transcodeEta.set('');
+        }
+      } else {
+        this.transcodeEta.set('');
+      }
+    } else {
+      this.transcodePercent.set(null);
+      if (status === 'running') {
+        this.transcodeEta.set('ETA calculando...');
+      }
+    }
+
+    if (status === 'running') {
+      if (Number.isFinite(percent)) {
+        const rounded = Math.floor(percent);
+        if (rounded >= this.lastTranscodePercent + 5) {
+          this.lastTranscodePercent = rounded;
+          this.pushLoadingLog(`Transcodificando: ${rounded}%`);
+        }
+      } else if (Number.isFinite(downloadPercent)) {
+        const rounded = Math.floor(downloadPercent);
+        if (rounded >= this.lastTranscodeDownloadPercent + 10) {
+          this.lastTranscodeDownloadPercent = rounded;
+          this.pushLoadingLog(`Preparando datos para transcodificar: ${rounded}% descargado`);
+        }
+      } else if (timemark && timemark !== this.lastTranscodeTimemark) {
+      if (now - this.lastTranscodeLogAt > 15000) {
+        this.lastTranscodeTimemark = timemark;
+        this.lastTranscodeLogAt = now;
+        this.pushLoadingLog(`Transcodificando... ${timemark}`);
+      }
+      }
+    }
+
+    if (status === 'error' || status === 'aborted') {
+      if (!this.errorMessage()) {
+        this.errorMessage.set('No se pudo transcodificar el video.');
+      }
+      this.loading.set(false);
+    }
+  }
+
+  private formatEta(seconds: number): string {
+    const total = Math.max(0, Math.round(seconds));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hours > 0) {
+      return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${String(secs).padStart(2, '0')}s`;
+    }
+    return `${secs}s`;
+  }
+
+  showTranscodeUI(): boolean {
+    const status = this.transcodeStatus();
+    return status === 'queued' || status === 'running' || status === 'ready';
   }
 
   getLanguageName(code: string): string {
