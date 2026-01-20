@@ -1615,6 +1615,19 @@ app.get('/api/opensubtitles/search', async (req, res) => {
       const attrs = item?.attributes || {};
       const picked = pickOpenSubtitlesFile(attrs.files);
       if (!picked?.file?.file_id) continue;
+      const featureDetails = attrs.feature_details || attrs.featureDetails || {};
+      const seasonRaw =
+        featureDetails.season_number ??
+        featureDetails.seasonNumber ??
+        attrs.season_number ??
+        attrs.seasonNumber;
+      const episodeRaw =
+        featureDetails.episode_number ??
+        featureDetails.episodeNumber ??
+        attrs.episode_number ??
+        attrs.episodeNumber;
+      const seasonNumber = Number(seasonRaw);
+      const episodeNumber = Number(episodeRaw);
 
       results.push({
         id: item?.id || null,
@@ -1627,6 +1640,8 @@ app.get('/api/opensubtitles/search', async (req, res) => {
         fps: attrs.fps || null,
         release: attrs.release || '',
         uploader: attrs.uploader?.name || '',
+        season: Number.isFinite(seasonNumber) ? seasonNumber : undefined,
+        episode: Number.isFinite(episodeNumber) ? episodeNumber : undefined,
       });
     }
 
