@@ -43,6 +43,7 @@ export class DetailsComponent {
   selectedSeason = signal<number | null>(null);
   selectedEpisode = signal<number | null>(null);
   seasonEpisodes = signal<any[]>([]);
+  seasonEpisodesLoading = signal(false);
 
   private seasonEpisodesCache = new Map<number, any[]>();
   private seasonEpisodesRequestId = 0;
@@ -231,9 +232,10 @@ export class DetailsComponent {
   }
 
   episodeOptions() {
-    const episodes = this.seasonEpisodes().filter((ep: any) =>
-      Number.isFinite(Number(ep?.episode_number))
-    );
+    const episodes = this.seasonEpisodes()
+      .filter((ep: any) => Number.isFinite(Number(ep?.episode_number)))
+      .slice()
+      .sort((a: any, b: any) => (a.episode_number ?? 0) - (b.episode_number ?? 0));
     if (episodes.length) return episodes;
 
     const season = this.selectedSeasonData();
@@ -245,7 +247,7 @@ export class DetailsComponent {
     }));
   }
 
-  setSeason(value: string) {
+  setSeason(value: number | string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     if (this.selectedSeason() === parsed) return;
@@ -272,6 +274,11 @@ export class DetailsComponent {
     this.selectedEpisode.set(parsed);
   }
 
+  selectEpisode(episodeNumber: number) {
+    if (!Number.isFinite(episodeNumber) || episodeNumber < 0) return;
+    this.selectedEpisode.set(episodeNumber);
+  }
+
   formatSeasonLabel(season: any) {
     const name = String(season?.name || '').trim();
     if (name) return name;
@@ -289,6 +296,51 @@ export class DetailsComponent {
     const numberTag = String(number).padStart(2, '0');
     if (!name) return `Episode ${number}`;
     return `E${numberTag} - ${name}`;
+  }
+
+  episodeTitle(episode: any) {
+    const name = String(episode?.name || '').trim();
+    if (name) return name;
+    const number = Number(episode?.episode_number);
+    if (!Number.isFinite(number)) return 'Episode';
+    if (number === 0) return 'Specials';
+    return `Episode ${number}`;
+  }
+
+  episodeCode(episode: any) {
+    const number = Number(episode?.episode_number);
+    if (!Number.isFinite(number)) return '';
+    if (number === 0) return 'SP';
+    return `E${String(number).padStart(2, '0')}`;
+  }
+
+  episodeMeta(episode: any) {
+    const parts: string[] = [];
+    const airDate = this.formatDate(episode?.air_date);
+    if (airDate && airDate !== '—') parts.push(airDate);
+    return parts.join(' • ');
+  }
+
+  episodeRuntime(episode: any) {
+    const runtime = Number(episode?.runtime);
+    if (!Number.isFinite(runtime) || runtime <= 0) return '';
+    return `${runtime}m`;
+  }
+
+  episodeRatingLabel(episode: any) {
+    const rating = Number(episode?.vote_average);
+    if (!Number.isFinite(rating) || rating <= 0) return '';
+    const votes = Number(episode?.vote_count);
+    if (Number.isFinite(votes) && votes <= 0) return '';
+    return rating.toFixed(1);
+  }
+
+  episodeOverview(episode: any) {
+    return String(episode?.overview || '').trim();
+  }
+
+  episodeStill(episode: any) {
+    return this.tmdb.posterUrl(episode?.still_path) || 'assets/placeholders/placeholder_movie.png';
   }
 
   seriesBadge() {
@@ -548,13 +600,18 @@ export class DetailsComponent {
     const cached = this.seasonEpisodesCache.get(seasonNumber);
     if (cached) {
       this.seasonEpisodes.set(cached);
+      this.seasonEpisodesLoading.set(false);
       this.ensureEpisodeSelection(cached);
       return;
     }
 
+    this.seasonEpisodesLoading.set(true);
     const idStr = this.route.snapshot.paramMap.get('id');
     const id = idStr ? Number(idStr) : NaN;
-    if (!Number.isFinite(id)) return;
+    if (!Number.isFinite(id)) {
+      this.seasonEpisodesLoading.set(false);
+      return;
+    }
 
     try {
       const data = await firstValueFrom(this.tmdb.tvSeason(id, seasonNumber));
@@ -567,6 +624,10 @@ export class DetailsComponent {
     } catch {
       if (requestId !== this.seasonEpisodesRequestId) return;
       this.seasonEpisodes.set([]);
+    } finally {
+      if (requestId === this.seasonEpisodesRequestId) {
+        this.seasonEpisodesLoading.set(false);
+      }
     }
   }
 
