@@ -31,7 +31,66 @@ $accent-gold: $accent-primary-light;
   background: $bg-primary;
   color: $text-primary;
   min-height: 100vh;
-  animation: fadeIn 0.4s ease-out;
+  animation: homePageFadeIn 0.5s ease-out forwards;
+  
+  // Transición suave de idioma - mantiene interfaz estable
+  &.lang-transitioning {
+    // Desactivar interacciones durante la transición
+    pointer-events: none;
+    
+    // Animación sutil de crossfade para textos traducibles
+    .translate-text,
+    [class*="section-title"],
+    [class*="section-count"],
+    [class*="hero-badge"],
+    [class*="btn-play"] span,
+    [class*="btn-info"] span,
+    [class*="filter-chip"],
+    [class*="search-page-title"],
+    [class*="search-subtitle"] {
+      animation: langTextCrossfade 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+  }
+}
+
+// Animación de crossfade extremadamente suave para textos
+@keyframes langTextCrossfade {
+  0% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 0.6;
+    filter: blur(0.5px);
+    transform: translateY(-1px);
+  }
+  70% {
+    opacity: 0.6;
+    filter: blur(0.5px);
+    transform: translateY(1px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes homePageFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+// Clase utilitaria para textos traducibles
+.translate-text {
+  display: inline-block;
+  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+  will-change: opacity, transform;
 }
 
 // ========================================
@@ -178,7 +237,7 @@ $accent-gold: $accent-primary-light;
   }
 }
 
-// Language Selector
+// Language Selector - Transición suave
 .language-selector {
   display: flex;
   align-items: center;
@@ -186,6 +245,13 @@ $accent-gold: $accent-primary-light;
   border-radius: 8px;
   padding: 2px;
   gap: 2px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  // Efecto sutil cuando se está cambiando el idioma
+  .lang-transitioning & {
+    box-shadow: 0 0 12px rgba($accent-primary, 0.2);
+    background: rgba($accent-primary, 0.08);
+  }
 }
 
 .lang-btn {
@@ -199,12 +265,32 @@ $accent-gold: $accent-primary-light;
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+
+  // Indicador de carga sutil
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba($accent-primary, 0.15),
+      transparent
+    );
+    opacity: 0;
+    transform: translateX(-100%);
+    transition: opacity 0.2s ease;
+  }
 
   .flag {
     font-size: 16px;
     display: inline-block;
-    transition: all 0.2s ease;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 1;
   }
 
   &:hover {
@@ -222,6 +308,40 @@ $accent-gold: $accent-primary-light;
       transform: scale(1.15);
     }
   }
+  
+  // Estado durante la transición de idioma
+  .lang-transitioning &.active {
+    &::after {
+      opacity: 1;
+      animation: langSelectorShimmer 0.5s ease-out;
+    }
+    
+    .flag {
+      animation: flagPulse 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+  }
+}
+
+// Animaciones para el selector de idioma
+@keyframes langSelectorShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes flagPulse {
+  0% {
+    transform: scale(1.15);
+  }
+  50% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1.15);
+  }
 }
 
 .lang-divider {
@@ -229,6 +349,11 @@ $accent-gold: $accent-primary-light;
   height: 20px;
   background: rgba(255, 255, 255, 0.1);
   margin: 0 2px;
+  transition: background 0.3s ease;
+  
+  .lang-transitioning & {
+    background: rgba($accent-primary, 0.3);
+  }
 }
 
 .nav-icon-btn {
@@ -528,10 +653,41 @@ $accent-gold: $accent-primary-light;
 // ========================================
 .main-content {
   padding: 0 4% 40px;
+  animation: mainContentSlideIn 0.6s ease-out 0.1s both;
+}
+
+@keyframes mainContentSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .section {
   margin-bottom: 40px;
+  opacity: 0;
+  animation: sectionFadeIn 0.5s ease-out forwards;
+  
+  @for $i from 1 through 10 {
+    &:nth-child(#{$i}) {
+      animation-delay: #{0.1 + ($i * 0.08)}s;
+    }
+  }
+}
+
+@keyframes sectionFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .section-header {
@@ -625,6 +781,21 @@ $accent-gold: $accent-primary-light;
     .card-rating {
       font-size: 13px;
       padding: 6px 10px;
+    }
+  }
+
+  // ========================================
+  // Grid FLIP Transition State
+  // ========================================
+  &.grid-transitioning {
+    // Deshabilitar interacciones durante la animación
+    pointer-events: none;
+    
+    .grid-card {
+      // Deshabilitar hover effects durante FLIP
+      &:hover {
+        transform: none !important;
+      }
     }
   }
 }
@@ -795,14 +966,18 @@ $accent-gold: $accent-primary-light;
 }
 
 .search-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   margin-bottom: 32px;
+  gap: 8px;
 }
 
 .search-page-title {
   font-size: 36px;
   font-weight: 800;
-  margin: 0 0 8px;
+  margin: 0;
 }
 
 .search-subtitle {

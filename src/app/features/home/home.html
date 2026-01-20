@@ -1,4 +1,4 @@
-<div class="home-page">
+<div class="home-page" [class.lang-transitioning]="isChangingLanguage()">
   <!-- Navigation Bar -->
   <nav class="navbar">
     <div class="nav-left">
@@ -15,7 +15,7 @@
         (click)="activeTab.set('movies')"
       >
         <mat-icon>movie</mat-icon>
-        <span i18n>Movies</span>
+        <span class="translate-text">{{ 'Movies' | t }}</span>
       </button>
       <button
         class="nav-tab"
@@ -23,7 +23,7 @@
         (click)="activeTab.set('tv')"
       >
         <mat-icon>tv</mat-icon>
-        <span i18n>TV Shows</span>
+        <span class="translate-text">{{ 'TV Shows' | t }}</span>
       </button>
       <button
         class="nav-tab"
@@ -31,7 +31,7 @@
         (click)="activeTab.set('search')"
       >
         <mat-icon>search</mat-icon>
-        <span i18n>Search</span>
+        <span class="translate-text">{{ 'Search' | t }}</span>
       </button>
     </div>
 
@@ -42,8 +42,7 @@
           class="density-btn"
           [class.active]="gridSize() === 1"
           (click)="setGridSize(1)"
-          title="Compact"
-          i18n-title
+          [title]="'Compact' | t"
         >
           <mat-icon>grid_view</mat-icon>
         </button>
@@ -51,8 +50,7 @@
           class="density-btn"
           [class.active]="gridSize() === 2"
           (click)="setGridSize(2)"
-          title="Normal"
-          i18n-title
+          [title]="'Normal' | t"
         >
           <mat-icon>view_comfy</mat-icon>
         </button>
@@ -60,8 +58,7 @@
           class="density-btn"
           [class.active]="gridSize() === 3"
           (click)="setGridSize(3)"
-          title="Large"
-          i18n-title
+          [title]="'Large' | t"
         >
           <mat-icon>view_module</mat-icon>
         </button>
@@ -116,7 +113,7 @@
       <div class="hero-content">
         <span class="hero-badge">
           <mat-icon>movie</mat-icon>
-          <span i18n>Featured Movie</span>
+          <span class="translate-text">{{ 'Featured Movie' | t }}</span>
         </span>
         <h1 class="hero-title">{{ getMovieHero()?.title }}</h1>
         <p class="hero-overview">{{ getMovieHero()?.overview }}</p>
@@ -130,11 +127,11 @@
         <div class="hero-actions">
           <button class="btn-play" (click)="openDetails('movie', getMovieHero()?.id)">
             <mat-icon>play_arrow</mat-icon>
-            <span i18n>Watch now</span>
+            <span class="translate-text">{{ 'Watch now' | t }}</span>
           </button>
           <button class="btn-info" (click)="openDetails('movie', getMovieHero()?.id)">
             <mat-icon>info_outline</mat-icon>
-            <span i18n>More info</span>
+            <span class="translate-text">{{ 'More info' | t }}</span>
           </button>
         </div>
       </div>
@@ -147,7 +144,7 @@
           <div class="skeleton-title"></div>
           <div class="skeleton-count"></div>
         </div>
-        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3" [class.grid-transitioning]="gridTransitioning()">
           <div class="grid-card skeleton-card" *ngFor="let _ of skeletonCount">
             <div class="card-poster skeleton-poster">
               <div class="skeleton-shimmer"></div>
@@ -165,11 +162,11 @@
     <main class="main-content" *ngIf="!loading()">
       <section class="section" *ngIf="!error()">
         <div class="section-header">
-          <h2 class="section-title" i18n>Trending Movies</h2>
-          <span class="section-count" i18n>{{ movies().length }} titles</span>
+          <h2 class="section-title translate-text">{{ 'Trending Movies' | t }}</h2>
+          <span class="section-count translate-text">{{ movies().length }} {{ 'titles' | t }}</span>
         </div>
 
-        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3" [class.grid-transitioning]="gridTransitioning()">
           <div
             class="grid-card"
             *ngFor="let item of movies(); let i = index"
@@ -205,7 +202,7 @@
       <div class="error-banner" *ngIf="error()">
         <mat-icon>error_outline</mat-icon>
         <span>{{ error() }}</span>
-        <button class="btn-retry" (click)="refreshTrending()" i18n>Retry</button>
+        <button class="btn-retry" (click)="refreshTrending()">{{ 'Retry' | t }}</button>
       </div>
     </main>
   </div>
@@ -221,7 +218,7 @@
       <div class="hero-content">
         <span class="hero-badge">
           <mat-icon>tv</mat-icon>
-          <span i18n>Featured TV Show</span>
+          <span class="translate-text">{{ 'Featured TV Show' | t }}</span>
         </span>
         <h1 class="hero-title">{{ getTvHero()?.name }}</h1>
         <p class="hero-overview">{{ getTvHero()?.overview }}</p>
@@ -235,11 +232,11 @@
         <div class="hero-actions">
           <button class="btn-play" (click)="openDetails('tv', getTvHero()?.id)">
             <mat-icon>play_arrow</mat-icon>
-            <span i18n>Watch now</span>
+            <span class="translate-text">{{ 'Watch now' | t }}</span>
           </button>
           <button class="btn-info" (click)="openDetails('tv', getTvHero()?.id)">
             <mat-icon>info_outline</mat-icon>
-            <span i18n>More info</span>
+            <span class="translate-text">{{ 'More info' | t }}</span>
           </button>
         </div>
       </div>
@@ -252,7 +249,7 @@
           <div class="skeleton-title"></div>
           <div class="skeleton-count"></div>
         </div>
-        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3" [class.grid-transitioning]="gridTransitioning()">
           <div class="grid-card skeleton-card" *ngFor="let _ of skeletonCount">
             <div class="card-poster skeleton-poster">
               <div class="skeleton-shimmer"></div>
@@ -270,11 +267,11 @@
     <main class="main-content" *ngIf="!loading()">
       <section class="section" *ngIf="!error()">
         <div class="section-header">
-          <h2 class="section-title" i18n>Trending TV Shows</h2>
-          <span class="section-count" i18n>{{ tv().length }} titles</span>
+          <h2 class="section-title translate-text">{{ 'Trending TV Shows' | t }}</h2>
+          <span class="section-count translate-text">{{ tv().length }} {{ 'titles' | t }}</span>
         </div>
 
-        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3">
+        <div class="content-grid" [class.size-small]="gridSize() === 1" [class.size-medium]="gridSize() === 2" [class.size-large]="gridSize() === 3" [class.grid-transitioning]="gridTransitioning()">
           <div
             class="grid-card"
             *ngFor="let item of tv(); let i = index"
@@ -310,7 +307,7 @@
       <div class="error-banner" *ngIf="error()">
         <mat-icon>error_outline</mat-icon>
         <span>{{ error() }}</span>
-        <button class="btn-retry" (click)="refreshTrending()" i18n>Retry</button>
+        <button class="btn-retry" (click)="refreshTrending()">{{ 'Retry' | t }}</button>
       </div>
     </main>
   </div>
@@ -322,8 +319,8 @@
     <main class="main-content search-main">
       <section class="search-section">
         <div class="search-header">
-          <h1 class="search-page-title" i18n>Search</h1>
-          <p class="search-subtitle" i18n>Find movies, TV shows, and people</p>
+          <h1 class="search-page-title translate-text">{{ 'Search' | t }}</h1>
+          <p class="search-subtitle translate-text">{{ 'Find movies, TV shows, and people' | t }}</p>
         </div>
 
         <div class="search-container">
@@ -332,8 +329,7 @@
             <input
               type="text"
               class="search-input"
-              placeholder="Search..."
-              i18n-placeholder
+              [placeholder]="'Search...' | t"
               [ngModel]="query()"
               (ngModelChange)="setQuery($event)"
               (keydown.enter)="doSearch()"
@@ -349,26 +345,22 @@
               class="filter-chip"
               [class.active]="searchFilter() === 'all'"
               (click)="setSearchFilter('all')"
-              i18n
-            >All</button>
+            >{{ 'All' | t }}</button>
             <button
               class="filter-chip"
               [class.active]="searchFilter() === 'movie'"
               (click)="setSearchFilter('movie')"
-              i18n
-            >Movies</button>
+            >{{ 'Movies' | t }}</button>
             <button
               class="filter-chip"
               [class.active]="searchFilter() === 'tv'"
               (click)="setSearchFilter('tv')"
-              i18n
-            >TV Shows</button>
+            >{{ 'TV Shows' | t }}</button>
             <button
               class="filter-chip"
               [class.active]="searchFilter() === 'person'"
               (click)="setSearchFilter('person')"
-              i18n
-            >People</button>
+            >{{ 'People' | t }}</button>
           </div>
         </div>
 
@@ -404,7 +396,7 @@
               <img [src]="posterOrPlaceholder(item.poster_path || item.profile_path)" [alt]="title(item)" [title]="title(item)" loading="lazy" />
               <div class="card-overlay">
                 <div class="overlay-top">
-                  <span class="media-badge">{{ labelMediaType(item.media_type) }}</span>
+                  <span class="media-badge">{{ labelMediaType(item.media_type) | t }}</span>
                 </div>
                 <div class="overlay-bottom">
                   <button class="play-btn">
@@ -429,13 +421,13 @@
         <!-- No Results -->
         <div class="no-results" *ngIf="hasSearch() && !searchLoading() && !searchError() && !searchResultsFiltered().length">
           <mat-icon>search_off</mat-icon>
-          <p i18n>No results found</p>
+          <p class="translate-text">{{ 'No results found' | t }}</p>
         </div>
 
         <!-- Empty State -->
         <div class="empty-search" *ngIf="!hasSearch() && !searchLoading()">
           <mat-icon>movie_filter</mat-icon>
-          <p i18n>Type something to search</p>
+          <p class="translate-text">{{ 'Type something to search' | t }}</p>
         </div>
       </section>
     </main>

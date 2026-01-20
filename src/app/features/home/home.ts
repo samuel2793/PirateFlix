@@ -1,10 +1,11 @@
-import { CommonModule, ViewportScroller } from '@angular/common';
-import { Component, inject, signal, computed, OnDestroy } from '@angular/core';
+import { CommonModule, ViewportScroller, DOCUMENT } from '@angular/common';
+import { Component, inject, signal, computed, OnDestroy, ElementRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { TmdbService } from '../../core/services/tmdb';
 import { LanguageService, SupportedLang } from '../../shared/services/language.service';
+import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -31,6 +32,7 @@ type SearchFilter = 'all' | 'movie' | 'tv' | 'person';
   imports: [
     CommonModule,
     FormsModule,
+    TranslatePipe,
 
     MatToolbarModule,
     MatSidenavModule,
@@ -57,9 +59,12 @@ export class HomeComponent implements OnDestroy {
   private readonly router = inject(Router);
   private readonly scroller = inject(ViewportScroller);
   private readonly language = inject(LanguageService);
+  private readonly document = inject(DOCUMENT);
+  private readonly elementRef = inject(ElementRef);
 
   // Language
   currentLang = this.language.currentLang;
+  isChangingLanguage = this.language.isChangingLanguage;
 
   changeLang(lang: SupportedLang) {
     this.language.setLang(lang);
@@ -89,6 +94,11 @@ export class HomeComponent implements OnDestroy {
 
   // Grid size (content density): 1 = small, 2 = medium, 3 = large
   gridSize = signal<number>(this.loadGridSize());
+  private gridTransitioningState = signal(false);
+
+  gridTransitioning() {
+    return this.gridTransitioningState();
+  }
 
   private loadGridSize(): number {
     try {
@@ -100,10 +110,93 @@ export class HomeComponent implements OnDestroy {
   }
 
   setGridSize(size: number) {
+    if (size === this.gridSize()) return;
+    
+    // Respetar prefers-reduced-motion
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    
+    if (prefersReducedMotion) {
+      // Sin animación, cambio instantáneo
+      this.gridSize.set(size);
+      try { localStorage.setItem('pirateflix_gridSize', String(size)); } catch {}
+      return;
+    }
+    
+    // === FLIP Animation ===
+    const grids = this.elementRef.nativeElement.querySelectorAll('.content-grid');
+    if (!grids.length) {
+      this.gridSize.set(size);
+      try { localStorage.setItem('pirateflix_gridSize', String(size)); } catch {}
+      return;
+    }
+    
+    // Preservar scroll
+    const scrollY = window.scrollY;
+    
+    // FIRST: Capturar posiciones iniciales de todas las cards
+    const cardPositions = new Map<HTMLElement, DOMRect>();
+    grids.forEach((grid: Element) => {
+      const cards = grid.querySelectorAll('.grid-card');
+      cards.forEach((card: Element) => {
+        const el = card as HTMLElement;
+        cardPositions.set(el, el.getBoundingClientRect());
+      });
+    });
+    
+    // Marcar transición activa (deshabilita hover/clicks)
+    this.gridTransitioningState.set(true);
+    
+    // Cambiar el tamaño del grid
     this.gridSize.set(size);
-    try {
-      localStorage.setItem('pirateflix_gridSize', String(size));
-    } catch {}
+    try { localStorage.setItem('pirateflix_gridSize', String(size)); } catch {}
+    
+    // LAST + INVERT + PLAY: En el siguiente frame
+    requestAnimationFrame(() => {
+      cardPositions.forEach((firstRect, card) => {
+        // LAST: Nueva posición
+        const lastRect = card.getBoundingClientRect();
+        
+        // INVERT: Calcular diferencia
+        const deltaX = firstRect.left - lastRect.left;
+        const deltaY = firstRect.top - lastRect.top;
+        const scaleX = firstRect.width / lastRect.width;
+        const scaleY = firstRect.height / lastRect.height;
+        
+        // Si no hay cambio significativo, skip
+        if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1 && 
+            Math.abs(scaleX - 1) < 0.01 && Math.abs(scaleY - 1) < 0.01) {
+          return;
+        }
+        
+        // Preparar para animación
+        card.style.willChange = 'transform';
+        card.style.transformOrigin = 'top left';
+        
+        // Aplicar transformación inversa (posición original)
+        card.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`;
+        card.style.transition = 'none';
+        
+        // PLAY: Forzar reflow y animar a posición final
+        card.offsetHeight; // Force reflow
+        
+        card.style.transition = 'transform 280ms cubic-bezier(0.4, 0, 0.2, 1)';
+        card.style.transform = '';
+      });
+      
+      // Restaurar scroll
+      window.scrollTo(0, scrollY);
+      
+      // Limpiar después de la animación
+      setTimeout(() => {
+        cardPositions.forEach((_, card) => {
+          card.style.willChange = '';
+          card.style.transformOrigin = '';
+          card.style.transform = '';
+          card.style.transition = '';
+        });
+        this.gridTransitioningState.set(false);
+      }, 300);
+    });
   }
 
   // Skeletons
@@ -128,6 +221,23 @@ export class HomeComponent implements OnDestroy {
 
   constructor() {
     this.refreshTrending();
+    
+    // Restore state if returning from details/person page
+    const state = this.router.getCurrentNavigation()?.extras?.state || window.history.state;
+    if (state?.activeTab) {
+      this.activeTab.set(state.activeTab);
+    }
+    if (state?.query) {
+      this.query.set(state.query);
+      this.doSearch();
+    }
+    if (state?.filter) {
+      this.searchFilter.set(state.filter);
+    }
+    if (state?.scroll) {
+      // Restore scroll after view initializes
+      setTimeout(() => window.scrollTo(0, state.scroll), 100);
+    }
   }
 
   ngOnDestroy() {
@@ -221,10 +331,9 @@ export class HomeComponent implements OnDestroy {
   }
 
   labelMediaType(mt: string) {
-    const lang = this.currentLang();
-    if (mt === 'movie') return lang === 'es' ? 'Película' : 'Movie';
-    if (mt === 'tv') return lang === 'es' ? 'Serie' : 'TV';
-    if (mt === 'person') return lang === 'es' ? 'Persona' : 'Person';
+    if (mt === 'movie') return 'Movie';
+    if (mt === 'tv') return 'TV';
+    if (mt === 'person') return 'Person';
     return mt ?? '—';
   }
 
@@ -297,11 +406,24 @@ export class HomeComponent implements OnDestroy {
   }
 
   openDetails(type: 'movie' | 'tv', id: number) {
-    this.router.navigate(['/details', type, id]);
+    // Store current tab/query/filter state for back navigation
+    const state = {
+      returnTab: this.activeTab(),
+      returnQuery: this.query(),
+      returnFilter: this.searchFilter(),
+      returnScroll: window.scrollY
+    };
+    this.router.navigate(['/details', type, id], { state });
   }
 
   openPerson(id: number) {
-    this.router.navigate(['/person', id]);
+    const state = {
+      returnTab: this.activeTab(),
+      returnQuery: this.query(),
+      returnFilter: this.searchFilter(),
+      returnScroll: window.scrollY
+    };
+    this.router.navigate(['/person', id], { state });
   }
 
   scrollTo(id: string) {
