@@ -622,6 +622,10 @@ const transcodedCache = new Map();
 const CACHE_DIR = path.join(os.tmpdir(), 'pirateflix-transcoded');
 
 const activeFFmpegProcesses = new Map();
+const transcodeJobs = new Map();
+
+const MP4_LIKE_EXT_RE = /\.(mp4|mov|m4v)$/i;
+const INCOMPATIBLE_VIDEO_HINT_RE = /\b(hevc|x265|h265|av1)\b/i;
 
 // --- NUEVO: tracking de streams activos por torrent ---
 // Esto evita destruir torrents mientras el navegador todavía hace Range requests,
@@ -678,6 +682,12 @@ function destroyTorrentNow(infoHash) {
   } catch (e) {
     console.warn('Error destruyendo torrent:', infoHash, e && e.message ? e.message : e);
     return false;
+  }
+}
+
+function maybeDestroyPending(infoHash) {
+  if (pendingDestroy.has(infoHash) && canDestroyNow(infoHash)) {
+    destroyTorrentNow(infoHash);
   }
 }
 
@@ -802,6 +812,254 @@ async function isLikelyFaststartMp4(file, filePath) {
       } catch (_) {}
     }
   }
+}
+
+function isMp4LikeName(name) {
+  return MP4_LIKE_EXT_RE.test(String(name || '').toLowerCase());
+}
+
+function hasIncompatibleVideoHint(name) {
+  return INCOMPATIBLE_VIDEO_HINT_RE.test(String(name || '').toLowerCase());
+}
+
+function getTranscodedCachePath(cacheKey) {
+  return path.join(CACHE_DIR, `${cacheKey}.mp4`);
+}
+
+function removeTranscodedFiles(cacheKey) {
+  const finalPath = getTranscodedCachePath(cacheKey);
+  const partialPath = `${finalPath}.partial`;
+  try {
+    fs.unlinkSync(finalPath);
+  } catch (_) {}
+  try {
+    fs.unlinkSync(partialPath);
+  } catch (_) {}
+}
+
+function abortTranscodeJob(cacheKey, reason) {
+  const job = transcodeJobs.get(cacheKey);
+  if (!job) return;
+  transcodeJobs.delete(cacheKey);
+  try {
+    job.reject(new Error(reason || 'Transcode aborted'));
+  } catch (_) {}
+}
+
+function abortAllTranscodeJobs(reason) {
+  for (const key of Array.from(transcodeJobs.keys())) {
+    abortTranscodeJob(key, reason);
+  }
+}
+
+function clearTranscodeEntry(cacheKey, reason) {
+  const proc = activeFFmpegProcesses.get(cacheKey);
+  if (proc) {
+    try {
+      proc.kill('SIGKILL');
+    } catch (_) {}
+    activeFFmpegProcesses.delete(cacheKey);
+  }
+  abortTranscodeJob(cacheKey, reason);
+  removeTranscodedFiles(cacheKey);
+  transcodedCache.delete(cacheKey);
+}
+
+function clearAllTranscodeEntries(reason) {
+  const keys = new Set([
+    ...Array.from(transcodedCache.keys()),
+    ...Array.from(transcodeJobs.keys()),
+    ...Array.from(activeFFmpegProcesses.keys()),
+  ]);
+  for (const key of keys) {
+    clearTranscodeEntry(key, reason);
+  }
+}
+
+async function determineTranscodeMode(file, filePath, audioStreamIndex) {
+  const name = String(file?.name || '').toLowerCase();
+  const isMp4Like = isMp4LikeName(name);
+  const hasIncompatibleVideo = hasIncompatibleVideoHint(name);
+  let faststart = false;
+
+  if (isMp4Like && !hasIncompatibleVideo) {
+    try {
+      faststart = await isLikelyFaststartMp4(file, filePath);
+    } catch (_) {
+      faststart = false;
+    }
+  }
+
+  if (Number.isFinite(audioStreamIndex)) {
+    return {
+      mode: isMp4Like && !hasIncompatibleVideo ? 'audio' : 'full',
+      isMp4Like,
+      hasIncompatibleVideo,
+      faststart,
+    };
+  }
+
+  if (!isMp4Like || hasIncompatibleVideo) {
+    return { mode: 'full', isMp4Like, hasIncompatibleVideo, faststart };
+  }
+
+  if (!faststart) {
+    return { mode: 'remux', isMp4Like, hasIncompatibleVideo, faststart };
+  }
+
+  return { mode: 'none', isMp4Like, hasIncompatibleVideo, faststart };
+}
+
+async function ensureTranscodedFile({
+  cacheKey,
+  infoHash,
+  file,
+  filePath,
+  mode,
+  audioStreamIndex,
+}) {
+  const cachedPath = getTranscodedCachePath(cacheKey);
+
+  if (transcodedCache.get(cacheKey) === 'ready' && fs.existsSync(cachedPath)) {
+    return cachedPath;
+  }
+
+  if (fs.existsSync(cachedPath)) {
+    transcodedCache.set(cacheKey, 'ready');
+    return cachedPath;
+  }
+
+  const existingJob = transcodeJobs.get(cacheKey);
+  if (existingJob) {
+    return existingJob.promise;
+  }
+
+  let resolveJob = null;
+  let rejectJob = null;
+  const jobPromise = new Promise((resolve, reject) => {
+    resolveJob = resolve;
+    rejectJob = reject;
+  });
+
+  transcodeJobs.set(cacheKey, { promise: jobPromise, reject: rejectJob });
+  transcodedCache.set(cacheKey, 'transcoding');
+
+  const existing = activeFFmpegProcesses.get(cacheKey);
+  if (existing) {
+    try {
+      existing.kill('SIGKILL');
+    } catch (_) {}
+    activeFFmpegProcesses.delete(cacheKey);
+  }
+
+  removeTranscodedFiles(cacheKey);
+
+  const useTorrentStream = Number(file?.downloaded || 0) < Number(file?.length || 0);
+  let inputStream = null;
+  if (useTorrentStream) {
+    inputStream = file.createReadStream();
+  } else {
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de transcodificar:', err.message);
+    }
+  }
+
+  const inputSource = useTorrentStream ? inputStream : filePath;
+  const partialPath = `${cachedPath}.partial`;
+
+  const mapOptions = [];
+  if (Number.isFinite(audioStreamIndex)) {
+    mapOptions.push('-map', '0:v:0', '-map', `0:${audioStreamIndex}?`);
+  }
+
+  const outputOptions = [
+    ...mapOptions,
+    '-movflags +faststart',
+    '-max_muxing_queue_size 1024',
+  ];
+
+  const ffmpegCommand = ffmpeg(inputSource)
+    .format('mp4')
+    .outputOptions(outputOptions)
+    .on('start', () => {
+      console.log('🔄 FFmpeg preparando MP4 seekable:', cacheKey, `(mode=${mode})`);
+    })
+    .on('error', (err) => {
+      if (!String(err.message || '').includes('SIGKILL')) {
+        console.error('❌ Error FFmpeg:', err.message);
+      }
+      if (inputStream) {
+        try {
+          inputStream.destroy();
+        } catch (_) {}
+      }
+      activeFFmpegProcesses.delete(cacheKey);
+      transcodedCache.delete(cacheKey);
+      removeTranscodedFiles(cacheKey);
+      transcodeJobs.delete(cacheKey);
+      if (infoHash) {
+        maybeDestroyPending(infoHash);
+      }
+      try {
+        rejectJob(err);
+      } catch (_) {}
+    })
+    .on('end', () => {
+      if (inputStream) {
+        try {
+          inputStream.destroy();
+        } catch (_) {}
+      }
+      activeFFmpegProcesses.delete(cacheKey);
+      if (infoHash) {
+        maybeDestroyPending(infoHash);
+      }
+      try {
+        fs.renameSync(partialPath, cachedPath);
+      } catch (err) {
+        console.error('Error moviendo archivo transcodificado:', err.message);
+        transcodedCache.delete(cacheKey);
+        removeTranscodedFiles(cacheKey);
+        transcodeJobs.delete(cacheKey);
+        if (infoHash) {
+          maybeDestroyPending(infoHash);
+        }
+        try {
+          rejectJob(err);
+        } catch (_) {}
+        return;
+      }
+      transcodedCache.set(cacheKey, 'ready');
+      transcodeJobs.delete(cacheKey);
+      try {
+        resolveJob(cachedPath);
+      } catch (_) {}
+    });
+
+  if (mode === 'full') {
+    ffmpegCommand
+      .videoCodec('libx264')
+      .videoBitrate('2500k')
+      .audioCodec('aac')
+      .audioBitrate('192k')
+      .audioChannels(2)
+      .outputOptions(['-preset ultrafast', '-tune zerolatency']);
+  } else if (mode === 'audio') {
+    ffmpegCommand
+      .videoCodec('copy')
+      .audioCodec('aac')
+      .audioBitrate('192k')
+      .audioChannels(2);
+  } else if (mode === 'remux') {
+    ffmpegCommand.videoCodec('copy').audioCodec('copy');
+  }
+
+  activeFFmpegProcesses.set(cacheKey, ffmpegCommand);
+  ffmpegCommand.save(partialPath);
+
+  return jobPromise;
 }
 
 // Warmup: hacer peticiones HEAD/GET rápidas a mirrors
@@ -2028,45 +2286,37 @@ app.get('/api/seekable/:infoHash/:fileIndex', async (req, res) => {
   if (!file) return res.status(404).json({ seekable: false, error: 'Archivo no encontrado' });
 
   const filePath = path.join(torrent.path, file.path);
-  const fileName = file.name.toLowerCase();
-
-  const needsTranscode =
-    fileName.endsWith('.mkv') ||
-    fileName.includes('hevc') ||
-    fileName.includes('x265') ||
-    fileName.includes('h265');
 
   const fileLength = Number(file.length || 0);
   const fileDownloaded = Number(file.downloaded || 0);
   const fullyDownloaded = fileLength > 0 && fileDownloaded >= fileLength;
-  const isMp4Like = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
-
-  let faststart = false;
+  const decision = await determineTranscodeMode(file, filePath, null);
+  const needsTranscode = decision.mode !== 'none';
   let seekable = false;
   let reason = '';
 
   if (needsTranscode) {
-    reason = 'needs-transcode';
+    seekable = true;
+    reason = decision.mode === 'remux' ? 'remux-faststart' : 'transcode';
   } else if (fullyDownloaded) {
     seekable = true;
     reason = 'fully-downloaded';
-  } else if (isMp4Like) {
-    try {
-      faststart = await isLikelyFaststartMp4(file, filePath);
-    } catch (_) {
-      faststart = false;
-    }
-    if (faststart) {
-      seekable = true;
-      reason = 'faststart';
-    } else {
-      reason = 'no-faststart';
-    }
+  } else if (decision.isMp4Like && decision.faststart) {
+    seekable = true;
+    reason = 'faststart';
+  } else if (decision.isMp4Like) {
+    reason = 'no-faststart';
   } else {
     reason = 'unsupported-container';
   }
 
-  res.json({ seekable, reason, faststart, fullyDownloaded, needsTranscode });
+  res.json({
+    seekable,
+    reason,
+    faststart: decision.faststart,
+    fullyDownloaded,
+    needsTranscode,
+  });
 });
 
 // =====================
@@ -2090,164 +2340,42 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   attachStreamLifecycle(infoHash, res);
 
   const filePath = path.join(torrent.path, file.path);
-  const fileName = file.name.toLowerCase();
-
-  let needsTranscode =
-    forceTranscode ||
-    fileName.endsWith('.mkv') ||
-    fileName.includes('hevc') ||
-    fileName.includes('x265') ||
-    fileName.includes('h265');
-
-  const isMp4Like = fileName.endsWith('.mp4') || fileName.endsWith('.mov');
-  if (!needsTranscode && isMp4Like) {
-    const fileDownloaded = Number(file.downloaded || 0);
-    const fileLength = Number(file.length || 0);
-    const fullyDownloaded = fileLength > 0 && fileDownloaded >= fileLength;
-
-    if (!fullyDownloaded) {
-      const faststart = await isLikelyFaststartMp4(file, filePath);
-      if (!faststart) {
-        try {
-          const tailBytes = Math.min(2 * 1024 * 1024, fileLength);
-          const start = Math.max(0, fileLength - tailBytes);
-          if (fileLength > 0) file.select(start, fileLength - 1);
-        } catch (_) {}
-        console.log('⚠️ MP4 sin faststart detectado, priorizando cola para moov');
-      }
-    }
-  }
+  const transcodeDecision = await determineTranscodeMode(
+    file,
+    filePath,
+    Number.isFinite(audioStreamIndex) ? audioStreamIndex : null
+  );
+  const needsTranscode = transcodeDecision.mode !== 'none';
 
   console.log(
     'Streaming archivo:',
     file.name,
-    needsTranscode ? '(TRANSCODIFICANDO automáticamente)' : '',
+    needsTranscode ? `(preparando MP4 seekable: ${transcodeDecision.mode})` : '',
     forceTranscode ? `(audio stream ${audioStreamIndex})` : ''
   );
 
   if (needsTranscode) {
     const audioSuffix = forceTranscode ? `_a${audioStreamIndex}` : '';
     const cacheKey = `${infoHash}_${fileIndex}${audioSuffix}`;
-    const cachedPath = path.join(CACHE_DIR, `${cacheKey}.mp4`);
-
-    if (activeFFmpegProcesses.has(cacheKey)) {
-      const oldProcess = activeFFmpegProcesses.get(cacheKey);
-      console.log('🧹 Deteniendo transcodificación anterior:', cacheKey);
-      try {
-        oldProcess.kill('SIGKILL');
-      } catch (_) {}
-      activeFFmpegProcesses.delete(cacheKey);
-    }
-
-    if (transcodedCache.get(cacheKey) === 'ready' && fs.existsSync(cachedPath)) {
-      console.log('✅ Sirviendo desde cache:', file.name);
+    try {
+      const cachedPath = await ensureTranscodedFile({
+        cacheKey,
+        infoHash,
+        file,
+        filePath,
+        mode: transcodeDecision.mode,
+        audioStreamIndex: forceTranscode ? audioStreamIndex : null,
+      });
+      if (res.destroyed) return;
+      console.log('✅ Sirviendo MP4 seekable:', file.name);
       return serveVideoFile(cachedPath, req, res);
-    }
-
-    console.log('🎬 Transcodificación en tiempo real:', file.name);
-
-    const useTorrentStream = file.downloaded < file.length;
-    const inputStream = useTorrentStream ? file.createReadStream() : null;
-
-    const startTranscode = () => {
-      res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Transfer-Encoding': 'chunked',
-        'Cache-Control': 'no-cache',
-        'Accept-Ranges': 'bytes',
-      });
-
-      transcodedCache.set(cacheKey, 'transcoding');
-
-      const mapOptions = forceTranscode ? ['-map', '0:v:0', '-map', `0:${audioStreamIndex}?`] : [];
-
-      const ffmpegCommand = ffmpeg(inputStream || filePath)
-        .videoCodec('libx264')
-        .videoBitrate('2500k')
-        .audioCodec('aac')
-        .audioBitrate('192k')
-        .audioChannels(2)
-        .format('mp4')
-        .outputOptions([
-          ...mapOptions,
-          '-preset ultrafast',
-          '-tune zerolatency',
-          '-movflags frag_keyframe+empty_moov+default_base_moof',
-          '-frag_duration 1000000',
-          '-max_muxing_queue_size 1024',
-        ])
-        .on('start', () => {
-          console.log('🔄 FFmpeg transcodificando en vivo');
-        })
-        .on('progress', (progress) => {
-          if (progress.percent && Math.floor(progress.percent) % 10 === 0) {
-            const rounded = Math.floor(progress.percent);
-            if (!ffmpegCommand._lastProgressLog || ffmpegCommand._lastProgressLog !== rounded) {
-              console.log(`⏳ Progreso: ${rounded}%`);
-              ffmpegCommand._lastProgressLog = rounded;
-            }
-          }
-        })
-        .on('error', (err) => {
-          if (!String(err.message || '').includes('SIGKILL')) {
-            console.error('❌ Error FFmpeg:', err.message);
-          }
-          transcodedCache.delete(cacheKey);
-          activeFFmpegProcesses.delete(cacheKey);
-          if (!res.headersSent) res.status(500).send('Error de transcodificación');
-        })
-        .on('end', () => {
-          console.log('✅ Transcodificación completada');
-          activeFFmpegProcesses.delete(cacheKey);
-        });
-
-      activeFFmpegProcesses.set(cacheKey, ffmpegCommand);
-
-      ffmpegCommand.pipe(res, { end: true });
-
-      // Si el cliente se desconecta, matar ffmpeg y limpiar.
-      // (attachStreamLifecycle ya decrementarará streams y podrá destruir torrent si estaba pendiente)
-      res.on('close', () => {
-        console.log('🛑 Cliente desconectado, deteniendo transcodificación');
-        try {
-          ffmpegCommand.kill('SIGKILL');
-        } catch (_) {}
-        try {
-          if (inputStream) inputStream.destroy();
-        } catch (_) {}
-        transcodedCache.delete(cacheKey);
-        activeFFmpegProcesses.delete(cacheKey);
-      });
-    };
-
-    if (useTorrentStream) {
-      console.log('📡 Transcodificando desde stream de torrent (secuencial)');
-      startTranscode();
+    } catch (err) {
+      console.error('Error preparando MP4 seekable:', err?.message || err);
+      if (!res.headersSent) {
+        res.status(500).send('Error al preparar video');
+      }
       return;
     }
-
-    try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
-    } catch (err) {
-      console.warn('Advertencia: waitForFileOnDisk falló antes de ffprobe:', err.message);
-    }
-
-    ffmpeg.ffprobe(filePath, (err, metadata) => {
-      if (err) {
-        console.warn('⚠️ Error al obtener metadata, continuando:', err.message);
-        startTranscode();
-        return;
-      }
-
-      const duration = metadata.format.duration;
-      if (duration) {
-        console.log(`📹 Duración: ${Math.floor(duration / 60)}m ${Math.floor(duration % 60)}s`);
-      }
-
-      startTranscode();
-    });
-
-    return;
   }
 
   // Streaming normal compatible: PASAMOS el file de WebTorrent para que sirva con createReadStream
@@ -2451,14 +2579,16 @@ app.delete('/api/torrent/:infoHash', (req, res) => {
 
   // Matar FFmpeg si existe (si hay transcode activo, igual prefieres dejarlo terminar;
   // pero para cambio de peli es mejor cortarlo)
-  for (const [cacheKey, ffmpegProcess] of activeFFmpegProcesses.entries()) {
+  for (const [cacheKey] of activeFFmpegProcesses.entries()) {
     if (String(cacheKey).startsWith(infoHash)) {
       console.log('🧹 Deteniendo FFmpeg para torrent:', cacheKey);
-      try {
-        ffmpegProcess.kill('SIGKILL');
-      } catch (_) {}
-      activeFFmpegProcesses.delete(cacheKey);
-      transcodedCache.delete(cacheKey);
+      clearTranscodeEntry(cacheKey, 'torrent-deleted');
+    }
+  }
+
+  for (const cacheKey of Array.from(transcodedCache.keys())) {
+    if (String(cacheKey).startsWith(infoHash)) {
+      clearTranscodeEntry(cacheKey, 'torrent-deleted');
     }
   }
 
@@ -2546,14 +2676,8 @@ app.post('/api/quick-switch', async (req, res) => {
       activeSearchControllers.delete(ctrl);
     }
 
-    // 2. Matar todos los procesos FFmpeg
-    for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try {
-        proc.kill && proc.kill('SIGKILL');
-      } catch (_) {}
-      activeFFmpegProcesses.delete(key);
-      transcodedCache.delete(key);
-    }
+    // 2. Matar FFmpeg y limpiar transcodes activos
+    clearAllTranscodeEntries('quick-switch');
 
     // 3. Cerrar streams HTTP activos (sin esperar)
     for (const [infoHash, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
@@ -2627,14 +2751,8 @@ app.post('/api/reset-state', async (req, res) => {
       activeSearchControllers.delete(ctrl);
     }
 
-    // 2. Matar FFmpeg
-    for (const [key, proc] of activeFFmpegProcesses.entries()) {
-      try {
-        proc.kill && proc.kill('SIGKILL');
-      } catch (_) {}
-      activeFFmpegProcesses.delete(key);
-      transcodedCache.delete(key);
-    }
+    // 2. Matar FFmpeg y limpiar transcodes activos
+    clearAllTranscodeEntries('reset-state');
 
     // 3. Cerrar streams
     for (const [, resSet] of Array.from(activeResponsesByInfoHash.entries())) {
