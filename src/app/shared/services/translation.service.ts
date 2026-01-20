@@ -163,9 +163,10 @@ export class TranslationService {
       
       this.translationsCache.set(lang, translations);
       
-      // Si es el idioma actual, actualizar estado
+      // Si es el idioma actual, actualizar estado e incrementar versión
+      // para forzar re-render de los pipes de traducción
       if (lang === this.state().lang) {
-        this.state.update(s => ({ ...s, translations }));
+        this.state.update(s => ({ ...s, translations, version: s.version + 1 }));
       }
     } catch (err) {
       console.error('Failed to load translations:', err);
