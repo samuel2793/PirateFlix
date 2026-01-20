@@ -123,6 +123,82 @@
       </div>
     </section>
 
+    <section class="section episodes-section" *ngIf="isTv() && seasons().length">
+      <div class="series-picker">
+        <div class="series-header">
+          <div class="series-title-group">
+            <span class="series-heading" i18n>Episodes</span>
+          </div>
+        </div>
+        <div class="season-picker">
+          <div class="season-top">
+            <span class="season-caption" i18n>Season</span>
+            <div class="series-summary" *ngIf="seriesBadge() as badge">{{ badge }}</div>
+          </div>
+          <div class="season-list">
+            <button
+              class="season-chip"
+              type="button"
+              *ngFor="let season of seasons()"
+              (click)="setSeason(season.season_number)"
+              [class.active]="selectedSeason() === season.season_number"
+              [attr.aria-pressed]="selectedSeason() === season.season_number">
+              <span class="season-name">{{ formatSeasonLabel(season) }}</span>
+              <span class="season-count" *ngIf="season.episode_count" i18n>
+                {{ season.episode_count }} episodes
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="episode-grid" *ngIf="!seasonEpisodesLoading() && episodeOptions().length">
+          <button
+            class="episode-card"
+            type="button"
+            *ngFor="let episode of episodeOptions()"
+            (click)="selectEpisode(episode.episode_number)"
+            [class.active]="selectedEpisode() === episode.episode_number"
+            [attr.aria-pressed]="selectedEpisode() === episode.episode_number">
+            <div class="episode-thumb">
+              <img [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
+              <span class="episode-chip" *ngIf="episodeCode(episode)">{{ episodeCode(episode) }}</span>
+              <span class="episode-runtime" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
+              <span class="episode-rating" *ngIf="episodeRatingLabel(episode) as rating">
+                <mat-icon>star</mat-icon>
+                {{ rating }}
+              </span>
+            </div>
+            <div class="episode-body">
+              <h3 class="episode-title">{{ episodeTitle(episode) }}</h3>
+              <div class="episode-meta" *ngIf="episodeMeta(episode)">{{ episodeMeta(episode) }}</div>
+              <p class="episode-overview" *ngIf="episodeOverview(episode) as overview; else noEpisodeOverview">
+                {{ overview }}
+              </p>
+              <ng-template #noEpisodeOverview>
+                <p class="episode-overview muted" i18n>No description available.</p>
+              </ng-template>
+            </div>
+          </button>
+        </div>
+
+        <div class="episode-grid skeleton" *ngIf="seasonEpisodesLoading()">
+          <div class="episode-card skeleton" *ngFor="let item of [1, 2, 3]">
+            <div class="episode-thumb"></div>
+            <div class="episode-body">
+              <div class="skeleton-line wide"></div>
+              <div class="skeleton-line"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="episodes-empty" *ngIf="!seasonEpisodesLoading() && episodeOptions().length === 0">
+          <mat-icon>live_tv</mat-icon>
+          <p i18n>No episodes available.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- Cast Section -->
     <section class="section cast-section" *ngIf="cast().length">
       <h2 class="section-title" i18n>Cast</h2>
