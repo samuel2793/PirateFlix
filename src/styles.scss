@@ -214,3 +214,107 @@ html {
 .animate-scale-in {
   animation: scaleIn 0.3s ease-out forwards;
 }
+
+// ========================================
+// Language Transition & Page Load Animations
+// ========================================
+
+// Variable CSS para controlar transiciones de idioma
+:root {
+  --lang-transition-duration: 0.25s;
+  --lang-transition-easing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+// Transición suave al cambiar idioma - SIN recarga de página
+// Aplica una transición suave a todos los elementos de texto
+body {
+  // Fade in suave al cargar la página
+  animation: pageLoadIn 0.5s ease-out forwards;
+  
+  &.language-transition-out {
+    animation: pageLoadOut 0.3s ease-in forwards;
+    pointer-events: none;
+  }
+}
+
+// Clase global para elementos que contienen texto traducible
+// Se aplicará automáticamente durante cambios de idioma
+.lang-transitioning {
+  // Durante la transición, aplicar efecto sutil
+  [data-translatable],
+  h1, h2, h3, h4, h5, h6,
+  p, span, button, a, label {
+    transition: opacity var(--lang-transition-duration) var(--lang-transition-easing),
+                transform var(--lang-transition-duration) var(--lang-transition-easing);
+  }
+}
+
+// Animación suave para textos que cambian
+@keyframes textCrossfade {
+  0% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  40% {
+    opacity: 0.7;
+    filter: blur(0.5px);
+  }
+  60% {
+    opacity: 0.7;
+    filter: blur(0.5px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+// Utilidad para elementos con traducción dinámica
+.translate-text {
+  display: inline-block;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  
+  &.updating {
+    opacity: 0.8;
+  }
+}
+
+@keyframes pageLoadIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pageLoadOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+    filter: blur(4px);
+  }
+}
+
+// Transiciones suaves para contenido principal
+.route-container {
+  animation: contentFadeIn 0.4s ease-out forwards;
+}
+
+@keyframes contentFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

@@ -3,4 +3,55 @@
   position: relative;
   min-height: 100vh;
   overflow: hidden;
+  opacity: 0;
+  animation: routeContainerFadeIn 0.5s ease-out 0.1s forwards;
+}
+
+@keyframes routeContainerFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ========================================
+// Zero-Jump Language Transition
+// ========================================
+// Transición 300ms, cero movimiento, cero salto de letras
+
+// Contenedor de textos traducibles - layout completamente estable
+.translate-text {
+  display: inline-block;
+  // Prevenir cualquier reflow
+  contain: layout style paint;
+  // Posición relativa para que los hijos absolutos funcionen
+  position: relative;
+  // Suavizar cambios de opacidad
+  will-change: opacity, filter;
+}
+
+// Durante la transición: animación continua sin fases
+.lang-transitioning .translate-text {
+  animation: langSwap 300ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+// Animación continua: opacidad baja al 50%, sube después
+// El swap del texto ocurre en el frame 50% cuando opacity=0.98
+@keyframes langSwap {
+  0% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  50% {
+    opacity: 0.98;
+    filter: blur(0.3px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+  }
 }
