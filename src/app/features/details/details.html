@@ -92,6 +92,43 @@
           </button>
         </div>
 
+        <div class="series-picker" *ngIf="isTv() && seasons().length">
+          <div class="series-heading" i18n>Season &amp; episode</div>
+          <div class="series-controls">
+            <label class="series-field">
+              <span class="series-caption" i18n>Season</span>
+              <div class="select-wrap">
+                <select
+                  class="series-select"
+                  [value]="selectedSeason()"
+                  (change)="setSeason($any($event.target).value)">
+                  <option *ngFor="let season of seasons()" [value]="season.season_number">
+                    {{ formatSeasonLabel(season) }}
+                  </option>
+                </select>
+                <mat-icon class="select-icon">expand_more</mat-icon>
+              </div>
+            </label>
+            <label class="series-field">
+              <span class="series-caption" i18n>Episode</span>
+              <div class="select-wrap">
+                <select
+                  class="series-select"
+                  [value]="selectedEpisode()"
+                  (change)="setEpisode($any($event.target).value)"
+                  [disabled]="episodeOptions().length === 0">
+                  <option *ngIf="episodeOptions().length === 0" value="" i18n>No episodes</option>
+                  <option *ngFor="let episode of episodeOptions()" [value]="episode.episode_number">
+                    {{ formatEpisodeLabel(episode) }}
+                  </option>
+                </select>
+                <mat-icon class="select-icon">expand_more</mat-icon>
+              </div>
+            </label>
+          </div>
+          <div class="series-summary" *ngIf="seriesBadge() as badge">{{ badge }}</div>
+        </div>
+
         <!-- Playback Options -->
         <div class="playback-options">
           <label class="option-toggle">

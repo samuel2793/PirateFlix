@@ -40,6 +40,12 @@ export class DetailsComponent {
   credits = signal<any | null>(null);
   videos = signal<any[]>([]);
   showTrailer = signal(false);
+  selectedSeason = signal<number | null>(null);
+  selectedEpisode = signal<number | null>(null);
+  seasonEpisodes = signal<any[]>([]);
+
+  private seasonEpisodesCache = new Map<number, any[]>();
+  private seasonEpisodesRequestId = 0;
 
   // Preferences with localStorage persistence
   preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
@@ -107,6 +113,7 @@ export class DetailsComponent {
       this.item.set(data);
       this.credits.set(creditsData);
       this.videos.set(videosData?.results || []);
+      this.initializeSeriesSelection(data);
 
       // Check if item is in My List
       this.inMyList.set(this.isInMyList());
@@ -145,6 +152,10 @@ export class DetailsComponent {
     if (type === 'tv') return 'Serie';
     if (type === 'movie') return 'Película';
     return 'Título';
+  }
+
+  isTv() {
+    return this.route.snapshot.paramMap.get('type') === 'tv';
   }
 
   year() {
@@ -208,6 +219,85 @@ export class DetailsComponent {
   episodesLabel() {
     const n = this.item()?.number_of_episodes;
     return Number.isFinite(n) ? String(n) : '';
+  }
+
+  seasons() {
+    const it = this.item();
+    if (!Array.isArray(it?.seasons)) return [];
+    return it.seasons
+      .filter((season: any) => Number.isFinite(season?.season_number))
+      .slice()
+      .sort((a: any, b: any) => (a.season_number ?? 0) - (b.season_number ?? 0));
+  }
+
+  episodeOptions() {
+    const episodes = this.seasonEpisodes().filter((ep: any) =>
+      Number.isFinite(Number(ep?.episode_number))
+    );
+    if (episodes.length) return episodes;
+
+    const season = this.selectedSeasonData();
+    const count = Number(season?.episode_count);
+    if (!Number.isFinite(count) || count <= 0) return [];
+    return Array.from({ length: count }, (_, index) => ({
+      episode_number: index + 1,
+      name: '',
+    }));
+  }
+
+  setSeason(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    if (this.selectedSeason() === parsed) return;
+
+    this.selectedSeason.set(parsed);
+    this.seasonEpisodes.set([]);
+    const count = this.getEpisodeCount(parsed);
+    const currentEpisode = this.selectedEpisode();
+    if (!Number.isFinite(count) || count <= 0) {
+      this.selectedEpisode.set(null);
+      return;
+    }
+
+    if (!currentEpisode || currentEpisode > count) {
+      this.selectedEpisode.set(1);
+    }
+
+    this.loadSeasonEpisodes(parsed);
+  }
+
+  setEpisode(value: string) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0) return;
+    this.selectedEpisode.set(parsed);
+  }
+
+  formatSeasonLabel(season: any) {
+    const name = String(season?.name || '').trim();
+    if (name) return name;
+    const number = Number(season?.season_number);
+    if (!Number.isFinite(number)) return 'Season';
+    if (number === 0) return 'Specials';
+    return `Season ${number}`;
+  }
+
+  formatEpisodeLabel(episode: any) {
+    const number = Number(episode?.episode_number);
+    const name = String(episode?.name || '').trim();
+    if (!Number.isFinite(number)) return name || 'Episode';
+
+    const numberTag = String(number).padStart(2, '0');
+    if (!name) return `Episode ${number}`;
+    return `E${numberTag} - ${name}`;
+  }
+
+  seriesBadge() {
+    const season = this.selectedSeason();
+    const episode = this.selectedEpisode();
+    if (season === null || episode === null) return '';
+    const seasonTag = String(season).padStart(2, '0');
+    const episodeTag = String(episode).padStart(2, '0');
+    return `S${seasonTag}E${episodeTag}`;
   }
 
   countriesLabel() {
@@ -282,14 +372,19 @@ export class DetailsComponent {
     if (this.preferSeekable()) queryParams['seekable'] = '1';
     if (this.preferSubtitles()) queryParams['subtitles'] = '1';
     if (this.preferYearInSearch()) queryParams['forceYear'] = '1';
-    this.router.navigate(
-      [
-        '/play',
-        this.route.snapshot.paramMap.get('type'),
-        this.route.snapshot.paramMap.get('id'),
-      ],
-      { queryParams }
-    );
+    const type = this.route.snapshot.paramMap.get('type');
+    const id = this.route.snapshot.paramMap.get('id');
+    const route = ['/play', type, id];
+
+    if (type === 'tv') {
+      const season = this.selectedSeason();
+      const episode = this.selectedEpisode();
+      if (season !== null && episode !== null) {
+        route.push(String(season), String(episode));
+      }
+    }
+
+    this.router.navigate(route, { queryParams });
   }
 
   // Trailer methods
@@ -409,5 +504,83 @@ export class DetailsComponent {
       currency: 'USD',
       maximumFractionDigits: 0,
     }).format(value);
+  }
+
+  private initializeSeriesSelection(data: any) {
+    if (!this.isTv()) return;
+    const seasons = Array.isArray(data?.seasons) ? data.seasons : [];
+    if (!seasons.length) return;
+
+    const sorted = seasons
+      .filter((season: any) => Number.isFinite(season?.season_number))
+      .slice()
+      .sort((a: any, b: any) => (a.season_number ?? 0) - (b.season_number ?? 0));
+    const primary = sorted.find((season: any) => season.season_number > 0) ?? sorted[0];
+    const seasonNumber = Number(primary?.season_number);
+    if (!Number.isFinite(seasonNumber)) return;
+
+    this.selectedSeason.set(seasonNumber);
+    const episodeCount = Number(primary?.episode_count);
+    if (Number.isFinite(episodeCount) && episodeCount > 0) {
+      this.selectedEpisode.set(1);
+    } else {
+      this.selectedEpisode.set(null);
+    }
+
+    this.loadSeasonEpisodes(seasonNumber);
+  }
+
+  private selectedSeasonData() {
+    const seasonNumber = this.selectedSeason();
+    if (!Number.isFinite(seasonNumber)) return null;
+    return this.seasons().find((season: any) => season.season_number === seasonNumber) ?? null;
+  }
+
+  private getEpisodeCount(seasonNumber: number) {
+    const season = this.seasons().find((s: any) => s.season_number === seasonNumber);
+    return Number(season?.episode_count);
+  }
+
+  private async loadSeasonEpisodes(seasonNumber: number) {
+    if (!this.isTv() || !Number.isFinite(seasonNumber)) return;
+
+    const requestId = ++this.seasonEpisodesRequestId;
+    const cached = this.seasonEpisodesCache.get(seasonNumber);
+    if (cached) {
+      this.seasonEpisodes.set(cached);
+      this.ensureEpisodeSelection(cached);
+      return;
+    }
+
+    const idStr = this.route.snapshot.paramMap.get('id');
+    const id = idStr ? Number(idStr) : NaN;
+    if (!Number.isFinite(id)) return;
+
+    try {
+      const data = await firstValueFrom(this.tmdb.tvSeason(id, seasonNumber));
+      if (requestId !== this.seasonEpisodesRequestId) return;
+
+      const episodes = Array.isArray(data?.episodes) ? data.episodes : [];
+      this.seasonEpisodesCache.set(seasonNumber, episodes);
+      this.seasonEpisodes.set(episodes);
+      this.ensureEpisodeSelection(episodes);
+    } catch {
+      if (requestId !== this.seasonEpisodesRequestId) return;
+      this.seasonEpisodes.set([]);
+    }
+  }
+
+  private ensureEpisodeSelection(episodes: any[]) {
+    if (!episodes.length) return;
+    const current = this.selectedEpisode();
+    if (current !== null && episodes.some((ep: any) => Number(ep?.episode_number) === current)) {
+      return;
+    }
+
+    const firstEpisode = episodes.find((ep: any) =>
+      Number.isFinite(Number(ep?.episode_number))
+    );
+    if (!firstEpisode) return;
+    this.selectedEpisode.set(Number(firstEpisode.episode_number));
   }
 }

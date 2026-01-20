@@ -468,6 +468,102 @@ $accent-gold: $accent-primary-light;
 }
 
 // ========================================
+// Series Picker
+// ========================================
+.series-picker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  margin-bottom: 22px;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.series-heading {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: $text-muted;
+}
+
+.series-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.series-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 160px;
+}
+
+.series-caption {
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: $text-muted;
+}
+
+.select-wrap {
+  position: relative;
+}
+
+.series-select {
+  width: 100%;
+  min-width: 160px;
+  background: rgba(0, 0, 0, 0.45);
+  color: $text-primary;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 10px 36px 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  appearance: none;
+
+  &:focus {
+    outline: none;
+    border-color: $accent-primary;
+    box-shadow: 0 0 0 2px rgba($accent-primary, 0.25);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+.select-icon {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: 22px;
+  width: 22px;
+  height: 22px;
+  color: $text-muted;
+}
+
+.series-summary {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: $accent-primary;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba($accent-primary, 0.12);
+  border: 1px solid rgba($accent-primary, 0.35);
+}
+
+// ========================================
 // Playback Options
 // ========================================
 .playback-options {
@@ -859,6 +955,30 @@ $accent-gold: $accent-primary-light;
   .btn-icon {
     width: 42px;
     height: 42px;
+  }
+
+  .series-picker {
+    gap: 12px;
+    padding: 12px 14px;
+  }
+
+  .series-controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .series-field {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .series-select {
+    min-width: 0;
+  }
+
+  .series-summary {
+    align-self: flex-start;
   }
 
   .playback-options {

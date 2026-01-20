@@ -49,6 +49,15 @@ export class TmdbService {
     });
   }
 
+  tvSeason(id: number, season: number) {
+    return this.http.get<any>(`${this.baseUrl}/tv/${id}/season/${season}`, {
+      params: {
+        api_key: this.key,
+        language: this.lang,
+      },
+    });
+  }
+
   searchMulti(query: string, page = 1) {
     return this.http.get<any>(`${this.baseUrl}/search/multi`, {
       params: {
