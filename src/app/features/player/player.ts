@@ -341,15 +341,68 @@ export class PlayerComponent implements OnDestroy {
         title.replace(/['\u2019`\u00b4]/g, '').replace(/[^\w\s]/g, ' ')
       );
       const queryTitle = normalizedTitle || title;
-      const baseQueries = [
-        normalizeQuery(`${queryTitle} ${year} 1080p`),
-        normalizeQuery(`${queryTitle} ${year} 720p`),
-        normalizeQuery(`${queryTitle} ${year}`),
-      ];
-      const searchQueries = (forceYearInSearch && year
-        ? baseQueries
-        : baseQueries.concat([normalizeQuery(`${queryTitle}`)])
-      ).filter((q, index, arr) => q && arr.indexOf(q) === index);
+      const season = this.season();
+      const episode = this.episode();
+      const seasonValue = season ?? NaN;
+      const episodeValue = episode ?? NaN;
+      const hasEpisodeTarget =
+        type === 'tv' && Number.isFinite(seasonValue) && Number.isFinite(episodeValue);
+      const episodeLabel = hasEpisodeTarget
+        ? `S${String(seasonValue).padStart(2, '0')}E${String(episodeValue).padStart(2, '0')}`
+        : '';
+
+      const searchQueries: string[] = [];
+      const pushQuery = (...parts: Array<string | null | undefined>) => {
+        const q = normalizeQuery(
+          parts.filter((part) => part && String(part).trim()).join(' ')
+        );
+        if (q && !searchQueries.includes(q)) searchQueries.push(q);
+      };
+
+      if (hasEpisodeTarget) {
+        const seasonTag = String(seasonValue).padStart(2, '0');
+        const episodeTag = String(episodeValue).padStart(2, '0');
+        const episodeTags = [
+          `S${seasonTag}E${episodeTag}`,
+          `S${seasonValue}E${episodeValue}`,
+          `${seasonValue}x${episodeTag}`,
+          `${seasonValue}x${episodeValue}`,
+        ];
+        const seasonTags = [`S${seasonTag}`, `S${seasonValue}`, `Season ${seasonValue}`];
+        const yearToken = forceYearInSearch && year ? year : null;
+        const resTokens = ['1080p', '720p'];
+
+        for (const tag of episodeTags) {
+          for (const res of resTokens) {
+            pushQuery(queryTitle, yearToken, tag, res);
+          }
+          pushQuery(queryTitle, yearToken, tag);
+        }
+
+        for (const tag of seasonTags) {
+          pushQuery(queryTitle, yearToken, tag);
+        }
+
+        if (!forceYearInSearch && year) {
+          for (const tag of episodeTags.slice(0, 2)) {
+            pushQuery(queryTitle, year, tag);
+          }
+        }
+
+        if (!forceYearInSearch) {
+          pushQuery(queryTitle);
+        }
+      } else {
+        const baseQueries = [
+          normalizeQuery(`${queryTitle} ${year} 1080p`),
+          normalizeQuery(`${queryTitle} ${year} 720p`),
+          normalizeQuery(`${queryTitle} ${year}`),
+        ];
+        const rawQueries = forceYearInSearch && year ? baseQueries : baseQueries.concat([queryTitle]);
+        for (const q of rawQueries) {
+          pushQuery(q);
+        }
+      }
 
       const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
       const multiAudioHintRegex =
@@ -362,7 +415,7 @@ export class PlayerComponent implements OnDestroy {
         /\b(subs?|subtitles?|subtitulado|castellano|spa(nish)?|lat(ino)?|esp|espa[ñn]ol)\b/i;
       const hasSubtitlesHint = (name: string) => subtitlesHintRegex.test(name);
 
-      const categoriesToTry = [207, 200, 0];
+      const categoriesToTry = type === 'tv' ? [208, 205, 0] : [207, 200, 0];
       let anyTimedOut = false;
       let lastCategoryError: any = null;
       let sawNoMultiAudio = false;
@@ -374,7 +427,8 @@ export class PlayerComponent implements OnDestroy {
         const overallTimeoutMs = 35000;
         let timedOut = false;
         let didSearch = false;
-        const cacheKey = `${type}:${id}:${category}:${forceYearInSearch ? 'year' : 'any'}`;
+        const episodeCacheKey = hasEpisodeTarget ? `:s${seasonValue}:e${episodeValue}` : '';
+        const cacheKey = `${type}:${id}${episodeCacheKey}:${category}:${forceYearInSearch ? 'year' : 'any'}`;
         const cachedSearch = PlayerComponent.searchCache.get(cacheKey);
         const cacheFresh =
           cachedSearch && Date.now() - cachedSearch.ts < PlayerComponent.SEARCH_CACHE_TTL_MS;
@@ -492,8 +546,50 @@ export class PlayerComponent implements OnDestroy {
           );
         }
 
+        const filterEpisodeResults = (list: any[]) => {
+          if (!hasEpisodeTarget) return { results: list, matchType: 'none' };
+          const scored = list.map((torrent) => ({
+            torrent,
+            score: this.getEpisodeMatchScore(
+              String(torrent?.name || ''),
+              seasonValue,
+              episodeValue
+            ),
+          }));
+          const episodeMatches = scored
+            .filter((item) => item.score >= 2)
+            .map((item) => item.torrent);
+          if (episodeMatches.length > 0) return { results: episodeMatches, matchType: 'episode' };
+          const seasonMatches = scored
+            .filter((item) => item.score === 1)
+            .map((item) => item.torrent);
+          if (seasonMatches.length > 0) return { results: seasonMatches, matchType: 'season' };
+          return { results: [], matchType: 'none' };
+        };
+
+        const episodeFiltered = filterEpisodeResults(aggregatedResults);
+        if (hasEpisodeTarget && episodeFiltered.matchType === 'none') {
+          console.warn('⚠️ Sin coincidencias para episodio/temporada, descartando resultados');
+          this.pushLoadingLog(
+            `No se encontraron torrents que coincidan con ${episodeLabel}`,
+            'warn'
+          );
+          return { status: 'no-results' };
+        }
+
+        if (hasEpisodeTarget && episodeFiltered.matchType !== 'none') {
+          if (episodeFiltered.matchType === 'episode') {
+            this.pushLoadingLog(`Filtrando por episodio ${episodeLabel}`);
+          } else if (episodeFiltered.matchType === 'season') {
+            this.pushLoadingLog(
+              `Sin episodio exacto, usando temporada S${String(seasonValue).padStart(2, '0')}`,
+              'warn'
+            );
+          }
+        }
+
         // Preferir torrents con formatos compatibles con navegadores
-        const torrents = aggregatedResults;
+        const torrents = episodeFiltered.results;
 
         if (didSearch || !cacheFresh) {
           PlayerComponent.searchCache.set(cacheKey, {
@@ -512,11 +608,17 @@ export class PlayerComponent implements OnDestroy {
         const sortBySeeders = (list: any[]) =>
           list
             .slice()
-            .sort(
-              (a, b) =>
+            .sort((a, b) => {
+              const matchDiff = hasEpisodeTarget
+                ? this.getEpisodeMatchScore(String(b?.name || ''), seasonValue, episodeValue) -
+                  this.getEpisodeMatchScore(String(a?.name || ''), seasonValue, episodeValue)
+                : 0;
+              return (
+                matchDiff ||
                 getSeeders(b) - getSeeders(a) ||
                 (Number(b?.leechers) || 0) - (Number(a?.leechers) || 0)
-            );
+              );
+            });
 
         const minSeedersPreferred = 2;
         const strongSeededTorrents = torrents.filter(
@@ -1073,14 +1175,53 @@ export class PlayerComponent implements OnDestroy {
         throw buildNoCompatibleVideoError();
       }
 
-      const videoFile = pickFrom.slice().sort((a, b) => b.length - a.length)[0];
+      const targetSeason = this.season();
+      const targetEpisode = this.episode();
+      const hasEpisodeTarget =
+        this.type() === 'tv' &&
+        targetSeason !== null &&
+        targetEpisode !== null &&
+        Number.isFinite(targetSeason) &&
+        Number.isFinite(targetEpisode);
+      let videoFile: TorrentFile | null = null;
+      let selectedByEpisode = false;
+
+      if (hasEpisodeTarget) {
+        const episodeMatches = pickFrom.filter(
+          (file) => this.getEpisodeMatchScore(file.name, targetSeason!, targetEpisode!) >= 2
+        );
+        if (episodeMatches.length > 0) {
+          videoFile = episodeMatches.slice().sort((a, b) => b.length - a.length)[0];
+          selectedByEpisode = true;
+        }
+      }
+
+      if (!videoFile) {
+        videoFile = pickFrom.slice().sort((a, b) => b.length - a.length)[0];
+      }
 
       if (!videoFile) {
         throw new Error('No se encontró archivo de video en el torrent');
       }
 
       console.log('Archivo seleccionado:', videoFile.name);
-      this.pushLoadingLog(`Archivo seleccionado: ${videoFile.name}`);
+      if (hasEpisodeTarget && !selectedByEpisode) {
+        const seasonTag = String(targetSeason).padStart(2, '0');
+        const episodeTag = String(targetEpisode).padStart(2, '0');
+        this.pushLoadingLog(
+          `No se identificó el episodio S${seasonTag}E${episodeTag} en los archivos; usando el más grande`,
+          'warn'
+        );
+      }
+      if (selectedByEpisode && hasEpisodeTarget) {
+        const seasonTag = String(targetSeason).padStart(2, '0');
+        const episodeTag = String(targetEpisode).padStart(2, '0');
+        this.pushLoadingLog(
+          `Archivo seleccionado (S${seasonTag}E${episodeTag}): ${videoFile.name}`
+        );
+      } else {
+        this.pushLoadingLog(`Archivo seleccionado: ${videoFile.name}`);
+      }
       this.currentVideoFileIndex = videoFile.index;
 
       // ✅ TRANSCODIFICACIÓN AUTOMÁTICA: el backend detecta y decide si transcodificar
@@ -1365,6 +1506,105 @@ export class PlayerComponent implements OnDestroy {
     if (track.codec) pieces.push(track.codec.toUpperCase());
     if (track.default) pieces.push('predeterminado');
     return pieces.filter(Boolean).join(' - ');
+  }
+
+  private getEpisodeMatchFlags(
+    name: string,
+    season: number,
+    episode: number
+  ): { episode: boolean; season: boolean } {
+    const text = String(name || '').toLowerCase();
+    const seasonNum = Number(season);
+    const episodeNum = Number(episode);
+    if (!text || !Number.isFinite(seasonNum) || !Number.isFinite(episodeNum)) {
+      return { episode: false, season: false };
+    }
+
+    const normalized = text.replace(/[\s._\/\\-]+/g, ' ');
+    const inRange = (value: number, start: number, end?: number) => {
+      if (!Number.isFinite(start)) return false;
+      if (!Number.isFinite(end)) return value === start;
+      const endValue = Number.isFinite(end) ? (end as number) : start;
+      const min = Math.min(start, endValue);
+      const max = Math.max(start, endValue);
+      return value >= min && value <= max;
+    };
+
+    let seasonMatch = false;
+    let episodeMatch = false;
+
+    const checkEpisode = (s: number, e1: number, e2?: number) => {
+      if (s !== seasonNum) return false;
+      seasonMatch = true;
+      if (inRange(episodeNum, e1, e2)) {
+        episodeMatch = true;
+        return true;
+      }
+      return false;
+    };
+
+    const seRegex =
+      /\bs(?:eason)?\s*0?(\d{1,3})\s*[.\-_ ]*e(?:p(?:isode)?)?\s*0?(\d{1,3})(?:\s*(?:-|to|e)\s*0?(\d{1,3}))?/gi;
+    let match;
+    while ((match = seRegex.exec(normalized)) !== null) {
+      const s = Number(match[1]);
+      const e1 = Number(match[2]);
+      const e2 = match[3] ? Number(match[3]) : undefined;
+      if (checkEpisode(s, e1, e2)) break;
+    }
+
+    if (!episodeMatch) {
+      const xRegex =
+        /\b(\d{1,3})\s*x\s*0?(\d{1,3})(?:\s*(?:-|to|x)\s*0?(\d{1,3}))?/gi;
+      while ((match = xRegex.exec(normalized)) !== null) {
+        const s = Number(match[1]);
+        const e1 = Number(match[2]);
+        const e2 = match[3] ? Number(match[3]) : undefined;
+        if (checkEpisode(s, e1, e2)) break;
+      }
+    }
+
+    if (!seasonMatch) {
+      const seasonWordRegex = /\bseason\s*0?(\d{1,3})\b/gi;
+      while ((match = seasonWordRegex.exec(normalized)) !== null) {
+        if (Number(match[1]) === seasonNum) {
+          seasonMatch = true;
+          break;
+        }
+      }
+    }
+
+    if (!seasonMatch) {
+      const seasonShortRegex = /\bs\s*0?(\d{1,3})\b/gi;
+      while ((match = seasonShortRegex.exec(normalized)) !== null) {
+        if (Number(match[1]) === seasonNum) {
+          seasonMatch = true;
+          break;
+        }
+      }
+    }
+
+    if (seasonMatch && !episodeMatch) {
+      const fileSegment = text.split(/[\\/]/).pop() || text;
+      const episodeOnlyRegex = /(?:^|[\s._-])0?(\d{1,3})(?:$|[\s._-])/g;
+      while ((match = episodeOnlyRegex.exec(fileSegment)) !== null) {
+        const value = Number(match[1]);
+        if (value === episodeNum) {
+          episodeMatch = true;
+          break;
+        }
+      }
+    }
+
+    if (episodeMatch) seasonMatch = true;
+    return { episode: episodeMatch, season: seasonMatch };
+  }
+
+  private getEpisodeMatchScore(name: string, season: number, episode: number): number {
+    const match = this.getEpisodeMatchFlags(name, season, episode);
+    if (match.episode) return 2;
+    if (match.season) return 1;
+    return 0;
   }
 
   canSearchOpenSubtitles(): boolean {
