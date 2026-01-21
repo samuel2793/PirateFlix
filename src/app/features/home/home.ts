@@ -6,6 +6,7 @@ import { Router } from '@angular/router';
 import { TmdbService } from '../../core/services/tmdb';
 import { LanguageService, SupportedLang } from '../../shared/services/language.service';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
+import { FirebaseAuthService } from '../../core/services/firebase-auth';
 
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -61,6 +62,11 @@ export class HomeComponent implements OnDestroy {
   private readonly language = inject(LanguageService);
   private readonly document = inject(DOCUMENT);
   private readonly elementRef = inject(ElementRef);
+  private readonly auth = inject(FirebaseAuthService);
+
+  authAvailable = this.auth.available;
+  isAuthenticated = this.auth.isAuthenticated;
+  userDisplayName = this.auth.displayName;
 
   // Language
   currentLang = this.language.currentLang;
@@ -68,6 +74,14 @@ export class HomeComponent implements OnDestroy {
 
   changeLang(lang: SupportedLang) {
     this.language.setLang(lang);
+  }
+
+  login() {
+    void this.auth.signInWithGoogle();
+  }
+
+  logout() {
+    void this.auth.signOut();
   }
 
   // Trending

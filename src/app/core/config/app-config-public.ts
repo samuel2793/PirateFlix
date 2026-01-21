@@ -108,7 +108,6 @@ export const APP_CONFIG = {
     timeoutMs: 30000,
   },
   firebase: {
-    enabled: false,
+    enabled: true,
   }
 } as const;
-

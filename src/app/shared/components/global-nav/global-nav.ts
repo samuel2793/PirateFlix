@@ -5,6 +5,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { filter } from 'rxjs/operators';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { TranslatePipe } from '../../pipes/translate.pipe';
+import { FirebaseAuthService } from '../../../core/services/firebase-auth';
 
 @Component({
   selector: 'app-global-nav',
@@ -16,6 +17,11 @@ import { TranslatePipe } from '../../pipes/translate.pipe';
 export class GlobalNavComponent {
   private readonly router = inject(Router);
   private readonly location = inject(Location);
+  private readonly auth = inject(FirebaseAuthService);
+
+  authAvailable = this.auth.available;
+  isAuthenticated = this.auth.isAuthenticated;
+  userDisplayName = this.auth.displayName;
 
   // Track current route
   private readonly navigationEnd = toSignal(
@@ -68,5 +74,13 @@ export class GlobalNavComponent {
 
   goHome() {
     this.router.navigate(['/']);
+  }
+
+  login() {
+    void this.auth.signInWithGoogle();
+  }
+
+  logout() {
+    void this.auth.signOut();
   }
 }
