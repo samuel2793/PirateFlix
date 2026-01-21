@@ -4,11 +4,12 @@ import { Router, RouterLink, NavigationEnd } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { filter } from 'rxjs/operators';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { TranslatePipe } from '../../pipes/translate.pipe';
 
 @Component({
   selector: 'app-global-nav',
   standalone: true,
-  imports: [CommonModule, RouterLink, MatIconModule],
+  imports: [CommonModule, RouterLink, MatIconModule, TranslatePipe],
   templateUrl: './global-nav.html',
   styleUrl: './global-nav.scss',
 })
@@ -42,10 +43,25 @@ export class GlobalNavComponent {
   canGoBack = computed(() => !this.isHome());
 
   goBack() {
-    // If we have history, go back; otherwise go home
-    if (window.history.length > 1) {
+    // Check if we have navigation state with return info
+    const navigation = this.router.getCurrentNavigation();
+    const state = window.history.state;
+    
+    // If we have return state from details/person page, navigate to home with state
+    if (state?.returnTab || state?.returnQuery) {
+      this.router.navigate(['/'], { 
+        state: {
+          activeTab: state.returnTab || 'movies',
+          query: state.returnQuery || '',
+          filter: state.returnFilter || 'movie',
+          scroll: state.returnScroll || 0
+        }
+      });
+    } else if (window.history.length > 1) {
+      // Otherwise use browser back
       this.location.back();
     } else {
+      // Fallback to home
       this.router.navigate(['/']);
     }
   }

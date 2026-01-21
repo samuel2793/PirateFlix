@@ -1,10 +1,11 @@
 import { Component, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, LowerCasePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
+import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { firstValueFrom } from 'rxjs';
 
 interface Credit {
@@ -30,6 +31,8 @@ interface Credit {
     MatIconModule,
     MatButtonModule,
     MatTooltipModule,
+    TranslatePipe,
+    LowerCasePipe,
   ],
   templateUrl: './person.html',
   styleUrl: './person.scss',
@@ -141,6 +144,25 @@ export class PersonComponent {
     return translations[dept] || dept || null;
   }
 
+  // Determina si la persona es principalmente del equipo técnico (no actor)
+  isPrimaryCrewMember(): boolean {
+    const dept = this.person()?.known_for_department;
+    // Profesiones que son del equipo técnico, no actuación
+    const crewDepartments = [
+      'Directing',
+      'Writing',
+      'Production',
+      'Crew',
+      'Sound',
+      'Camera',
+      'Editing',
+      'Art',
+      'Costume & Make-Up',
+      'Visual Effects',
+    ];
+    return crewDepartments.includes(dept);
+  }
+
   // Credits
   actingCredits(): Credit[] {
     const creds = this.credits();
@@ -216,7 +238,7 @@ export class PersonComponent {
   }
 
   getMediaType(credit: Credit) {
-    return credit.media_type === 'tv' ? 'Serie' : 'Película';
+    return credit.media_type === 'tv' ? 'TV' : 'Movie';
   }
 
   private formatDate(value: string | null | undefined) {

@@ -1,6 +1,9 @@
 <!-- Cinematic Intro (only first visit) -->
 <app-intro (introComplete)="onIntroComplete()"></app-intro>
 
+<!-- Language Transition Overlay (subtle visual feedback) -->
+<app-language-transition-overlay></app-language-transition-overlay>
+
 <!-- Global Navigation (shown on all pages except player) -->
 <app-global-nav *ngIf="showMainContent()"></app-global-nav>
 

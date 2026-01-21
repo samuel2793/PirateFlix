@@ -1,10 +1,10 @@
-<div class="details-page" *ngIf="!loading(); else loadingTpl">
+<div class="details-page" [class.lang-transitioning]="isChangingLanguage()" *ngIf="!loading(); else loadingTpl">
   <!-- Error State -->
   <div class="error-state" *ngIf="error()">
     <mat-icon>error_outline</mat-icon>
-    <h2 i18n>Error loading</h2>
+    <h2 class="translate-text">{{ 'Error loading' | t }}</h2>
     <p>{{ error() }}</p>
-    <button mat-flat-button routerLink="/" i18n>Back to home</button>
+    <button mat-flat-button routerLink="/">{{ 'Back to home' | t }}</button>
   </div>
 
   <ng-container *ngIf="!error() && item() as it">
@@ -17,7 +17,7 @@
       <div class="hero-content">
         <!-- Logo/Title Area -->
         <div class="title-area">
-          <span class="media-badge">{{ mediaLabel() }}</span>
+          <span class="media-badge">{{ mediaLabel() | t }}</span>
           <h1 class="title">{{ title() }}</h1>
           <p class="tagline" *ngIf="it.tagline">"{{ it.tagline }}"</p>
         </div>
@@ -32,8 +32,8 @@
           <span class="meta-divider" *ngIf="year() && runtimeLabel()"></span>
           <span class="meta-item" *ngIf="runtimeLabel()">{{ runtimeLabel() }}</span>
           <span class="meta-divider" *ngIf="seasonsLabel()"></span>
-          <span class="meta-item" *ngIf="seasonsLabel() === '1'" i18n>{{ seasonsLabel() }} season</span>
-          <span class="meta-item" *ngIf="seasonsLabel() && seasonsLabel() !== '1'" i18n>{{ seasonsLabel() }} seasons</span>
+          <span class="meta-item translate-text" *ngIf="seasonsLabel() === '1'">{{ seasonsLabel() }} {{ 'season' | t }}</span>
+          <span class="meta-item translate-text" *ngIf="seasonsLabel() && seasonsLabel() !== '1'">{{ seasonsLabel() }} {{ 'seasons' | t }}</span>
         </div>
 
         <!-- Genres -->
@@ -46,24 +46,36 @@
         <!-- Overview -->
         <p class="overview" *ngIf="overview(); else noOverview">{{ overview() }}</p>
         <ng-template #noOverview>
-          <p class="overview" i18n>No synopsis available.</p>
+          <p class="overview translate-text">{{ 'No synopsis available.' | t }}</p>
         </ng-template>
 
         <!-- Crew Info -->
         <div class="crew-info">
           <div class="crew-item" *ngIf="directors().length">
-            <span class="crew-label" *ngIf="directors().length > 1" i18n>Directors:</span>
-            <span class="crew-label" *ngIf="directors().length === 1" i18n>Director:</span>
-            <span class="crew-value">{{ directors().join(', ') }}</span>
+            <span class="crew-label translate-text" *ngIf="directors().length > 1">{{ 'Directors:' | t }}</span>
+            <span class="crew-label translate-text" *ngIf="directors().length === 1">{{ 'Director:' | t }}</span>
+            <span class="crew-value">
+              <ng-container *ngFor="let director of directors(); let last = last">
+                <a class="crew-link" [routerLink]="['/person', director.id]">{{ director.name }}</a><span *ngIf="!last">, </span>
+              </ng-container>
+            </span>
           </div>
           <div class="crew-item" *ngIf="creators().length">
-            <span class="crew-label" *ngIf="creators().length > 1" i18n>Creators:</span>
-            <span class="crew-label" *ngIf="creators().length === 1" i18n>Creator:</span>
-            <span class="crew-value">{{ creators().join(', ') }}</span>
+            <span class="crew-label translate-text" *ngIf="creators().length > 1">{{ 'Creators:' | t }}</span>
+            <span class="crew-label translate-text" *ngIf="creators().length === 1">{{ 'Creator:' | t }}</span>
+            <span class="crew-value">
+              <ng-container *ngFor="let creator of creators(); let last = last">
+                <a class="crew-link" [routerLink]="['/person', creator.id]">{{ creator.name }}</a><span *ngIf="!last">, </span>
+              </ng-container>
+            </span>
           </div>
           <div class="crew-item" *ngIf="writers().length">
-            <span class="crew-label" i18n>Writers:</span>
-            <span class="crew-value">{{ writers().join(', ') }}</span>
+            <span class="crew-label translate-text">{{ 'Writers:' | t }}</span>
+            <span class="crew-value">
+              <ng-container *ngFor="let writer of writers(); let last = last">
+                <a class="crew-link" [routerLink]="['/person', writer.id]">{{ writer.name }}</a><span *ngIf="!last">, </span>
+              </ng-container>
+            </span>
           </div>
         </div>
 
@@ -71,11 +83,11 @@
         <div class="actions">
           <button class="btn-play" (click)="play()">
             <mat-icon>play_arrow</mat-icon>
-            <span i18n>Play</span>
+            <span class="translate-text">{{ 'Play' | t }}</span>
           </button>
           <button class="btn-trailer" *ngIf="hasTrailer()" (click)="openTrailer()">
             <mat-icon>movie</mat-icon>
-            <span i18n>Watch Trailer</span>
+            <span class="translate-text">{{ 'Watch Trailer' | t }}</span>
           </button>
           <button
             class="btn-secondary"
@@ -84,10 +96,10 @@
           >
             <mat-icon>{{ inMyList() ? 'check' : 'add' }}</mat-icon>
             <ng-container *ngIf="inMyList(); else addToList">
-              <span i18n>In My List</span>
+              <span class="translate-text">{{ 'In My List' | t }}</span>
             </ng-container>
             <ng-template #addToList>
-              <span i18n>My List</span>
+              <span class="translate-text">{{ 'My List' | t }}</span>
             </ng-template>
           </button>
         </div>
@@ -97,22 +109,22 @@
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferMultiAudio()" (change)="toggleMultiAudio($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label" i18n>Multi-audio</span>
+            <span class="toggle-label translate-text">{{ 'Multi-audio' | t }}</span>
           </label>
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferSubtitles()" (change)="toggleSubtitles($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label" i18n>With subtitles</span>
+            <span class="toggle-label translate-text">{{ 'With subtitles' | t }}</span>
           </label>
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferSeekable()" (change)="toggleSeekable($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label" i18n>Seekable only</span>
+            <span class="toggle-label translate-text">{{ 'Seekable only' | t }}</span>
           </label>
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferYearInSearch()" (change)="toggleYearInSearch($any($event.target).checked)" />
             <span class="toggle-track"></span>
-            <span class="toggle-label" i18n>Force year in search</span>
+            <span class="toggle-label translate-text">{{ 'Force year in search' | t }}</span>
           </label>
         </div>
       </div>
@@ -127,12 +139,12 @@
       <div class="series-picker">
         <div class="series-header">
           <div class="series-title-group">
-            <span class="series-heading" i18n>Episodes</span>
+            <span class="series-heading translate-text">{{ 'Episodes' | t }}</span>
           </div>
         </div>
         <div class="season-picker">
           <div class="season-top">
-            <span class="season-caption" i18n>Season</span>
+            <span class="season-caption translate-text">{{ 'Season' | t }}</span>
             <div class="series-summary" *ngIf="seriesBadge() as badge">{{ badge }}</div>
           </div>
           <div class="season-list">
@@ -144,8 +156,8 @@
               [class.active]="selectedSeason() === season.season_number"
               [attr.aria-pressed]="selectedSeason() === season.season_number">
               <span class="season-name">{{ formatSeasonLabel(season) }}</span>
-              <span class="season-count" *ngIf="season.episode_count" i18n>
-                {{ season.episode_count }} episodes
+              <span class="season-count translate-text" *ngIf="season.episode_count">
+                {{ season.episode_count }} {{ 'Episodes' | t | lowercase }}
               </span>
             </button>
           </div>
@@ -159,32 +171,55 @@
             (click)="selectEpisode(episode.episode_number)"
             [class.active]="selectedEpisode() === episode.episode_number"
             [attr.aria-pressed]="selectedEpisode() === episode.episode_number">
-            <div class="episode-thumb">
-              <img [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
-              <span class="episode-chip" *ngIf="episodeCode(episode)">{{ episodeCode(episode) }}</span>
-              <span class="episode-runtime" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
-              <span class="episode-rating" *ngIf="episodeRatingLabel(episode) as rating">
-                <mat-icon>star</mat-icon>
-                {{ rating }}
-              </span>
+            <!-- Thumbnail con badges y overlay -->
+            <div class="ep-thumb">
+              <img class="ep-thumb-img" [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
+              <div class="ep-thumb-overlay"></div>
+              
+              <!-- Badges sistema consistente -->
+              <div class="ep-badges">
+                <div class="ep-badges-left">
+                  <span class="ep-badge ep-badge-rating" *ngIf="episodeRatingLabel(episode) as rating">
+                    <mat-icon>star</mat-icon>
+                    {{ rating }}
+                  </span>
+                  <span class="ep-badge ep-badge-episode" *ngIf="episodeCode(episode)">{{ episodeCode(episode) }}</span>
+                </div>
+                <div class="ep-badges-right">
+                  <span class="ep-badge ep-badge-duration" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
+                </div>
+              </div>
+              
+              <!-- Play button - clickable -->
+              <button
+                type="button"
+                class="ep-play-btn"
+                (click)="playEpisode(episode, $event)"
+                [attr.aria-label]="('Play' | t) + ' ' + episodeTitle(episode)">
+                <mat-icon>play_arrow</mat-icon>
+              </button>
             </div>
-            <div class="episode-body">
-              <h3 class="episode-title">{{ episodeTitle(episode) }}</h3>
-              <div class="episode-meta" *ngIf="episodeMeta(episode)">{{ episodeMeta(episode) }}</div>
-              <p class="episode-overview" *ngIf="episodeOverview(episode) as overview; else noEpisodeOverview">
+            
+            <!-- Content premium -->
+            <div class="ep-content">
+              <h3 class="ep-title">{{ episodeTitle(episode) }}</h3>
+              <div class="ep-meta" *ngIf="episodeMeta(episode)">
+                <span>{{ episodeMeta(episode) }}</span>
+              </div>
+              <p class="ep-desc" *ngIf="episodeOverview(episode) as overview; else noEpisodeOverview">
                 {{ overview }}
               </p>
               <ng-template #noEpisodeOverview>
-                <p class="episode-overview muted" i18n>No description available.</p>
+                <p class="ep-desc muted translate-text">{{ 'No description available.' | t }}</p>
               </ng-template>
             </div>
           </button>
         </div>
 
         <div class="episode-grid skeleton" *ngIf="seasonEpisodesLoading()">
-          <div class="episode-card skeleton" *ngFor="let item of [1, 2, 3]">
-            <div class="episode-thumb"></div>
-            <div class="episode-body">
+          <div class="episode-card" *ngFor="let item of [1, 2, 3]">
+            <div class="ep-thumb"></div>
+            <div class="ep-content">
               <div class="skeleton-line wide"></div>
               <div class="skeleton-line"></div>
               <div class="skeleton-line short"></div>
@@ -194,14 +229,14 @@
 
         <div class="episodes-empty" *ngIf="!seasonEpisodesLoading() && episodeOptions().length === 0">
           <mat-icon>live_tv</mat-icon>
-          <p i18n>No episodes available.</p>
+          <p class="translate-text">{{ 'No episodes available.' | t }}</p>
         </div>
       </div>
     </section>
 
     <!-- Cast Section -->
     <section class="section cast-section" *ngIf="cast().length">
-      <h2 class="section-title" i18n>Cast</h2>
+      <h2 class="section-title translate-text">{{ 'Cast' | t }}</h2>
       <div class="cast-scroll">
         <a class="cast-card" *ngFor="let person of cast()" [routerLink]="['/person', person.id]">
           <div class="cast-image">
@@ -224,7 +259,7 @@
       <button class="info-toggle" (click)="showInfo.set(!showInfo())">
         <div class="toggle-left">
           <mat-icon>info_outline</mat-icon>
-          <span i18n>Additional information</span>
+          <span class="translate-text">{{ 'Additional information' | t }}</span>
         </div>
         <mat-icon class="toggle-arrow" [class.expanded]="showInfo()">expand_more</mat-icon>
       </button>
@@ -242,12 +277,12 @@
           </div>
           <div class="info-chip" *ngIf="seasonsLabel()">
             <mat-icon>tv</mat-icon>
-            <span *ngIf="seasonsLabel() === '1'" i18n>{{ seasonsLabel() }} season</span>
-            <span *ngIf="seasonsLabel() !== '1'" i18n>{{ seasonsLabel() }} seasons</span>
+            <span class="translate-text" *ngIf="seasonsLabel() === '1'">{{ seasonsLabel() }} {{ 'season' | t }}</span>
+            <span class="translate-text" *ngIf="seasonsLabel() !== '1'">{{ seasonsLabel() }} {{ 'seasons' | t }}</span>
           </div>
           <div class="info-chip" *ngIf="episodesLabel()">
             <mat-icon>video_library</mat-icon>
-            <span i18n>{{ episodesLabel() }} episodes</span>
+            <span class="translate-text">{{ episodesLabel() }} {{ 'Episodes' | t | lowercase }}</span>
           </div>
           <div class="info-chip" *ngIf="languageLabel()">
             <mat-icon>language</mat-icon>
@@ -265,22 +300,22 @@
 
         <div class="info-details">
           <div class="info-column" *ngIf="companiesLabel()">
-            <span class="info-label" i18n>Studios</span>
+            <span class="info-label translate-text">{{ 'Studios' | t }}</span>
             <span class="info-value">{{ companiesLabel() }}</span>
           </div>
           <div class="info-column" *ngIf="budgetLabel() !== '—'">
-            <span class="info-label" i18n>Budget</span>
+            <span class="info-label translate-text">{{ 'Budget' | t }}</span>
             <span class="info-value">{{ budgetLabel() }}</span>
           </div>
           <div class="info-column" *ngIf="revenueLabel() !== '—'">
-            <span class="info-label" i18n>Revenue</span>
+            <span class="info-label translate-text">{{ 'Revenue' | t }}</span>
             <span class="info-value">{{ revenueLabel() }}</span>
           </div>
         </div>
 
         <a class="official-link" *ngIf="homepageLabel()" [href]="homepageLabel()" target="_blank" rel="noreferrer">
           <mat-icon>open_in_new</mat-icon>
-          <span i18n>Visit official site</span>
+          <span class="translate-text">{{ 'Visit official site' | t }}</span>
         </a>
       </div>
     </section>
@@ -293,8 +328,7 @@
         <mat-icon>close</mat-icon>
       </button>
       <iframe
-        title="Movie trailer"
-        i18n-title
+        [title]="'Movie trailer' | t"
         [src]="trailerUrl() | safeUrl"
         frameborder="0"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -308,7 +342,7 @@
   <div class="details-page loading-state">
     <div class="loading-spinner">
       <div class="spinner"></div>
-      <p i18n>Loading...</p>
+      <p class="translate-text">{{ 'Loading...' | t }}</p>
     </div>
   </div>
 </ng-template>

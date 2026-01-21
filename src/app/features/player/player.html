@@ -4,16 +4,16 @@
       <div class="loading-overlay">
         <div class="loading-content">
           @if (loadingPhase() === 'resetting') {
-            <h2 i18n>Preparing the server for the next stream...</h2>
+            <h2 class="translate-text">{{ 'Preparing the server for the next stream...' | t }}</h2>
           } @else if (loadingPhase() === 'searching') {
-            <h2 i18n>Searching for available torrents...</h2>
+            <h2 class="translate-text">{{ 'Searching for available torrents...' | t }}</h2>
           } @else {
-            <h2 i18n>Connecting to the torrent...</h2>
+            <h2 class="translate-text">{{ 'Connecting to the torrent...' | t }}</h2>
           }
 
           <ul class="loading-logs" aria-live="polite">
             @if (loadingLogs().length === 0) {
-              <li class="loading-log muted" i18n>Gathering status updates...</li>
+              <li class="loading-log muted translate-text">{{ 'Gathering status updates...' | t }}</li>
             } @else {
               @for (entry of loadingLogs(); track entry.id) {
                 <li class="loading-log" [class.warn]="entry.level === 'warn'" [class.error]="entry.level === 'error'">
@@ -59,10 +59,10 @@
   }
 
   <div class="hud">
-    <a routerLink="/" class="btn">← <span i18n>Home</span></a>
-    <a [routerLink]="['/details', type(), id()]" class="btn"><span i18n>Details</span></a>
-    <button class="btn settings-btn" (click)="toggleSettings()" title="Settings" i18n-title>
-      ⚙️ <span i18n>Settings</span>
+    <a routerLink="/" class="btn">← <span class="translate-text">{{ 'Home' | t }}</span></a>
+    <a [routerLink]="['/details', type(), id()]" class="btn"><span class="translate-text">{{ 'Details' | t }}</span></a>
+    <button class="btn settings-btn" (click)="toggleSettings()" [title]="'Settings' | t">
+      ⚙️ <span class="translate-text">{{ 'Settings' | t }}</span>
     </button>
   </div>
 
@@ -76,24 +76,24 @@
             [class.active]="settingsTab() === 'audio'"
             (click)="setSettingsTab('audio')"
             [disabled]="audioTracks().length <= 1">
-            🔊 <span i18n>Audio</span>
+            🔊 <span class="translate-text">{{ 'Audio' | t }}</span>
           </button>
           <button
             class="tab-btn"
             [class.active]="settingsTab() === 'subtitles'"
             (click)="setSettingsTab('subtitles')"
             [disabled]="subtitleTracks().length === 0 && !canSearchOpenSubtitles()">
-            💬 <span i18n>Subtitles</span>
+            💬 <span class="translate-text">{{ 'Subtitles' | t }}</span>
           </button>
           <button
             class="tab-btn"
             [class.active]="settingsTab() === 'appearance'"
             (click)="setSettingsTab('appearance')"
             [disabled]="subtitleTracks().length === 0">
-            🎨 <span i18n>Appearance</span>
+            🎨 <span class="translate-text">{{ 'Appearance' | t }}</span>
           </button>
         </div>
-        <button class="close-btn" (click)="toggleSettings()" title="Close" i18n-title>✕</button>
+        <button class="close-btn" (click)="toggleSettings()" [title]="'Close' | t">✕</button>
       </div>
 
       <div class="settings-content">
@@ -102,14 +102,14 @@
           <div class="tab-content">
             @if (audioTracks().length > 1) {
               <div class="setting-group">
-                <label class="group-label" i18n>Audio track</label>
+                <label class="group-label translate-text">{{ 'Audio track' | t }}</label>
                 <div class="audio-list">
                   <button
                     class="audio-option"
                     [class.active]="selectedAudioTrack() === 'auto'"
                     (click)="selectAudioTrack('auto')">
                     <span class="audio-icon">🔄</span>
-                    <span class="audio-name" i18n>Auto</span>
+                    <span class="audio-name translate-text">{{ 'Auto' | t }}</span>
                   </button>
                   @for (track of audioTracks(); track track.index) {
                     <button
@@ -119,7 +119,7 @@
                       <span class="audio-icon">🔊</span>
                       <span class="audio-name">{{ formatAudioTrackLabel(track) }}</span>
                       @if (track.default) {
-                        <span class="audio-badge" i18n>Default</span>
+                        <span class="audio-badge translate-text">{{ 'Default' | t }}</span>
                       }
                     </button>
                   }
@@ -128,7 +128,7 @@
             } @else {
               <div class="empty-state">
                 <span class="empty-icon">🔇</span>
-                <p i18n>Only one audio track is available</p>
+                <p class="translate-text">{{ 'Only one audio track is available' | t }}</p>
               </div>
             }
           </div>
@@ -139,14 +139,14 @@
           <div class="tab-content">
             @if (subtitleTracks().length > 0) {
               <div class="setting-group">
-                <label class="group-label" i18n>Subtitle track</label>
+                <label class="group-label translate-text">{{ 'Subtitle track' | t }}</label>
                 <div class="subtitle-list">
                   <button
                     class="subtitle-option"
                     [class.active]="selectedSubtitleTrack() === -1"
                     (click)="selectSubtitleTrack(-1)">
                     <span class="sub-icon">🚫</span>
-                    <span class="sub-name" i18n>Off</span>
+                    <span class="sub-name translate-text">{{ 'Off' | t }}</span>
                   </button>
                   @for (track of subtitleTracks(); track track.index; let i = $index) {
                     <button
@@ -162,32 +162,31 @@
             } @else {
               <div class="empty-state">
                 <span class="empty-icon">💬</span>
-                <p i18n>No subtitles available</p>
+                <p class="translate-text">{{ 'No subtitles available' | t }}</p>
               </div>
             }
 
             <div class="setting-group">
-              <label class="group-label" i18n>Download from OpenSubtitles</label>
+              <label class="group-label translate-text">{{ 'Download from OpenSubtitles' | t }}</label>
               @if (!canSearchOpenSubtitles()) {
-                <p class="open-subtitle-status" i18n>Load a video to search for external subtitles.</p>
+                <p class="open-subtitle-status translate-text">{{ 'Load a video to search for external subtitles.' | t }}</p>
               } @else {
                 <div class="open-subtitle-controls">
                   <input
                     class="lang-input"
                     type="text"
-                    placeholder="Languages (en,es)"
-                    i18n-placeholder
+                    [placeholder]="'Languages (en,es)' | t"
                     [value]="openSubtitlesLanguages()"
                     (input)="setOpenSubtitlesLanguages($any($event.target).value)">
                   <button
                     class="action-btn"
                     (click)="searchOpenSubtitles()"
                     [disabled]="openSubtitlesLoading()">
-                    <span i18n>Search</span>
+                    <span class="translate-text">{{ 'Search' | t }}</span>
                   </button>
                 </div>
                 @if (openSubtitlesLoading()) {
-                  <p class="open-subtitle-status" i18n>Searching for subtitles...</p>
+                  <p class="open-subtitle-status translate-text">{{ 'Searching for subtitles...' | t }}</p>
                 }
                 @if (openSubtitlesError()) {
                   <p class="open-subtitle-status error">{{ openSubtitlesError() }}</p>
@@ -206,13 +205,13 @@
                           </div>
                           <div class="open-subtitle-actions">
                             <button class="download-btn" (click)="downloadOpenSubtitle(result)">
-                              <span i18n>Download</span>
+                              <span class="translate-text">{{ 'Download' | t }}</span>
                             </button>
                             <button
                               class="next-btn"
                               (click)="pickNextOpenSubtitle(languageKey)"
                               [disabled]="!hasNextOpenSubtitle(languageKey)">
-                              <span i18n>Doesn't work</span>
+                              <span class="translate-text">{{ "Doesn't work" | t }}</span>
                             </button>
                           </div>
                         </div>
@@ -220,7 +219,7 @@
                     }
                   </div>
                 } @else if (!openSubtitlesLoading() && !openSubtitlesError()) {
-                  <p class="open-subtitle-status hint" i18n>Use "Search" to query OpenSubtitles.</p>
+                  <p class="open-subtitle-status hint translate-text">{{ 'Use "Search" to query OpenSubtitles.' | t }}</p>
                 }
               }
             </div>
@@ -232,77 +231,77 @@
           <div class="tab-content">
             @if (subtitleTracks().length > 0) {
               <div class="setting-group">
-                <label class="group-label" i18n>Text size</label>
+                <label class="group-label translate-text">{{ 'Text size' | t }}</label>
                 <div class="size-control">
                   <button class="size-btn" (click)="adjustSubtitleSize(-10)" [disabled]="subtitleSize() <= 50">−</button>
                   <span class="size-value">{{ subtitleSize() }}%</span>
                   <button class="size-btn" (click)="adjustSubtitleSize(10)" [disabled]="subtitleSize() >= 200">+</button>
                 </div>
                 <div class="size-presets">
-                  <button class="preset-btn" [class.active]="subtitleSize() === 75" (click)="setSubtitleSize(75)" i18n>Small</button>
-                  <button class="preset-btn" [class.active]="subtitleSize() === 100" (click)="setSubtitleSize(100)" i18n>Normal</button>
-                  <button class="preset-btn" [class.active]="subtitleSize() === 125" (click)="setSubtitleSize(125)" i18n>Large</button>
-                  <button class="preset-btn" [class.active]="subtitleSize() === 150" (click)="setSubtitleSize(150)" i18n>Extra large</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 75" (click)="setSubtitleSize(75)">{{ 'Small' | t }}</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 100" (click)="setSubtitleSize(100)">{{ 'Normal' | t }}</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 125" (click)="setSubtitleSize(125)">{{ 'Large' | t }}</button>
+                  <button class="preset-btn" [class.active]="subtitleSize() === 150" (click)="setSubtitleSize(150)">{{ 'Extra large' | t }}</button>
                 </div>
               </div>
 
               <div class="setting-group">
-                <label class="group-label" i18n>Text color</label>
+                <label class="group-label translate-text">{{ 'Text color' | t }}</label>
                 <div class="color-grid">
-                  <button class="color-option color-white" [class.active]="subtitleColor() === '#ffffff'" (click)="setSubtitleColor('#ffffff')" title="White" i18n-title>
+                  <button class="color-option color-white" [class.active]="subtitleColor() === '#ffffff'" (click)="setSubtitleColor('#ffffff')" [title]="'White' | t">
                     <span class="check">✓</span>
                   </button>
-                  <button class="color-option color-yellow" [class.active]="subtitleColor() === '#ffff00'" (click)="setSubtitleColor('#ffff00')" title="Yellow" i18n-title>
+                  <button class="color-option color-yellow" [class.active]="subtitleColor() === '#ffff00'" (click)="setSubtitleColor('#ffff00')" [title]="'Yellow' | t">
                     <span class="check">✓</span>
                   </button>
-                  <button class="color-option color-green" [class.active]="subtitleColor() === '#00ff00'" (click)="setSubtitleColor('#00ff00')" title="Green" i18n-title>
+                  <button class="color-option color-green" [class.active]="subtitleColor() === '#00ff00'" (click)="setSubtitleColor('#00ff00')" [title]="'Green' | t">
                     <span class="check">✓</span>
                   </button>
-                  <button class="color-option color-cyan" [class.active]="subtitleColor() === '#00ffff'" (click)="setSubtitleColor('#00ffff')" title="Cyan" i18n-title>
+                  <button class="color-option color-cyan" [class.active]="subtitleColor() === '#00ffff'" (click)="setSubtitleColor('#00ffff')" [title]="'Cyan' | t">
                     <span class="check">✓</span>
                   </button>
                 </div>
               </div>
 
               <div class="setting-group">
-                <label class="group-label" i18n>Background</label>
+                <label class="group-label translate-text">{{ 'Background' | t }}</label>
                 <div class="bg-options">
                   <button class="bg-option" [class.active]="subtitleBackground() === 'rgba(0,0,0,0.7)'" (click)="setSubtitleBackground('rgba(0,0,0,0.7)')">
                     <span class="bg-preview bg-semi"></span>
-                    <span i18n>Semi</span>
+                    <span class="translate-text">{{ 'Semi' | t }}</span>
                   </button>
                   <button class="bg-option" [class.active]="subtitleBackground() === 'rgba(0,0,0,0.9)'" (click)="setSubtitleBackground('rgba(0,0,0,0.9)')">
                     <span class="bg-preview bg-solid"></span>
-                    <span i18n>Solid</span>
+                    <span class="translate-text">{{ 'Solid' | t }}</span>
                   </button>
                   <button class="bg-option" [class.active]="subtitleBackground() === 'transparent'" (click)="setSubtitleBackground('transparent')">
                     <span class="bg-preview bg-none"></span>
-                    <span i18n>None</span>
+                    <span class="translate-text">{{ 'None' | t }}</span>
                   </button>
                 </div>
               </div>
 
               <div class="setting-group">
-                <label class="group-label" i18n>Font</label>
+                <label class="group-label translate-text">{{ 'Font' | t }}</label>
                 <div class="font-options">
                   <button class="font-option" [class.active]="subtitleFont() === 'sans-serif'" (click)="setSubtitleFont('sans-serif')">
                     <span class="font-preview font-sans">Aa</span>
-                    <span i18n>Sans Serif</span>
+                    <span class="translate-text">{{ 'Sans Serif' | t }}</span>
                   </button>
                   <button class="font-option" [class.active]="subtitleFont() === 'serif'" (click)="setSubtitleFont('serif')">
                     <span class="font-preview font-serif">Aa</span>
-                    <span i18n>Serif</span>
+                    <span class="translate-text">{{ 'Serif' | t }}</span>
                   </button>
                   <button class="font-option" [class.active]="subtitleFont() === 'monospace'" (click)="setSubtitleFont('monospace')">
                     <span class="font-preview font-mono">Aa</span>
-                    <span i18n>Mono</span>
+                    <span class="translate-text">{{ 'Mono' | t }}</span>
                   </button>
                 </div>
               </div>
             } @else {
               <div class="empty-state">
                 <span class="empty-icon">🎨</span>
-                <p i18n>Enable subtitles to customize their appearance</p>
+                <p class="translate-text">{{ 'Enable subtitles to customize their appearance' | t }}</p>
               </div>
             }
           </div>

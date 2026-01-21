@@ -22,15 +22,17 @@ $accent: $accent-primary;
   color: $text-primary;
   padding-top: 64px; // Space for global navbar
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  animation: pageEnter 0.5s ease-out;
+  animation: personPageEnter 0.5s ease-out forwards;
 }
 
-@keyframes pageEnter {
+@keyframes personPageEnter {
   from {
     opacity: 0;
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -260,6 +262,31 @@ $accent: $accent-primary;
 // Sections
 .section {
   padding: 24px 4% 40px;
+  opacity: 0;
+  animation: sectionSlideIn 0.5s ease-out forwards;
+  
+  &:nth-of-type(1) {
+    animation-delay: 0.15s;
+  }
+  
+  &:nth-of-type(2) {
+    animation-delay: 0.25s;
+  }
+  
+  &:nth-of-type(3) {
+    animation-delay: 0.35s;
+  }
+}
+
+@keyframes sectionSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .section-title {

@@ -9,10 +9,22 @@ import { MatListModule } from '@angular/material/list';
 import { slideAnimation } from './core/animations/route-animations';
 import { IntroComponent } from './features/intro/intro';
 import { GlobalNavComponent } from './shared/components/global-nav/global-nav';
+import { LanguageTransitionOverlayComponent } from './shared/components/language-transition-overlay/language-transition-overlay.component';
 
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, RouterOutlet, MatToolbarModule, MatSidenavModule, MatIconModule, MatButtonModule, MatListModule, IntroComponent, GlobalNavComponent],
+  imports: [
+    CommonModule,
+    RouterOutlet,
+    MatToolbarModule,
+    MatSidenavModule,
+    MatIconModule,
+    MatButtonModule,
+    MatListModule,
+    IntroComponent,
+    GlobalNavComponent,
+    LanguageTransitionOverlayComponent,
+  ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   animations: [slideAnimation],

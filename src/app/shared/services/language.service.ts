@@ -1,40 +1,30 @@
-import { DOCUMENT } from '@angular/common';
-import { inject, Injectable, signal } from '@angular/core';
+import { inject, Injectable, computed } from '@angular/core';
+import { TranslationService, SupportedLang } from './translation.service';
 
-type SupportedLang = 'en' | 'es';
-
+/**
+ * Servicio de idioma que delega al TranslationService
+ * Mantiene compatibilidad con la API existente
+ */
 @Injectable({ providedIn: 'root' })
 export class LanguageService {
-  private readonly document = inject(DOCUMENT);
-  currentLang = signal<SupportedLang>(this.getInitialLang());
+  private readonly translationService = inject(TranslationService);
+  
+  // Exponer señales del TranslationService
+  readonly currentLang = this.translationService.currentLang;
+  readonly isChangingLanguage = this.translationService.isChangingLanguage;
 
-  setLang(lang: SupportedLang) {
-    if (lang === this.currentLang()) return;
-
-    this.currentLang.set(lang);
-    try {
-      localStorage.setItem('pirateflix_lang', lang);
-    } catch {}
-
-    if (this.document?.documentElement) {
-      this.document.documentElement.lang = lang;
-      this.document.documentElement.classList.remove('lang-en', 'lang-es');
-      this.document.documentElement.classList.add(`lang-${lang}`);
-    }
-
-    this.document?.location?.reload();
+  /**
+   * Cambiar idioma con transición suave (sin recarga de página)
+   */
+  setLang(lang: SupportedLang): void {
+    this.translationService.setLang(lang);
   }
 
-  private getInitialLang(): SupportedLang {
-    try {
-      const saved = localStorage.getItem('pirateflix_lang');
-      if (saved === 'es' || saved === 'en') return saved;
-    } catch {}
-
-    const docLang = this.document?.documentElement?.lang;
-    if (docLang === 'es' || docLang === 'en') return docLang;
-
-    return 'en';
+  /**
+   * Obtener traducción reactiva
+   */
+  translate(key: string): string {
+    return this.translationService.translate(key);
   }
 }
 
