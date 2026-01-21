@@ -1,7 +1,7 @@
 <nav class="global-nav" *ngIf="showNav()">
   <div class="nav-left">
     <!-- Logo - always goes home -->
-    <a class="logo" routerLink="/" title="Ir al inicio" aria-label="PirateFlix">
+    <a class="logo" routerLink="/" [title]="'Back to home' | t" aria-label="PirateFlix">
       <span class="logo-img" aria-hidden="true"></span>
       <span class="logo-text">PirateFlix</span>
     </a>
@@ -10,10 +10,10 @@
     <button
       class="back-btn"
       (click)="goBack()"
-      title="Volver"
+      [title]="'Back' | t"
     >
       <mat-icon>arrow_back</mat-icon>
-      <span class="back-text" i18n>Back</span>
+      <span class="back-text translate-text">{{ 'Back' | t }}</span>
     </button>
   </div>
 
@@ -22,7 +22,7 @@
     <a
       class="home-btn"
       routerLink="/"
-      title="Ir al inicio"
+      [title]="'Home' | t"
     >
       <mat-icon>home</mat-icon>
     </a>

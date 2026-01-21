@@ -1,5 +1,5 @@
-import { Component, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, ElementRef } from '@angular/core';
+import { CommonModule, DOCUMENT, LowerCasePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatButtonModule } from '@angular/material/button';
@@ -8,6 +8,8 @@ import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
 import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
+import { TranslatePipe } from '../../shared/pipes/translate.pipe';
+import { LanguageService } from '../../shared/services/language.service';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 
@@ -25,6 +27,8 @@ type MediaType = 'movie' | 'tv';
     MatButtonToggleModule,
     MatTooltipModule,
     SafeUrlPipe,
+    TranslatePipe,
+    LowerCasePipe,
   ],
   templateUrl: './details.html',
   styleUrl: './details.scss',
@@ -33,6 +37,12 @@ export class DetailsComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly tmdb = inject(TmdbService);
   private readonly router = inject(Router);
+  private readonly language = inject(LanguageService);
+  private readonly document = inject(DOCUMENT);
+  private readonly elementRef = inject(ElementRef);
+  
+  // Exponer para la vista
+  isChangingLanguage = this.language.isChangingLanguage;
 
   loading = signal(true);
   error = signal<string | null>(null);
@@ -150,9 +160,9 @@ export class DetailsComponent {
 
   mediaLabel() {
     const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
-    if (type === 'tv') return 'Serie';
-    if (type === 'movie') return 'Película';
-    return 'Título';
+    if (type === 'tv') return 'TV';
+    if (type === 'movie') return 'Movie';
+    return 'Title';
   }
 
   isTv() {
@@ -247,25 +257,89 @@ export class DetailsComponent {
     }));
   }
 
+  // Estado de transición del grid de episodios
+  seasonTransitioning = signal(false);
+
   setSeason(value: number | string) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return;
     if (this.selectedSeason() === parsed) return;
 
-    this.selectedSeason.set(parsed);
-    this.seasonEpisodes.set([]);
-    const count = this.getEpisodeCount(parsed);
-    const currentEpisode = this.selectedEpisode();
-    if (!Number.isFinite(count) || count <= 0) {
-      this.selectedEpisode.set(null);
+    // Transición natural y simple
+    this.smoothSeasonChange(() => {
+      this.selectedSeason.set(parsed);
+      this.seasonEpisodes.set([]);
+      const count = this.getEpisodeCount(parsed);
+      const currentEpisode = this.selectedEpisode();
+      if (!Number.isFinite(count) || count <= 0) {
+        this.selectedEpisode.set(null);
+        return;
+      }
+
+      if (!currentEpisode || currentEpisode > count) {
+        this.selectedEpisode.set(1);
+      }
+
+      this.loadSeasonEpisodes(parsed);
+    });
+  }
+
+  /**
+   * Transición de temporada natural y sin saltos
+   * - Sin FLIP complejo, sin transforms exagerados
+   * - Solo un micro-fade casi imperceptible
+   * - Mantiene scroll estable
+   */
+  private smoothSeasonChange(changeCallback: () => void): void {
+    // Respetar prefers-reduced-motion: swap instantáneo
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      changeCallback();
       return;
     }
 
-    if (!currentEpisode || currentEpisode > count) {
-      this.selectedEpisode.set(1);
+    const gridEl = this.elementRef.nativeElement.querySelector('.episode-grid') as HTMLElement;
+    if (!gridEl) {
+      changeCallback();
+      return;
     }
 
-    this.loadSeasonEpisodes(parsed);
+    // Capturar posición del grid antes del cambio
+    const gridRect = gridEl.getBoundingClientRect();
+    const gridTopBefore = gridRect.top;
+
+    // Marcar como transitioning (bloquea interacciones)
+    this.seasonTransitioning.set(true);
+    
+    // Micro-fade out casi imperceptible (opacity 1 → 0.97)
+    gridEl.style.opacity = '0.97';
+    gridEl.style.pointerEvents = 'none';
+
+    // Ejecutar el cambio de datos
+    changeCallback();
+
+    // Después del render, hacer el fade-in
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        // Ajustar scroll si el grid se movió
+        const gridTopAfter = gridEl.getBoundingClientRect().top;
+        const scrollDelta = gridTopAfter - gridTopBefore;
+        if (Math.abs(scrollDelta) > 2) {
+          window.scrollBy({ top: scrollDelta, behavior: 'instant' });
+        }
+
+        // Micro-fade in (0.97 → 1)
+        gridEl.style.transition = 'opacity 180ms ease-out';
+        gridEl.style.opacity = '1';
+
+        // Cleanup después de la transición
+        setTimeout(() => {
+          gridEl.style.transition = '';
+          gridEl.style.opacity = '';
+          gridEl.style.pointerEvents = '';
+          this.seasonTransitioning.set(false);
+        }, 200);
+      });
+    });
   }
 
   setEpisode(value: string) {
@@ -277,6 +351,23 @@ export class DetailsComponent {
   selectEpisode(episodeNumber: number) {
     if (!Number.isFinite(episodeNumber) || episodeNumber < 0) return;
     this.selectedEpisode.set(episodeNumber);
+  }
+
+  /**
+   * Reproduce un episodio específico.
+   * Detiene propagación para no disparar selectEpisode de la card padre.
+   */
+  playEpisode(episode: any, event: Event) {
+    event.stopPropagation();
+    
+    // Asegurar que el episodio esté seleccionado
+    const episodeNumber = episode?.episode_number;
+    if (Number.isFinite(episodeNumber) && episodeNumber >= 0) {
+      this.selectedEpisode.set(episodeNumber);
+    }
+    
+    // Reproducir
+    this.play();
   }
 
   formatSeasonLabel(season: any) {
@@ -395,27 +486,39 @@ export class DetailsComponent {
     }));
   }
 
-  directors() {
+  directors(): { id: number; name: string }[] {
     const c = this.credits();
     if (!Array.isArray(c?.crew)) return [];
     return c.crew
       .filter((p: any) => p.job === 'Director')
-      .map((p: any) => p.name);
+      .map((p: any) => ({ id: p.id, name: p.name }));
   }
 
-  writers() {
+  directorsDisplay() {
+    return this.directors().map(d => d.name).join(', ');
+  }
+
+  writers(): { id: number; name: string }[] {
     const c = this.credits();
     if (!Array.isArray(c?.crew)) return [];
     return c.crew
       .filter((p: any) => p.job === 'Screenplay' || p.job === 'Writer')
       .slice(0, 3)
-      .map((p: any) => p.name);
+      .map((p: any) => ({ id: p.id, name: p.name }));
   }
 
-  creators() {
+  writersDisplay() {
+    return this.writers().map(w => w.name).join(', ');
+  }
+
+  creators(): { id: number; name: string }[] {
     const it = this.item();
     if (!Array.isArray(it?.created_by)) return [];
-    return it.created_by.map((p: any) => p.name);
+    return it.created_by.map((p: any) => ({ id: p.id, name: p.name }));
+  }
+
+  creatorsDisplay() {
+    return this.creators().map(c => c.name).join(', ');
   }
 
   play() {

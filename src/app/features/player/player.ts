@@ -4,6 +4,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { AlertController } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { TmdbService } from '../../core/services/tmdb';
+import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { firstValueFrom } from 'rxjs';
 
 type MediaType = 'movie' | 'tv';
@@ -116,7 +117,7 @@ interface LoadingLogEntry {
 @Component({
   selector: 'app-player',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, TranslatePipe],
   templateUrl: './player.html',
   styleUrl: './player.scss',
 })
