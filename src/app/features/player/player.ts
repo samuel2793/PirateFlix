@@ -179,7 +179,11 @@ export class PlayerComponent implements OnDestroy {
   openSubtitlesLanguageIndices = signal<Record<string, number>>({});
   openSubtitlesBuckets = signal<Record<string, OpenSubtitleResult[]>>({});
 
-  private readonly API_URL = 'http://localhost:3001/api';
+  private readonly API_URL = (() => {
+    const hostname = window.location.hostname;
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    return isLocalhost ? 'http://localhost:3001/api' : `http://${hostname}:3001/api`;
+  })();
   private readonly maxLoadingLogEntries = 8;
   private currentTorrentHash: string | null = null;
   private currentVideoFileIndex: number | null = null;
