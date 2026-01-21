@@ -36,6 +36,31 @@
     </div>
 
     <div class="nav-right">
+      <div class="auth-actions" *ngIf="authAvailable()">
+        <div class="user-badge" *ngIf="isAuthenticated()">
+          <mat-icon>account_circle</mat-icon>
+          <span class="user-text">{{ userDisplayName() }}</span>
+        </div>
+        <button
+          class="auth-btn"
+          *ngIf="!isAuthenticated()"
+          (click)="login()"
+          [title]="'Sign in' | t"
+        >
+          <mat-icon>login</mat-icon>
+          <span class="translate-text">{{ 'Sign in' | t }}</span>
+        </button>
+        <button
+          class="auth-btn"
+          *ngIf="isAuthenticated()"
+          (click)="logout()"
+          [title]="'Sign out' | t"
+        >
+          <mat-icon>logout</mat-icon>
+          <span class="translate-text">{{ 'Sign out' | t }}</span>
+        </button>
+      </div>
+
       <!-- Content Density Toggle -->
       <div class="density-toggle">
         <button

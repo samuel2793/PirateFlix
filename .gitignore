@@ -39,6 +39,7 @@ package-lock.json
 testem.log
 /typings
 __screenshots__/
+/server/storage/
 
 # System files
 .DS_Store
@@ -96,4 +97,5 @@ www/
 logs/
 
 src/app/core/config/app-config.ts
+src/app/core/config/app-config-private.ts
 dump_project.sh

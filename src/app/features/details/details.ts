@@ -60,18 +60,20 @@ export class DetailsComponent {
 
   // Preferences with localStorage persistence
   preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
-  preferSeekable = signal(this.loadPref('preferSeekable'));
+  preferSeekable = signal(this.loadPref('preferSeekable', true));
   preferSubtitles = signal(this.loadPref('preferSubtitles'));
   preferYearInSearch = signal(this.loadPref('preferYearInSearch'));
   showInfo = signal(false);
   inMyList = signal(false);
 
   // Load preference from localStorage
-  private loadPref(key: string): boolean {
+  private loadPref(key: string, defaultValue = false): boolean {
     try {
-      return localStorage.getItem(`pirateflix_${key}`) === 'true';
+      const value = localStorage.getItem(`pirateflix_${key}`);
+      if (value === null) return defaultValue;
+      return value === 'true';
     } catch {
-      return false;
+      return defaultValue;
     }
   }
 
