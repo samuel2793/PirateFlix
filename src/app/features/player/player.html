@@ -125,7 +125,9 @@
                     <span class="audio-icon">🔄</span>
                     <span class="audio-name translate-text">{{ 'Auto' | t }}</span>
                     @if (audioSwitching() && audioSwitchTrack() === 'auto') {
-                      <span class="audio-badge pending">Descargando...</span>
+                      <span class="audio-progress" [style.--progress]="audioSwitchProgress()">
+                        <span class="audio-progress-text">{{ audioSwitchProgress() }}%</span>
+                      </span>
                     }
                   </button>
                   @for (track of audioTracks(); track track.index) {
@@ -139,7 +141,9 @@
                         <span class="audio-badge translate-text">{{ 'Default' | t }}</span>
                       }
                       @if (audioSwitching() && audioSwitchTrack() === track.index) {
-                        <span class="audio-badge pending">Descargando...</span>
+                        <span class="audio-progress" [style.--progress]="audioSwitchProgress()">
+                          <span class="audio-progress-text">{{ audioSwitchProgress() }}%</span>
+                        </span>
                       }
                     </button>
                   }

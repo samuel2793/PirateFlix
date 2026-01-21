@@ -372,6 +372,39 @@ $accent-primary: #e5a00d;
     font-weight: 600;
   }
 
+  .audio-progress {
+    --size: 30px;
+    --thickness: 3px;
+    --progress: 0;
+    width: var(--size);
+    height: var(--size);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: conic-gradient(
+      rgba(229, 9, 20, 0.95) calc(var(--progress) * 1%),
+      rgba(255, 255, 255, 0.15) 0
+    );
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    position: relative;
+  }
+
+  .audio-progress::before {
+    content: '';
+    position: absolute;
+    inset: var(--thickness);
+    border-radius: 50%;
+    background: rgba(16, 16, 16, 0.9);
+  }
+
+  .audio-progress-text {
+    position: relative;
+    z-index: 1;
+    line-height: 1;
+  }
+
   .audio-badge.pending {
     background: rgba(255, 255, 255, 0.12);
     border: 1px dashed rgba(255, 255, 255, 0.35);

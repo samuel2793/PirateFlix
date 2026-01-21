@@ -153,6 +153,7 @@ export class PlayerComponent implements OnDestroy {
   audioSwitching = signal<boolean>(false);
   audioSwitchTrack = signal<'auto' | number | null>(null);
   audioSwitchMessage = signal<string>('');
+  audioSwitchProgress = signal<number>(0);
   preferMultiAudio = signal<boolean>(false);
   preferSeekable = signal<boolean>(false);
   preferSubtitles = signal<boolean>(false);
@@ -345,6 +346,7 @@ export class PlayerComponent implements OnDestroy {
     this.audioSwitching.set(false);
     this.audioSwitchTrack.set(null);
     this.audioSwitchMessage.set('');
+    this.audioSwitchProgress.set(0);
     this.audioSwitchTargetSrc = '';
     this.audioSwitchPreviousSrc = '';
     if (this.audioPreloadVideo) {
@@ -356,16 +358,48 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
+  private updateAudioSwitchProgress(progress: number, token: number) {
+    if (this.audioSwitchToken !== token) return;
+    const clamped = Math.max(0, Math.min(100, Math.round(progress)));
+    this.audioSwitchProgress.set(clamped);
+  }
+
   private preloadAudioStream(url: string, token: number, timeoutMs = 15000): Promise<void> {
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       video.preload = 'auto';
       video.muted = true;
+      const startedAt = Date.now();
+      let lastProgress = 0;
+      const updateProgress = () => {
+        if (this.audioSwitchToken !== token) return;
+        let percent = 0;
+        try {
+          const duration = video.duration;
+          if (Number.isFinite(duration) && duration > 0 && video.buffered.length > 0) {
+            const end = video.buffered.end(video.buffered.length - 1);
+            if (Number.isFinite(end) && end > 0) {
+              percent = (end / duration) * 100;
+            }
+          }
+        } catch {}
+
+        const elapsed = Date.now() - startedAt;
+        const timePercent = Math.min(90, (elapsed / timeoutMs) * 90);
+        percent = Math.max(percent, timePercent);
+        percent = Math.min(99, Math.max(0, percent));
+        if (percent >= lastProgress) {
+          lastProgress = percent;
+          this.updateAudioSwitchProgress(percent, token);
+        }
+      };
 
       let finished = false;
       const cleanup = () => {
         if (finished) return;
         finished = true;
+        clearInterval(intervalId);
+        video.removeEventListener('progress', onProgress);
         try {
           video.removeAttribute('src');
           video.load();
@@ -377,6 +411,7 @@ export class PlayerComponent implements OnDestroy {
           cleanup();
           return;
         }
+        this.updateAudioSwitchProgress(100, token);
         cleanup();
         resolve();
       };
@@ -404,9 +439,15 @@ export class PlayerComponent implements OnDestroy {
         handler();
       };
 
+      const onProgress = () => {
+        updateProgress();
+      };
+
+      const intervalId = window.setInterval(updateProgress, 200);
       video.addEventListener('loadedmetadata', finishOnce(onReady), { once: true });
       video.addEventListener('canplay', finishOnce(onReady), { once: true });
       video.addEventListener('error', finishOnce(onError), { once: true });
+      video.addEventListener('progress', onProgress);
       video.src = url;
       try {
         video.load();
@@ -1637,6 +1678,7 @@ export class PlayerComponent implements OnDestroy {
     this.audioSwitching.set(true);
     this.audioSwitchTrack.set(nextSelection);
     this.audioSwitchMessage.set('Descargando audio...');
+    this.audioSwitchProgress.set(0);
     this.audioSwitchPreviousSrc = this.videoSrc();
     this.audioSwitchPreviousSelection = this.selectedAudioTrack();
     this.audioSwitchTargetSrc = nextUrl;
