@@ -371,6 +371,13 @@ $accent-primary: #e5a00d;
     text-transform: uppercase;
     font-weight: 600;
   }
+
+  .audio-badge.pending {
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px dashed rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.9);
+    text-transform: none;
+  }
 }
 
 .open-subtitle-controls {

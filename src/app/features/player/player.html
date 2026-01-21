@@ -124,6 +124,9 @@
                     (click)="selectAudioTrack('auto')">
                     <span class="audio-icon">🔄</span>
                     <span class="audio-name translate-text">{{ 'Auto' | t }}</span>
+                    @if (audioSwitching() && audioSwitchTrack() === 'auto') {
+                      <span class="audio-badge pending">Descargando...</span>
+                    }
                   </button>
                   @for (track of audioTracks(); track track.index) {
                     <button
@@ -134,6 +137,9 @@
                       <span class="audio-name">{{ formatAudioTrackLabel(track) }}</span>
                       @if (track.default) {
                         <span class="audio-badge translate-text">{{ 'Default' | t }}</span>
+                      }
+                      @if (audioSwitching() && audioSwitchTrack() === track.index) {
+                        <span class="audio-badge pending">Descargando...</span>
                       }
                     </button>
                   }

@@ -150,6 +150,9 @@ export class PlayerComponent implements OnDestroy {
   subtitleTracks = signal<SubtitleTrack[]>([]);
   audioTracks = signal<AudioTrack[]>([]);
   selectedAudioTrack = signal<'auto' | number>('auto');
+  audioSwitching = signal<boolean>(false);
+  audioSwitchTrack = signal<'auto' | number | null>(null);
+  audioSwitchMessage = signal<string>('');
   preferMultiAudio = signal<boolean>(false);
   preferSeekable = signal<boolean>(false);
   preferSubtitles = signal<boolean>(false);
@@ -201,6 +204,11 @@ export class PlayerComponent implements OnDestroy {
   private playbackSession = 0;
   private playbackSessionSeed = 0;
   private searchAbortController: AbortController | null = null;
+  private audioSwitchToken = 0;
+  private audioPreloadVideo: HTMLVideoElement | null = null;
+  private audioSwitchPreviousSrc = '';
+  private audioSwitchPreviousSelection: 'auto' | number = 'auto';
+  private audioSwitchTargetSrc = '';
 
   private startNewPlaybackSession() {
     this.playbackSessionSeed += 1;
@@ -319,6 +327,7 @@ export class PlayerComponent implements OnDestroy {
     this.currentTorrentHash = null;
     this.currentVideoFileIndex = null;
     this.resetTranscodeTracking();
+    this.cancelAudioSwitch();
 
     // Cierra de verdad la conexión de vídeo y range-requests
     const v = this.videoPlayer?.nativeElement;
@@ -329,6 +338,84 @@ export class PlayerComponent implements OnDestroy {
       v.removeAttribute('src');
       v.load();
     }
+  }
+
+  private cancelAudioSwitch() {
+    this.audioSwitchToken += 1;
+    this.audioSwitching.set(false);
+    this.audioSwitchTrack.set(null);
+    this.audioSwitchMessage.set('');
+    this.audioSwitchTargetSrc = '';
+    this.audioSwitchPreviousSrc = '';
+    if (this.audioPreloadVideo) {
+      try {
+        this.audioPreloadVideo.removeAttribute('src');
+        this.audioPreloadVideo.load();
+      } catch {}
+      this.audioPreloadVideo = null;
+    }
+  }
+
+  private preloadAudioStream(url: string, token: number, timeoutMs = 15000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement('video');
+      video.preload = 'auto';
+      video.muted = true;
+
+      let finished = false;
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        try {
+          video.removeAttribute('src');
+          video.load();
+        } catch {}
+      };
+
+      const onReady = () => {
+        if (this.audioSwitchToken !== token) {
+          cleanup();
+          return;
+        }
+        cleanup();
+        resolve();
+      };
+
+      const onError = () => {
+        if (this.audioSwitchToken !== token) {
+          cleanup();
+          return;
+        }
+        cleanup();
+        reject(new Error('audio-preload-failed'));
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (this.audioSwitchToken !== token) {
+          cleanup();
+          return;
+        }
+        cleanup();
+        reject(new Error('audio-preload-timeout'));
+      }, timeoutMs);
+
+      const finishOnce = (handler: () => void) => () => {
+        clearTimeout(timeoutId);
+        handler();
+      };
+
+      video.addEventListener('loadedmetadata', finishOnce(onReady), { once: true });
+      video.addEventListener('canplay', finishOnce(onReady), { once: true });
+      video.addEventListener('error', finishOnce(onError), { once: true });
+      video.src = url;
+      try {
+        video.load();
+      } catch (err) {
+        finishOnce(onError)();
+      }
+
+      this.audioPreloadVideo = video;
+    });
   }
 
   async searchAndPlayTorrent() {
@@ -1524,28 +1611,49 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
-  onAudioTrackChange(event: Event) {
-    const value = (event.target as HTMLSelectElement).value;
-    if (value === 'auto') {
-      this.selectedAudioTrack.set('auto');
-    } else {
-      const parsed = Number(value);
-      if (!Number.isFinite(parsed)) return;
-      this.selectedAudioTrack.set(parsed);
+  async onAudioTrackChange(eventOrTrack: Event | 'auto' | number) {
+    const value =
+      typeof eventOrTrack === 'string' || typeof eventOrTrack === 'number'
+        ? String(eventOrTrack)
+        : (eventOrTrack.target as HTMLSelectElement).value;
+    const nextSelection = value === 'auto' ? 'auto' : Number(value);
+    if (nextSelection !== 'auto' && !Number.isFinite(nextSelection)) return;
+
+    if (nextSelection === this.selectedAudioTrack()) {
+      if (this.audioSwitching()) this.cancelAudioSwitch();
+      return;
     }
 
     const v = this.videoPlayer?.nativeElement;
-    if (v) {
-      this.pendingSeekTime = v.currentTime || 0;
-      this.pendingWasPlaying = !v.paused;
+    if (!v) {
+      this.selectedAudioTrack.set(nextSelection);
+      return;
     }
 
-    this.loading.set(true);
-    this.loadingPhase.set('streaming');
-    this.resetTranscodeTracking();
-    this.pushLoadingLog('Preparando audio seleccionado...');
+    const nextUrl = this.buildStreamUrl(nextSelection, true);
 
-    const nextUrl = this.buildStreamUrl(this.selectedAudioTrack(), true);
+    this.cancelAudioSwitch();
+    const token = ++this.audioSwitchToken;
+    this.audioSwitching.set(true);
+    this.audioSwitchTrack.set(nextSelection);
+    this.audioSwitchMessage.set('Descargando audio...');
+    this.audioSwitchPreviousSrc = this.videoSrc();
+    this.audioSwitchPreviousSelection = this.selectedAudioTrack();
+    this.audioSwitchTargetSrc = nextUrl;
+
+    try {
+      await this.preloadAudioStream(nextUrl, token);
+    } catch (err) {
+      if (this.audioSwitchToken !== token) return;
+      this.cancelAudioSwitch();
+      return;
+    }
+
+    if (this.audioSwitchToken !== token) return;
+
+    this.pendingSeekTime = v.currentTime || 0;
+    this.pendingWasPlaying = !v.paused;
+    this.selectedAudioTrack.set(nextSelection);
     this.videoSrc.set(nextUrl);
   }
 
@@ -1555,6 +1663,14 @@ export class PlayerComponent implements OnDestroy {
 
     this.loading.set(false);
     this.loadingPhase.set('idle');
+
+    if (this.audioSwitching() && this.videoSrc() === this.audioSwitchTargetSrc) {
+      this.audioSwitching.set(false);
+      this.audioSwitchTrack.set(null);
+      this.audioSwitchMessage.set('');
+      this.audioSwitchTargetSrc = '';
+      this.audioSwitchPreviousSrc = '';
+    }
     
     if (this.pendingSeekTime === null) return;
 
@@ -1578,6 +1694,17 @@ export class PlayerComponent implements OnDestroy {
   }
 
   onVideoError() {
+    if (this.audioSwitching() && this.videoSrc() === this.audioSwitchTargetSrc) {
+      const previousSrc = this.audioSwitchPreviousSrc;
+      const previousSelection = this.audioSwitchPreviousSelection;
+      this.cancelAudioSwitch();
+      if (previousSrc) {
+        this.selectedAudioTrack.set(previousSelection);
+        this.videoSrc.set(previousSrc);
+        return;
+      }
+    }
+
     this.loading.set(false);
     this.loadingPhase.set('idle');
     if (!this.errorMessage()) {
@@ -2528,10 +2655,7 @@ export class PlayerComponent implements OnDestroy {
   }
 
   selectAudioTrack(track: 'auto' | number) {
-    this.selectedAudioTrack.set(track);
-    // Trigger audio track change
-    const event = { target: { value: track.toString() } } as unknown as Event;
-    this.onAudioTrackChange(event);
+    void this.onAudioTrackChange(track);
   }
 
   selectSubtitleTrack(index: number) {
