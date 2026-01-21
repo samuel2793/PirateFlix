@@ -166,6 +166,11 @@ export class PlayerComponent implements OnDestroy {
   showSettings = signal<boolean>(false);
   settingsTab = signal<'audio' | 'subtitles' | 'appearance'>('audio');
   selectedSubtitleTrack = signal<number>(-1);
+  
+  // UI Controls visibility
+  showControls = signal<boolean>(true);
+  private controlsHideTimer: any = null;
+  private readonly CONTROLS_HIDE_DELAY = 3000; // 3 seconds
   openSubtitlesResults = signal<OpenSubtitleResult[]>([]);
   openSubtitlesLoading = signal<boolean>(false);
   openSubtitlesError = signal<string>('');
@@ -1484,6 +1489,9 @@ export class PlayerComponent implements OnDestroy {
     // Apply subtitle styles
     this.applySubtitleStyles();
     
+    // Iniciar temporizador para ocultar controles
+    this.resetControlsHideTimer();
+    
     if (this.pendingSeekTime === null) return;
 
     const v = this.videoPlayer?.nativeElement;
@@ -2263,14 +2271,23 @@ export class PlayerComponent implements OnDestroy {
   }
 
   toggleSettings() {
-    this.showSettings.set(!this.showSettings());
-    // Auto-select appropriate tab
-    if (this.showSettings()) {
+    const newValue = !this.showSettings();
+    this.showSettings.set(newValue);
+    
+    if (newValue) {
+      // Si se abre settings, mostrar controles y cancelar ocultamiento
+      this.showControls.set(true);
+      this.clearControlsHideTimer();
+      
+      // Auto-select appropriate tab
       if (this.audioTracks().length > 1) {
         this.settingsTab.set('audio');
       } else if (this.subtitleTracks().length > 0 || this.canSearchOpenSubtitles()) {
         this.settingsTab.set('subtitles');
       }
+    } else {
+      // Si se cierra settings, reiniciar el temporizador
+      this.resetControlsHideTimer();
     }
   }
 
@@ -2340,12 +2357,48 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
+  // Mostrar controles y reiniciar el temporizador de ocultamiento
+  onUserActivity() {
+    this.showControls.set(true);
+    this.resetControlsHideTimer();
+  }
+
+  // Reiniciar el temporizador para ocultar controles
+  private resetControlsHideTimer() {
+    if (this.controlsHideTimer) {
+      clearTimeout(this.controlsHideTimer);
+    }
+    
+    // No ocultar si el panel de settings está abierto
+    if (this.showSettings()) {
+      return;
+    }
+    
+    this.controlsHideTimer = setTimeout(() => {
+      // Solo ocultar si no hay errores y el video está cargado
+      if (!this.errorMessage() && this.videoSrc() && !this.showSettings()) {
+        this.showControls.set(false);
+      }
+    }, this.CONTROLS_HIDE_DELAY);
+  }
+
+  // Limpiar el temporizador de controles
+  private clearControlsHideTimer() {
+    if (this.controlsHideTimer) {
+      clearTimeout(this.controlsHideTimer);
+      this.controlsHideTimer = null;
+    }
+  }
+
   ngOnDestroy() {
     // Limpiar interval de progreso
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
       this.progressInterval = null;
     }
+
+    // Limpiar temporizador de controles
+    this.clearControlsHideTimer();
 
     // Limpiar estilos de subtítulos
     this.cleanupSubtitleStyles();

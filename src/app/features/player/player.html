@@ -1,4 +1,4 @@
-<div class="player-page">
+<div class="player-page" (mousemove)="onUserActivity()" (click)="onUserActivity()" (keydown)="onUserActivity()" [class.hide-cursor]="!showControls()">
   @if (showPlayer()) {
     @if (loading()) {
       <div class="loading-overlay">
@@ -58,7 +58,7 @@
     }
   }
 
-  <div class="hud">
+  <div class="hud" [class.hidden]="!showControls()">
     <a routerLink="/" class="btn">← <span class="translate-text">{{ 'Home' | t }}</span></a>
     <a [routerLink]="['/details', type(), id()]" class="btn"><span class="translate-text">{{ 'Details' | t }}</span></a>
     <button class="btn settings-btn" (click)="toggleSettings()" [title]="'Settings' | t">

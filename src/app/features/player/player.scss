@@ -3,6 +3,10 @@
   inset: 0;
   background: #000;
   animation: playerEnter 0.4s ease-out;
+  
+  &.hide-cursor {
+    cursor: none;
+  }
 }
 
 // Color principal (naranja)
@@ -31,6 +35,15 @@ $accent-primary: #e5a00d;
   gap: 8px;
   align-items: center;
   z-index: 10;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  
+  &.hidden {
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+  }
 }
 
 .btn {
