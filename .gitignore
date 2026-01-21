@@ -39,6 +39,7 @@ package-lock.json
 testem.log
 /typings
 __screenshots__/
+/server/storage/
 
 # System files
 .DS_Store

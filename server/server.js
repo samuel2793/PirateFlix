@@ -618,8 +618,11 @@ const activeTorrents = new Map();
 const embeddedSubtitlesCache = new Map();
 const embeddedAudioTracksCache = new Map();
 
+const STORAGE_ROOT = process.env.PIRATEFLIX_STORAGE_DIR || path.join(process.cwd(), 'storage');
+const TORRENT_DIR = process.env.PIRATEFLIX_TORRENT_DIR || path.join(STORAGE_ROOT, 'webtorrent');
+const CACHE_DIR =
+  process.env.PIRATEFLIX_TRANSCODE_DIR || path.join(STORAGE_ROOT, 'transcoded');
 const transcodedCache = new Map();
-const CACHE_DIR = path.join(os.tmpdir(), 'pirateflix-transcoded');
 
 const activeFFmpegProcesses = new Map();
 const transcodeJobs = new Map();
@@ -627,6 +630,16 @@ const transcodeStatusByKey = new Map();
 
 const MP4_LIKE_EXT_RE = /\.(mp4|mov|m4v)$/i;
 const INCOMPATIBLE_VIDEO_HINT_RE = /\b(hevc|x265|h265|av1)\b/i;
+const H264_HINT_RE = /\b(x264|h\.?264|avc)\b/i;
+const INCOMPATIBLE_AUDIO_HINT_RE =
+  /\b(atmos|truehd|ddp|dd\+|eac3|ac-?3|dts|dd5\.?1|dd5\+1|dd\s*5\.?1|dolby)\b/i;
+const COMPATIBLE_AUDIO_HINT_RE = /\b(aac|mp3)\b/i;
+const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.stealth.si:80/announce',
+];
 
 // --- NUEVO: tracking de streams activos por torrent ---
 // Esto evita destruir torrents mientras el navegador todavía hace Range requests,
@@ -666,6 +679,19 @@ function clearEmbeddedCacheForInfoHash(infoHash) {
   for (const k of Array.from(embeddedAudioTracksCache.keys())) {
     if (String(k).startsWith(`${infoHash}-`)) embeddedAudioTracksCache.delete(k);
   }
+}
+
+function selectOnlyFile(torrent, fileIndex) {
+  if (!torrent || !Array.isArray(torrent.files)) return;
+  torrent.files.forEach((f, idx) => {
+    try {
+      if (idx === fileIndex) {
+        f.select();
+      } else {
+        f.deselect();
+      }
+    } catch (_) {}
+  });
 }
 
 function destroyTorrentNow(infoHash) {
@@ -734,11 +760,14 @@ function attachStreamLifecycle(infoHash, res) {
   res.on('finish', release);
 }
 
-// Crear directorio de cache si no existe
-if (!fs.existsSync(CACHE_DIR)) {
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-  console.log('📁 Directorio de cache creado:', CACHE_DIR);
-}
+const ensureDir = (dirPath, label) => {
+  if (fs.existsSync(dirPath)) return;
+  fs.mkdirSync(dirPath, { recursive: true });
+  console.log(`📁 Directorio ${label} creado:`, dirPath);
+};
+
+ensureDir(TORRENT_DIR, 'de torrents');
+ensureDir(CACHE_DIR, 'de transcodificacion');
 
 // Helper: esperar hasta que el archivo exista en disco y tenga al menos `minBytes` bytes
 async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15000) {
@@ -821,6 +850,18 @@ function isMp4LikeName(name) {
 
 function hasIncompatibleVideoHint(name) {
   return INCOMPATIBLE_VIDEO_HINT_RE.test(String(name || '').toLowerCase());
+}
+
+function hasH264Hint(name) {
+  return H264_HINT_RE.test(String(name || '').toLowerCase());
+}
+
+function hasIncompatibleAudioHint(name) {
+  return INCOMPATIBLE_AUDIO_HINT_RE.test(String(name || '').toLowerCase());
+}
+
+function hasCompatibleAudioHint(name) {
+  return COMPATIBLE_AUDIO_HINT_RE.test(String(name || '').toLowerCase());
 }
 
 function getTranscodeKey(infoHash, fileIndex, audioStreamIndex) {
@@ -919,6 +960,9 @@ async function determineTranscodeMode(file, filePath, audioStreamIndex) {
   const name = String(file?.name || '').toLowerCase();
   const isMp4Like = isMp4LikeName(name);
   const hasIncompatibleVideo = hasIncompatibleVideoHint(name);
+  const hasH264Video = hasH264Hint(name);
+  const hasIncompatibleAudio = hasIncompatibleAudioHint(name);
+  const hasCompatibleAudio = hasCompatibleAudioHint(name);
   let faststart = false;
 
   if (isMp4Like && !hasIncompatibleVideo) {
@@ -931,7 +975,7 @@ async function determineTranscodeMode(file, filePath, audioStreamIndex) {
 
   if (Number.isFinite(audioStreamIndex)) {
     return {
-      mode: isMp4Like && !hasIncompatibleVideo ? 'audio' : 'full',
+      mode: isMp4Like && !hasIncompatibleVideo ? 'audio' : hasH264Video ? 'audio' : 'full',
       isMp4Like,
       hasIncompatibleVideo,
       faststart,
@@ -939,7 +983,19 @@ async function determineTranscodeMode(file, filePath, audioStreamIndex) {
   }
 
   if (!isMp4Like || hasIncompatibleVideo) {
+    if (!hasIncompatibleVideo && hasH264Video) {
+      return {
+        mode: hasCompatibleAudio && !hasIncompatibleAudio ? 'remux' : 'audio',
+        isMp4Like,
+        hasIncompatibleVideo,
+        faststart,
+      };
+    }
     return { mode: 'full', isMp4Like, hasIncompatibleVideo, faststart };
+  }
+
+  if (hasIncompatibleAudio) {
+    return { mode: 'audio', isMp4Like, hasIncompatibleVideo, faststart };
   }
 
   if (!faststart) {
@@ -1170,6 +1226,187 @@ async function ensureTranscodedFile({
   return jobPromise;
 }
 
+async function streamTranscodedFile({
+  cacheKey,
+  infoHash,
+  fileIndex,
+  file,
+  filePath,
+  mode,
+  audioStreamIndex,
+  res,
+}) {
+  const existing = activeFFmpegProcesses.get(cacheKey);
+  if (existing) {
+    try {
+      existing.kill('SIGKILL');
+    } catch (_) {}
+    activeFFmpegProcesses.delete(cacheKey);
+  }
+
+  upsertTranscodeStatus(cacheKey, {
+    status: 'running',
+    mode,
+    infoHash,
+    fileIndex,
+    audioStreamIndex: Number.isFinite(audioStreamIndex) ? audioStreamIndex : null,
+    startedAt: Date.now(),
+    percent: null,
+  });
+
+  const useTorrentStream = Number(file?.downloaded || 0) < Number(file?.length || 0);
+  let inputStream = null;
+  if (useTorrentStream) {
+    inputStream = file.createReadStream();
+  } else {
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de streaming:', err.message);
+    }
+  }
+
+  const inputSource = useTorrentStream ? inputStream : filePath;
+
+  const mapOptions = [];
+  if (Number.isFinite(audioStreamIndex)) {
+    mapOptions.push('-map', '0:v:0', '-map', `0:${audioStreamIndex}?`);
+  }
+
+  const outputOptions = [
+    ...mapOptions,
+    '-movflags +frag_keyframe+empty_moov+default_base_moof',
+    '-max_muxing_queue_size 1024',
+  ];
+
+  let closed = false;
+  let finished = false;
+  let ffmpegCommand = null;
+
+  const cleanup = () => {
+    if (inputStream) {
+      try {
+        inputStream.destroy();
+      } catch (_) {}
+    }
+    activeFFmpegProcesses.delete(cacheKey);
+    if (infoHash) {
+      maybeDestroyPending(infoHash);
+    }
+  };
+
+  res.on('close', () => {
+    closed = true;
+    try {
+      if (ffmpegCommand) ffmpegCommand.kill('SIGKILL');
+    } catch (_) {}
+    if (!finished) {
+      cleanup();
+      clearTranscodeStatus(cacheKey, {
+        status: 'aborted',
+        error: 'client-disconnected',
+      });
+    }
+  });
+
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Cache-Control': 'no-store',
+    'Accept-Ranges': 'none',
+  });
+
+  ffmpegCommand = ffmpeg(inputSource)
+    .format('mp4')
+    .outputOptions(outputOptions)
+    .on('start', () => {
+      console.log('🔄 FFmpeg streaming MP4:', cacheKey, `(mode=${mode})`);
+      upsertTranscodeStatus(cacheKey, { status: 'running' });
+    })
+    .on('progress', (progress) => {
+      const current = transcodeStatusByKey.get(cacheKey) || {};
+      const rawPercent = Number(progress?.percent);
+      let percent = Number.isFinite(rawPercent) ? rawPercent : null;
+      if (percent === null) {
+        const durationSec = Number(current?.durationSec);
+        const markSec = timemarkToSeconds(progress?.timemark);
+        if (
+          Number.isFinite(durationSec) &&
+          Number.isFinite(markSec) &&
+          durationSec > 0
+        ) {
+          percent = (markSec / durationSec) * 100;
+        }
+      }
+
+      const next = upsertTranscodeStatus(cacheKey, {
+        status: 'running',
+        percent: percent !== null ? Math.max(0, Math.min(100, percent)) : null,
+        timemark: progress?.timemark || '',
+        outputBytes: Number.isFinite(progress?.targetSize)
+          ? Math.max(0, Math.round(progress.targetSize * 1024))
+          : null,
+      });
+
+      const percentInt =
+        Number.isFinite(next.percent) && next.percent !== null
+          ? Math.floor(next.percent)
+          : null;
+      const lastLoggedPercent = Number(next?.lastLoggedPercent) || 0;
+      const lastLoggedAt = Number(next?.lastLoggedAt) || 0;
+      const now = Date.now();
+
+      if (percentInt !== null) {
+        const bucket = Math.floor(percentInt / 5) * 5;
+        if (bucket >= lastLoggedPercent + 5) {
+          console.log(`⏳ Transcodificando ${cacheKey}: ${bucket}%`);
+          upsertTranscodeStatus(cacheKey, { lastLoggedPercent: bucket });
+        }
+      } else if (now - lastLoggedAt > 30000) {
+        const mark = next.timemark ? ` (${next.timemark})` : '';
+        console.log(`⏳ Transcodificando ${cacheKey}: en progreso${mark}`);
+        upsertTranscodeStatus(cacheKey, { lastLoggedAt: now });
+      }
+    })
+    .on('error', (err) => {
+      if (closed) return;
+      if (!String(err.message || '').includes('SIGKILL')) {
+        console.error('❌ Error FFmpeg (stream):', err.message);
+      }
+      finished = true;
+      cleanup();
+      clearTranscodeStatus(cacheKey, { status: 'error', error: err.message || 'ffmpeg-error' });
+      if (!res.headersSent) {
+        res.status(500).send('Error al preparar video');
+      }
+    })
+    .on('end', () => {
+      finished = true;
+      cleanup();
+      upsertTranscodeStatus(cacheKey, { status: 'ready', percent: 100, completedAt: Date.now() });
+    });
+
+  if (mode === 'full') {
+    ffmpegCommand
+      .videoCodec('libx264')
+      .videoBitrate('2500k')
+      .audioCodec('aac')
+      .audioBitrate('192k')
+      .audioChannels(2)
+      .outputOptions(['-preset ultrafast', '-tune zerolatency']);
+  } else if (mode === 'audio') {
+    ffmpegCommand
+      .videoCodec('copy')
+      .audioCodec('aac')
+      .audioBitrate('192k')
+      .audioChannels(2);
+  } else if (mode === 'remux') {
+    ffmpegCommand.videoCodec('copy').audioCodec('copy');
+  }
+
+  activeFFmpegProcesses.set(cacheKey, ffmpegCommand);
+  ffmpegCommand.pipe(res, { end: true });
+}
+
 // Warmup: hacer peticiones HEAD/GET rápidas a mirrors
 async function warmupMirrors(timeoutPer = 3000) {
   try {
@@ -1213,6 +1450,28 @@ async function warmupMirrors(timeoutPer = 3000) {
 app.get('/api/search-torrent', async (req, res) => {
   const { query, category = '207' } = req.query; // 207 = HD Movies
   if (!query) return res.status(400).json({ error: 'query es requerido' });
+
+  const decodeHtmlEntities = (value) =>
+    String(value)
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+
+  const normalizeHtmlForScan = (value) => decodeHtmlEntities(value).toLowerCase();
+
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.9',
+    Referer: 'https://www.google.com/',
+  };
 
   const perMirrorTimeoutMs = parseInt(process.env.PIRATEFLIX_MIRROR_TIMEOUT_MS || '20000', 10);
   const stage2TimeoutMs = Math.max(
@@ -1295,13 +1554,32 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     async function fetchSearchHtml(cleanQuery, category, parentSignal) {
-      const headers = {
-        'User-Agent':
-          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-        Accept:
-          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'es-ES,es;q=0.9',
-        Referer: 'https://www.google.com/',
+      const looksLikeBlockedHtml = (html) => {
+        const lower = normalizeHtmlForScan(html);
+        return (
+          lower.includes('ddos-guard') ||
+          lower.includes('cloudflare') ||
+          lower.includes('checking your browser') ||
+          lower.includes('attention required') ||
+          lower.includes('access denied') ||
+          lower.includes('enable javascript') ||
+          lower.includes('captcha') ||
+          lower.includes('sucuri') ||
+          lower.includes('just a moment')
+        );
+      };
+
+      const looksLikeSearchHtml = (html) => {
+        const lower = normalizeHtmlForScan(html);
+        return (
+          lower.includes('magnet:?xt=urn:btih:') ||
+          lower.includes('searchresult') ||
+          lower.includes('detlink') ||
+          lower.includes('detname') ||
+          lower.includes('no hits') ||
+          lower.includes('no results') ||
+          lower.includes('nothing found')
+        );
       };
 
       const cacheKey = `${cleanQuery}::${category}`;
@@ -1311,7 +1589,8 @@ app.get('/api/search-torrent', async (req, res) => {
       const cached = searchCache.get(cacheKey);
       if (cached && Date.now() - cached.ts < cacheTtl) {
         console.log('✅ Sirviendo búsqueda desde cache:', cacheKey);
-        return cached.html;
+        if (typeof cached === 'string') return { html: cached, base: null };
+        return { html: cached.html, base: cached.base || null };
       }
 
       const perMirrorTimeout = perMirrorTimeoutMs;
@@ -1478,6 +1757,14 @@ app.get('/api/search-torrent', async (req, res) => {
           })
           .then((resp) => {
             if (resp && resp.data && resp.data.length > 0) {
+              if (!looksLikeSearchHtml(resp.data)) {
+                const blocked = looksLikeBlockedHtml(resp.data);
+                console.warn(
+                  `HTML inesperado desde ${base} (${blocked ? 'bloqueado' : 'no-search'})`
+                );
+                throw new Error(`Invalid search HTML from ${base}`);
+              }
+
               console.log(`HTML recibido desde ${base}: ${resp.data.length} bytes`);
               mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
               try {
@@ -1542,7 +1829,7 @@ app.get('/api/search-torrent', async (req, res) => {
           console.log(`Stage1: probando top ${topList.length} mirrors en paralelo`);
           const requests = topList.map((m) => makeRequestFor(m, perMirrorTimeout));
           const winner = await Promise.any(requests);
-          result = winner.html;
+          result = winner;
         } catch (stage1Err) {
           if (
             (overallSignal && overallSignal.aborted) ||
@@ -1590,7 +1877,7 @@ app.get('/api/search-torrent', async (req, res) => {
               } catch (e) {}
             }
 
-            result = winner2.html;
+            result = winner2;
           } catch (stage2Err) {
             if (
               (overallSignal && overallSignal.aborted) ||
@@ -1622,7 +1909,7 @@ app.get('/api/search-torrent', async (req, res) => {
               const ytsHtml = await tryYtsFallback(cleanQuery);
               if (ytsHtml) {
                 console.log('✅ Fallback externo (YTS) exitoso — usando resultados rápidos');
-                result = ytsHtml;
+                result = { html: ytsHtml, base: null };
               }
             } catch (e) {
               console.warn('Error en fallback externo rápido:', e && e.message ? e.message : e);
@@ -1658,12 +1945,19 @@ app.get('/api/search-torrent', async (req, res) => {
                 }
 
                 if (resp && resp.data && resp.data.length > 0) {
-                  console.log(
-                    `HTML recibido (secuencial) desde ${base}: ${resp.data.length} bytes`
-                  );
-                  mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
-                  result = resp.data;
-                  break;
+                  if (!looksLikeSearchHtml(resp.data)) {
+                    const blocked = looksLikeBlockedHtml(resp.data);
+                    console.warn(
+                      `HTML inesperado (secuencial) desde ${base} (${blocked ? 'bloqueado' : 'no-search'})`
+                    );
+                  } else {
+                    console.log(
+                      `HTML recibido (secuencial) desde ${base}: ${resp.data.length} bytes`
+                    );
+                    mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
+                    result = { base, html: resp.data };
+                    break;
+                  }
                 }
               } catch (err) {
                 if (controller) {
@@ -1714,13 +2008,20 @@ app.get('/api/search-torrent', async (req, res) => {
 
       if (!result) throw new Error('All mirrors failed');
 
-      searchCache.set(cacheKey, { html: result, ts: Date.now() });
+      if (typeof result === 'string') {
+        result = { html: result, base: null };
+      }
+
+      searchCache.set(cacheKey, { html: result.html, base: result.base || null, ts: Date.now() });
       return result;
     }
 
     let html = null;
+    let htmlBase = null;
     try {
-      html = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
+      const searchResult = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
+      html = searchResult?.html || searchResult;
+      htmlBase = searchResult?.base || null;
       console.log(`Busqueda finalizada en ${Date.now() - searchStart} ms`);
     } catch (initialErr) {
       if (isAbortLikeError(initialErr) || requestAbortSignal.aborted) throw initialErr;
@@ -1753,7 +2054,9 @@ app.get('/api/search-torrent', async (req, res) => {
       for (const fq of fallbacks) {
         try {
           console.log(`Intentando fallback: '${fq}'`);
-          html = await fetchSearchHtml(fq, category, requestAbortSignal);
+          const searchResult = await fetchSearchHtml(fq, category, requestAbortSignal);
+          html = searchResult?.html || searchResult;
+          htmlBase = searchResult?.base || null;
           console.log(`Fallback exitoso con query: '${fq}'`);
           break;
         } catch (fbErr) {
@@ -1769,14 +2072,6 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     const torrents = [];
-
-    const decodeHtmlEntities = (value) =>
-      String(value)
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>');
 
     const extractPeersFromRow = (rowHtml) => {
       const numbersFrom = (regex) => {
@@ -1807,9 +2102,122 @@ app.get('/api/search-torrent', async (req, res) => {
       const detLinkMatch = rowHtml.match(/class="detLink"[^>]*>([^<]+)</i);
       if (detLinkMatch) return decodeHtmlEntities(detLinkMatch[1]).trim();
 
+      const detNameMatch = rowHtml.match(/class="detName"[^>]*>([^<]+)</i);
+      if (detNameMatch) return decodeHtmlEntities(detNameMatch[1]).trim();
+
+      const titleMatch = rowHtml.match(/title=["']Details\s+for\s+([^"']+)["']/i);
+      if (titleMatch) return decodeHtmlEntities(titleMatch[1]).trim();
+
       return 'Unknown';
     };
 
+    const buildMagnetFromHash = (hash, name) => {
+      const safeHash = String(hash || '').trim();
+      if (!safeHash) return null;
+      const dn = name && name !== 'Unknown' ? `&dn=${encodeURIComponent(name)}` : '';
+      const trackers = DEFAULT_TRACKERS.map((t) => `&tr=${encodeURIComponent(t)}`).join('');
+      return `magnet:?xt=urn:btih:${safeHash}${dn}${trackers}`;
+    };
+
+    const extractInfoHash = (value) => {
+      const scan = normalizeHtmlForScan(value);
+      const patterns = [
+        /data-infohash=['"]?([a-f0-9]{40}|[a-z2-7]{32})/i,
+        /infohash[^a-z0-9]{0,10}([a-f0-9]{40}|[a-z2-7]{32})/i,
+        /info_hash[^a-z0-9]{0,10}([a-f0-9]{40}|[a-z2-7]{32})/i,
+        /btih[:=]([a-f0-9]{40}|[a-z2-7]{32})/i,
+      ];
+      for (const pattern of patterns) {
+        const match = scan.match(pattern);
+        if (match && match[1]) return match[1];
+      }
+      return null;
+    };
+
+    const extractDetailUrls = (value, base) => {
+      if (!base) return [];
+      const urls = [];
+      const seen = new Set();
+      const addUrl = (href) => {
+        if (!href) return;
+        if (href.startsWith('magnet:')) return;
+        let resolved = href;
+        if (href.startsWith('//')) {
+          resolved = `https:${href}`;
+        } else if (href.startsWith('/')) {
+          resolved = `${base}${href}`;
+        } else if (!/^https?:\/\//i.test(href)) {
+          resolved = `${base}/${href.replace(/^\.?\//, '')}`;
+        }
+        if (!seen.has(resolved)) {
+          seen.add(resolved);
+          urls.push(resolved);
+        }
+      };
+
+      const patterns = [
+        /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*detLink[^'"]*['"]/gi,
+        /<a[^>]+href=['"]([^'"]*\/torrent\/[^'"]+)['"][^>]*>/gi,
+        /<a[^>]+href=['"]([^'"]*\/desc\/[^'"]+)['"][^>]*>/gi,
+      ];
+      for (const pattern of patterns) {
+        let match;
+        while ((match = pattern.exec(value)) !== null) {
+          addUrl(match[1]);
+        }
+      }
+      return urls;
+    };
+
+    const fetchMagnetsFromDetails = async (urls) => {
+      const results = [];
+      const seen = new Set();
+      const limit = Math.min(urls.length, 5);
+      for (let i = 0; i < limit; i++) {
+        if (requestAbortSignal && requestAbortSignal.aborted) break;
+        const url = urls[i];
+        try {
+          const resp = await axios.get(url, {
+            headers,
+            timeout: Math.min(15000, perMirrorTimeoutMs),
+            maxRedirects: 5,
+            responseType: 'text',
+            httpsAgent: httpsAgentShared,
+            httpAgent,
+            signal: requestAbortSignal,
+          });
+          if (!resp?.data) continue;
+          const detailHtml = decodeHtmlEntities(resp.data);
+          const magnetMatch = detailHtml.match(/magnet:\?xt=urn:btih:[^'"\s<>]+/i);
+          let magnetLink = magnetMatch ? magnetMatch[0] : null;
+          if (!magnetLink) {
+            const hash = extractInfoHash(detailHtml);
+            if (hash) {
+              const titleMatch = detailHtml.match(/<title[^>]*>([^<]+)<\/title>/i);
+              const title = titleMatch ? decodeHtmlEntities(titleMatch[1]).trim() : 'Unknown';
+              magnetLink = buildMagnetFromHash(hash, title);
+            }
+          }
+          if (!magnetLink || seen.has(magnetLink)) continue;
+          seen.add(magnetLink);
+          const name = extractName(magnetLink, detailHtml);
+          results.push({
+            name,
+            magnetLink,
+            size: 'Unknown',
+            seeders: 0,
+            leechers: 0,
+            score: 0,
+          });
+        } catch (err) {
+          const msg = err && err.message ? err.message : err;
+          console.warn('Detalle falló para magnet:', url, msg);
+        }
+      }
+      return results;
+    };
+
+    const seenMagnets = new Set();
     const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     let rowMatch;
 
@@ -1817,14 +2225,23 @@ app.get('/api/search-torrent', async (req, res) => {
       if (torrents.length >= 10) break;
 
       const rowHtml = rowMatch[0];
-      const magnetMatch = rowHtml.match(/href=['"](magnet:\?xt=urn:btih:[^'"]+)['"]/i);
-      if (!magnetMatch) continue;
+      const decodedRow = decodeHtmlEntities(rowHtml);
+      const magnetMatch = decodedRow.match(/magnet:\?xt=urn:btih:[^'"\s<>]+/i);
+      let magnetLink = magnetMatch ? magnetMatch[0] : null;
+      if (!magnetLink) {
+        const hash = extractInfoHash(decodedRow);
+        if (hash) {
+          const name = extractName('', decodedRow);
+          magnetLink = buildMagnetFromHash(hash, name);
+        }
+      }
+      if (!magnetLink || seenMagnets.has(magnetLink)) continue;
+      seenMagnets.add(magnetLink);
 
-      const magnetLink = decodeHtmlEntities(magnetMatch[1]);
-      const name = extractName(magnetLink, rowHtml);
-      const sizeMatch = rowHtml.match(/Size\s+([^,<]+)\s*,/i);
+      const name = extractName(magnetLink, decodedRow);
+      const sizeMatch = decodedRow.match(/Size\s+([^,<]+)\s*,/i);
       const size = sizeMatch ? sizeMatch[1].trim() : 'Unknown';
-      const { seeders, leechers } = extractPeersFromRow(rowHtml);
+      const { seeders, leechers } = extractPeersFromRow(decodedRow);
 
       torrents.push({
         name,
@@ -1837,20 +2254,23 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     if (torrents.length === 0) {
-      const magnetRegex = /<a href=['"](magnet:\?xt=urn:btih:[^'"]+)['"]/g;
+      const normalizedHtml = decodeHtmlEntities(html);
+      const magnetRegex = /magnet:\?xt=urn:btih:[^'"\s<>]+/gi;
       const magnets = [];
       let magnetMatch;
 
-      while ((magnetMatch = magnetRegex.exec(html)) !== null) {
-        magnets.push(decodeHtmlEntities(magnetMatch[1]));
+      while ((magnetMatch = magnetRegex.exec(normalizedHtml)) !== null) {
+        magnets.push(magnetMatch[0]);
       }
 
       console.log(`Magnet links encontrados (fallback): ${magnets.length}`);
 
       for (const magnetLink of magnets) {
         if (torrents.length >= 10) break;
+        if (seenMagnets.has(magnetLink)) continue;
+        seenMagnets.add(magnetLink);
 
-        const name = extractName(magnetLink, html);
+        const name = extractName(magnetLink, normalizedHtml);
 
         torrents.push({
           name,
@@ -1860,6 +2280,20 @@ app.get('/api/search-torrent', async (req, res) => {
           leechers: 0,
           score: 0,
         });
+      }
+    }
+
+    if (torrents.length === 0 && htmlBase) {
+      const detailUrls = extractDetailUrls(html, htmlBase);
+      if (detailUrls.length > 0) {
+        console.log(`Intentando detalles para ${detailUrls.length} resultados...`);
+        const detailTorrents = await fetchMagnetsFromDetails(detailUrls);
+        for (const torrent of detailTorrents) {
+          if (torrents.length >= 10) break;
+          if (seenMagnets.has(torrent.magnetLink)) continue;
+          seenMagnets.add(torrent.magnetLink);
+          torrents.push(torrent);
+        }
       }
     } else {
       console.log(`Magnet links encontrados: ${torrents.length}`);
@@ -2214,14 +2648,18 @@ app.post('/api/torrent/add', (req, res) => {
     });
   }
 
-  client.add(magnetUri, (torrent) => {
+  client.add(magnetUri, { path: TORRENT_DIR }, (torrent) => {
     console.log('Torrent agregado:', torrent.name);
     console.log('InfoHash:', torrent.infoHash);
     console.log('Archivos:', torrent.files.length);
 
     activeTorrents.set(torrent.infoHash, torrent);
 
-    torrent.files.forEach((file) => file.select());
+    torrent.files.forEach((file) => {
+      try {
+        file.deselect();
+      } catch (_) {}
+    });
 
     res.json({
       infoHash: torrent.infoHash,
@@ -2276,8 +2714,9 @@ app.get('/api/embedded-subtitles/:infoHash/:fileIndex', async (req, res) => {
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).json({ error: 'Torrent no encontrado' });
 
-  const file = torrent.files[parseInt(fileIndex)];
+  const file = torrent.files[parseInt(fileIndex, 10)];
   if (!file) return res.status(404).json({ error: 'Archivo no encontrado' });
+  selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   try {
     const filePath = path.join(torrent.path, file.path);
@@ -2336,8 +2775,9 @@ app.get('/api/audio-tracks/:infoHash/:fileIndex', async (req, res) => {
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).json({ error: 'Torrent no encontrado' });
 
-  const file = torrent.files[parseInt(fileIndex)];
+  const file = torrent.files[parseInt(fileIndex, 10)];
   if (!file) return res.status(404).json({ error: 'Archivo no encontrado' });
+  selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   try {
     const filePath = path.join(torrent.path, file.path);
@@ -2390,8 +2830,9 @@ app.get('/api/seekable/:infoHash/:fileIndex', async (req, res) => {
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).json({ seekable: false, error: 'Torrent no encontrado' });
 
-  const file = torrent.files[parseInt(fileIndex)];
+  const file = torrent.files[parseInt(fileIndex, 10)];
   if (!file) return res.status(404).json({ seekable: false, error: 'Archivo no encontrado' });
+  selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   const filePath = path.join(torrent.path, file.path);
 
@@ -2479,6 +2920,10 @@ app.get('/api/transcode-status/:infoHash/:fileIndex', (req, res) => {
 app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const { infoHash, fileIndex } = req.params;
   const audioStreamParam = req.query.audioStream;
+  const seekableParam = req.query.seekable;
+  const requireSeekable =
+    typeof seekableParam === 'string' &&
+    (seekableParam === '1' || seekableParam.toLowerCase() === 'true');
   const audioStreamIndex =
     typeof audioStreamParam === 'string' && audioStreamParam.trim() !== ''
       ? Number(audioStreamParam)
@@ -2487,8 +2932,9 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).send('Torrent no encontrado');
 
-  const file = torrent.files[parseInt(fileIndex)];
+  const file = torrent.files[parseInt(fileIndex, 10)];
   if (!file) return res.status(404).send('Archivo no encontrado');
+  selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   // NUEVO: contabilizar stream activo de este torrent
   attachStreamLifecycle(infoHash, res);
@@ -2509,13 +2955,42 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   );
 
   if (needsTranscode) {
+    if (
+      !requireSeekable &&
+      !forceTranscode &&
+      transcodeDecision.mode === 'remux' &&
+      transcodeDecision.isMp4Like
+    ) {
+      console.log('✅ Sirviendo MP4 sin faststart (no seekable requerido):', file.name);
+      return serveVideoFile(filePath, req, res, file);
+    }
+
     const cacheKey = getTranscodeKey(
       infoHash,
       fileIndex,
       forceTranscode ? audioStreamIndex : null
     );
+    const cachedPath = getTranscodedCachePath(cacheKey);
+    if (!requireSeekable && fs.existsSync(cachedPath)) {
+      console.log('✅ Sirviendo MP4 seekable en cache:', file.name);
+      return serveVideoFile(cachedPath, req, res);
+    }
     try {
-      const cachedPath = await ensureTranscodedFile({
+      if (!requireSeekable) {
+        await streamTranscodedFile({
+          cacheKey,
+          infoHash,
+          fileIndex,
+          file,
+          filePath,
+          mode: transcodeDecision.mode,
+          audioStreamIndex: forceTranscode ? audioStreamIndex : null,
+          res,
+        });
+        return;
+      }
+
+      const ensuredPath = await ensureTranscodedFile({
         cacheKey,
         infoHash,
         fileIndex,
@@ -2526,7 +3001,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
       });
       if (res.destroyed) return;
       console.log('✅ Sirviendo MP4 seekable:', file.name);
-      return serveVideoFile(cachedPath, req, res);
+      return serveVideoFile(ensuredPath, req, res);
     } catch (err) {
       console.error('Error preparando MP4 seekable:', err?.message || err);
       if (!res.headersSent) {
@@ -2623,8 +3098,9 @@ app.get('/api/embedded-subtitle/:infoHash/:fileIndex/:streamIndex', async (req, 
 
   if (!torrent) return res.status(404).send('Torrent no encontrado');
 
-  const file = torrent.files[parseInt(fileIndex)];
+  const file = torrent.files[parseInt(fileIndex, 10)];
   if (!file) return res.status(404).send('Archivo no encontrado');
+  selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   try {
     console.log(`Extrayendo subtítulo stream ${streamIndex} de:`, file.name);

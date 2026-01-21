@@ -80,6 +80,16 @@ Health check del servidor.
 - Soporta HTTP Range requests para permitir seeking en videos.
 - Los torrents permanecen activos hasta que se eliminen explícitamente o se cierre el servidor.
 
+## Almacenamiento
+
+Por defecto, las descargas y transcodificados se guardan en `server/storage/`.
+
+Puedes ajustar las rutas con variables de entorno:
+
+- `PIRATEFLIX_STORAGE_DIR`
+- `PIRATEFLIX_TORRENT_DIR`
+- `PIRATEFLIX_TRANSCODE_DIR`
+
 ## OpenSubtitles
 
 Configura estas variables de entorno para habilitar la descarga de subtítulos:

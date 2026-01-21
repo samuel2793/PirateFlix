@@ -262,6 +262,16 @@ export class PlayerComponent implements OnDestroy {
     this.loadingLogs.set(next);
   }
 
+  private loadPref(key: string, defaultValue = false): boolean {
+    try {
+      const value = localStorage.getItem(`pirateflix_${key}`);
+      if (value === null) return defaultValue;
+      return value === 'true';
+    } catch {
+      return defaultValue;
+    }
+  }
+
   async ngOnInit() {
     const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
     const idStr = this.route.snapshot.paramMap.get('id');
@@ -277,7 +287,11 @@ export class PlayerComponent implements OnDestroy {
     if (seasonStr) this.season.set(Number(seasonStr));
     if (episodeStr) this.episode.set(Number(episodeStr));
     this.preferMultiAudio.set(preferMultiAudioParam === '1' || preferMultiAudioParam === 'true');
-    this.preferSeekable.set(preferSeekableParam === '1' || preferSeekableParam === 'true');
+    if (preferSeekableParam === null) {
+      this.preferSeekable.set(this.loadPref('preferSeekable', true));
+    } else {
+      this.preferSeekable.set(preferSeekableParam === '1' || preferSeekableParam === 'true');
+    }
     this.preferSubtitles.set(preferSubtitlesParam === '1' || preferSubtitlesParam === 'true');
     this.forceYearInSearch.set(forceYearParam === '1' || forceYearParam === 'true');
 
@@ -1311,41 +1325,61 @@ export class PlayerComponent implements OnDestroy {
         };
       });
 
-      // Detectar subtítulos embebidos en el video
-      try {
-      const embeddedResponse = await fetch(
-        `${this.API_URL}/embedded-subtitles/${torrentInfo.infoHash}/${videoFile.index}`
-      );
-
-      if (embeddedResponse.ok) {
-        const embeddedSubs: EmbeddedSubtitle[] = await embeddedResponse.json();
-        if (!this.isSessionActive(sessionId)) return false;
-        console.log('Subtítulos embebidos encontrados:', embeddedSubs.length);
-
-          // Agregar subtítulos embebidos a la lista
-          embeddedSubs.forEach((sub) => {
-            const langName = this.getLanguageName(sub.language);
-            subtitles.push({
-              index: subtitles.length, // Usar índice secuencial único
-              name: sub.title || `Embedded ${langName}`,
-              language: langName,
-              url: `${this.API_URL}/embedded-subtitle/${torrentInfo.infoHash}/${videoFile.index}/${sub.index}`,
-              isEmbedded: true,
-              streamIndex: sub.index,
-              provider: 'embedded',
-            });
+      const mergeEmbeddedSubtitles = (
+        embeddedSubs: EmbeddedSubtitle[],
+        target: SubtitleTrack[]
+      ) => {
+        embeddedSubs.forEach((sub) => {
+          const langName = this.getLanguageName(sub.language);
+          target.push({
+            index: target.length, // Usar índice secuencial único
+            name: sub.title || `Embedded ${langName}`,
+            language: langName,
+            url: `${this.API_URL}/embedded-subtitle/${torrentInfo.infoHash}/${videoFile.index}/${sub.index}`,
+            isEmbedded: true,
+            streamIndex: sub.index,
+            provider: 'embedded',
           });
+        });
+      };
+
+      const fetchEmbeddedSubtitles = async (): Promise<EmbeddedSubtitle[]> => {
+        try {
+          const embeddedResponse = await fetch(
+            `${this.API_URL}/embedded-subtitles/${torrentInfo.infoHash}/${videoFile.index}`
+          );
+          if (!embeddedResponse.ok) return [];
+          const embeddedSubs: EmbeddedSubtitle[] = await embeddedResponse.json();
+          if (!this.isSessionActive(sessionId)) return [];
+          console.log('Subtítulos embebidos encontrados:', embeddedSubs.length);
+          return embeddedSubs;
+        } catch (error) {
+          console.error('Error al detectar subtítulos embebidos:', error);
+          return [];
         }
-      } catch (error) {
-        console.error('Error al detectar subtítulos embebidos:', error);
-      }
+      };
 
-      if (requireSubtitles && subtitles.length === 0) {
-        throw buildNoSubtitlesError();
+      if (requireSubtitles) {
+        const embeddedSubs = await fetchEmbeddedSubtitles();
+        if (!this.isSessionActive(sessionId)) return false;
+        mergeEmbeddedSubtitles(embeddedSubs, subtitles);
+        if (subtitles.length === 0) {
+          throw buildNoSubtitlesError();
+        }
+        this.subtitleTracks.set(subtitles);
+        this.pushLoadingLog(`Total de subtítulos disponibles: ${subtitles.length}`);
+      } else {
+        this.subtitleTracks.set(subtitles);
+        this.pushLoadingLog(`Total de subtítulos disponibles: ${subtitles.length}`);
+        void fetchEmbeddedSubtitles().then((embeddedSubs) => {
+          if (!this.isSessionActive(sessionId)) return;
+          if (embeddedSubs.length === 0) return;
+          const updated = this.subtitleTracks().slice();
+          mergeEmbeddedSubtitles(embeddedSubs, updated);
+          this.subtitleTracks.set(updated);
+          this.pushLoadingLog(`Subtítulos embebidos agregados: ${embeddedSubs.length}`);
+        });
       }
-
-      this.subtitleTracks.set(subtitles);
-      this.pushLoadingLog(`Total de subtítulos disponibles: ${subtitles.length}`);
 
       // Construir URL de streaming (con transcodificación si es necesario)
       const streamUrl = this.buildStreamUrl('auto');
@@ -1416,6 +1450,9 @@ export class PlayerComponent implements OnDestroy {
 
     if (selection !== 'auto') {
       params.set('audioStream', String(selection));
+    }
+    if (this.preferSeekable()) {
+      params.set('seekable', '1');
     }
     if (cacheBust) {
       params.set('t', String(Date.now()));
