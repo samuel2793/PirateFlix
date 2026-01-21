@@ -171,55 +171,33 @@
             (click)="selectEpisode(episode.episode_number)"
             [class.active]="selectedEpisode() === episode.episode_number"
             [attr.aria-pressed]="selectedEpisode() === episode.episode_number">
-            <!-- Thumbnail con badges y overlay -->
-            <div class="ep-thumb">
-              <img class="ep-thumb-img" [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
-              <div class="ep-thumb-overlay"></div>
-              
-              <!-- Badges sistema consistente -->
-              <div class="ep-badges">
-                <div class="ep-badges-left">
-                  <span class="ep-badge ep-badge-rating" *ngIf="episodeRatingLabel(episode) as rating">
-                    <mat-icon>star</mat-icon>
-                    {{ rating }}
-                  </span>
-                  <span class="ep-badge ep-badge-episode" *ngIf="episodeCode(episode)">{{ episodeCode(episode) }}</span>
-                </div>
-                <div class="ep-badges-right">
-                  <span class="ep-badge ep-badge-duration" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
-                </div>
-              </div>
-              
-              <!-- Play button - clickable -->
-              <button
-                type="button"
-                class="ep-play-btn"
-                (click)="playEpisode(episode, $event)"
-                [attr.aria-label]="('Play' | t) + ' ' + episodeTitle(episode)">
-                <mat-icon>play_arrow</mat-icon>
-              </button>
+            <div class="episode-thumb">
+              <img [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
+              <span class="episode-chip" *ngIf="episodeCode(episode)">{{ episodeCode(episode) }}</span>
+              <span class="episode-runtime" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
+              <span class="episode-rating" *ngIf="episodeRatingLabel(episode) as rating">
+                <mat-icon>star</mat-icon>
+                {{ rating }}
+              </span>
             </div>
             
-            <!-- Content premium -->
-            <div class="ep-content">
-              <h3 class="ep-title">{{ episodeTitle(episode) }}</h3>
-              <div class="ep-meta" *ngIf="episodeMeta(episode)">
-                <span>{{ episodeMeta(episode) }}</span>
-              </div>
-              <p class="ep-desc" *ngIf="episodeOverview(episode) as overview; else noEpisodeOverview">
+            <div class="episode-body">
+              <h3 class="episode-title">{{ episodeTitle(episode) }}</h3>
+              <div class="episode-meta" *ngIf="episodeMeta(episode)">{{ episodeMeta(episode) }}</div>
+              <p class="episode-overview" *ngIf="episodeOverview(episode) as overview; else noEpisodeOverview">
                 {{ overview }}
               </p>
               <ng-template #noEpisodeOverview>
-                <p class="ep-desc muted translate-text">{{ 'No description available.' | t }}</p>
+                <p class="episode-overview muted translate-text">{{ 'No description available.' | t }}</p>
               </ng-template>
             </div>
           </button>
         </div>
 
         <div class="episode-grid skeleton" *ngIf="seasonEpisodesLoading()">
-          <div class="episode-card" *ngFor="let item of [1, 2, 3]">
-            <div class="ep-thumb"></div>
-            <div class="ep-content">
+          <div class="episode-card skeleton" *ngFor="let item of [1, 2, 3]">
+            <div class="episode-thumb"></div>
+            <div class="episode-body">
               <div class="skeleton-line wide"></div>
               <div class="skeleton-line"></div>
               <div class="skeleton-line short"></div>
