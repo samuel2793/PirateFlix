@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterModule, ParamMap } from '@angular/router'
 import { AlertController } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { TmdbService } from '../../core/services/tmdb';
+import { CreditsDetectionService } from '../../core/services/credits-detection.service';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { firstValueFrom, Subject, combineLatest, takeUntil } from 'rxjs';
 
@@ -142,6 +143,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private readonly alertController = inject(AlertController);
   private readonly http = inject(HttpClient);
   private readonly tmdb = inject(TmdbService);
+  private readonly creditsDetection = inject(CreditsDetectionService);
 
   @ViewChild('videoPlayer', { static: false }) videoPlayer!: ElementRef<HTMLVideoElement>;
 
@@ -219,9 +221,11 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private readonly NEXT_EPISODE_TRIGGER_PERCENT = 0.97; // 97% of video = ~1.5 min before end for 50min episode
   private readonly NEXT_EPISODE_MIN_TRIGGER_SECONDS = 30; // At minimum, trigger 30 seconds before end
   private readonly NEXT_EPISODE_MAX_TRIGGER_SECONDS = 120; // At maximum, trigger 2 minutes before end
-  private nextEpisodePrefetched = false;
+  private nextEpisodePrefetchPromise: Promise<NextEpisodeInfo | null> | null = null;
   private pendingNextEpisode: NextEpisodeInfo | null = null;
   private nextEpisodeTriggered = false; // Prevent multiple triggers
+  private creditsTriggerSeconds: number | null = null; // Cached trigger point from credits detection
+  private creditsTriggerSource: string = 'heuristic'; // Source of credits detection
 
   // Route subscription for handling navigation to next episodes
   private readonly destroy$ = new Subject<void>();
@@ -426,10 +430,12 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.cancelAudioSwitch();
 
     // Reset next episode state for new playback
-    this.nextEpisodePrefetched = false;
+    this.nextEpisodePrefetchPromise = null;
     this.pendingNextEpisode = null;
     this.nextEpisodeTriggered = false;
     this.nextEpisodeProgress.set(0);
+    this.creditsTriggerSeconds = null;
+    this.creditsTriggerSource = 'heuristic';
 
     // Cierra de verdad la conexión de vídeo y range-requests
     const v = this.videoPlayer?.nativeElement;
@@ -1807,6 +1813,11 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.loading.set(false);
     this.loadingPhase.set('idle');
 
+    // Fetch credits trigger time from external sources
+    if (this.type() === 'tv') {
+      this.fetchCreditsTriggerTime();
+    }
+
     if (this.audioSwitching() && this.videoSrc() === this.audioSwitchTargetSrc) {
       this.audioSwitching.set(false);
       this.audioSwitchTrack.set(null);
@@ -3060,11 +3071,51 @@ export class PlayerComponent implements OnInit, OnDestroy {
   // ─────────────────────────────────────────────────────────────────────────────
 
   /**
+   * Fetch the credits trigger time from external sources (TMDB, external API, or heuristics)
+   */
+  private async fetchCreditsTriggerTime(): Promise<void> {
+    const showId = this.id();
+    const season = this.season();
+    const episode = this.episode();
+    
+    if (!showId || season === null || episode === null) {
+      return;
+    }
+    
+    const v = this.videoPlayer?.nativeElement;
+    if (!v || !v.duration || !Number.isFinite(v.duration)) {
+      return;
+    }
+    
+    try {
+      const result = await this.creditsDetection.getTriggerSecondsBeforeEnd(
+        showId,
+        season,
+        episode,
+        v.duration
+      );
+      
+      this.creditsTriggerSeconds = result.seconds;
+      this.creditsTriggerSource = result.source;
+      
+      console.log(`✅ Credits detection ready: trigger at ${result.seconds}s before end (source: ${result.source})`);
+    } catch (err) {
+      console.warn('Could not fetch credits trigger time:', err);
+      // Will use fallback in calculateTriggerSeconds
+    }
+  }
+
+  /**
    * Calculate the trigger point for showing next episode overlay.
-   * Uses a percentage-based approach to detect when credits likely start.
+   * Uses pre-fetched credits data if available, otherwise falls back to heuristics.
    */
   private calculateTriggerSeconds(duration: number): number {
-    // Calculate based on percentage (credits usually start at ~97% of episode)
+    // Use pre-fetched credits trigger time if available
+    if (this.creditsTriggerSeconds !== null) {
+      return this.creditsTriggerSeconds;
+    }
+    
+    // Fallback to percentage-based calculation
     const percentBasedTrigger = duration * (1 - this.NEXT_EPISODE_TRIGGER_PERCENT);
     
     // Clamp between min and max values
@@ -3089,6 +3140,12 @@ export class PlayerComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Skip if playing without seekable (duration is unreliable)
+    // When streaming without transcoding, the duration may be incomplete
+    if (!this.preferSeekable()) {
+      return;
+    }
+
     // Skip if overlay is already showing or we already know there's no next episode
     if (this.showNextEpisodeOverlay() || this.showEndOverlay() || this.showRetryNextEpisode()) {
       return;
@@ -3105,44 +3162,59 @@ export class PlayerComponent implements OnInit, OnDestroy {
     }
 
     const duration = v.duration;
+    
+    // Skip if duration is too short to be a real episode (minimum 5 minutes)
+    // This prevents false triggers when video metadata is incomplete
+    const MIN_EPISODE_DURATION = 300; // 5 minutes in seconds
+    if (duration < MIN_EPISODE_DURATION) {
+      return;
+    }
+    
     const currentTime = v.currentTime;
     const remainingTime = duration - currentTime;
     
-    // Calculate smart trigger point based on video duration
+    // Calculate smart trigger point based on credits detection or video duration
     const triggerSeconds = this.calculateTriggerSeconds(duration);
     const prefetchSeconds = triggerSeconds + 30; // Prefetch 30s before showing overlay
     
     // Prefetch next episode info when we're approaching the trigger point
-    if (remainingTime <= prefetchSeconds && !this.nextEpisodePrefetched) {
-      this.nextEpisodePrefetched = true;
-      this.prefetchNextEpisodeInfo();
+    if (remainingTime <= prefetchSeconds && !this.nextEpisodePrefetchPromise) {
+      this.startPrefetchNextEpisode();
     }
 
     // Start showing the countdown when we reach the trigger point
     if (remainingTime <= triggerSeconds && remainingTime > 0) {
-      console.log(`🎬 Triggering next episode at ${triggerSeconds.toFixed(0)}s before end (${(this.NEXT_EPISODE_TRIGGER_PERCENT * 100).toFixed(0)}% of ${duration.toFixed(0)}s video)`);
+      console.log(`🎬 Triggering next episode at ${triggerSeconds.toFixed(0)}s before end (source: ${this.creditsTriggerSource}, duration: ${duration.toFixed(0)}s)`);
       this.nextEpisodeTriggered = true;
       this.triggerNextEpisodeCountdown();
     }
   }
 
   /**
-   * Prefetch next episode info to avoid delay when showing the overlay
+   * Start prefetching next episode info (stores the promise)
    */
-  private async prefetchNextEpisodeInfo() {
+  private startPrefetchNextEpisode() {
     console.log('📥 Prefetching next episode info...');
-    const nextEp = await this.fetchNextEpisodeInfo();
-    this.pendingNextEpisode = nextEp;
-    console.log('📥 Prefetched:', nextEp);
+    this.nextEpisodePrefetchPromise = this.fetchNextEpisodeInfo();
+    this.nextEpisodePrefetchPromise.then(nextEp => {
+      this.pendingNextEpisode = nextEp;
+      console.log('📥 Prefetched:', nextEp);
+    });
   }
 
   /**
    * Trigger the next episode countdown overlay
    */
   private async triggerNextEpisodeCountdown() {
-    // Use prefetched info if available, otherwise fetch now
+    // Wait for prefetch to complete if it's in progress
     let nextEp = this.pendingNextEpisode;
-    if (nextEp === null && !this.nextEpisodePrefetched) {
+    
+    if (nextEp === null && this.nextEpisodePrefetchPromise) {
+      // Prefetch started but not finished - wait for it
+      console.log('⏳ Waiting for prefetch to complete...');
+      nextEp = await this.nextEpisodePrefetchPromise;
+    } else if (nextEp === null && !this.nextEpisodePrefetchPromise) {
+      // No prefetch started - fetch now
       nextEp = await this.fetchNextEpisodeInfo();
     }
 
@@ -3290,7 +3362,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
       this.nextEpisodeInfo.set(null);
       this.nextEpisodeCountdown.set(this.NEXT_EPISODE_COUNTDOWN_SECONDS);
       this.nextEpisodeProgress.set(0);
-      this.nextEpisodePrefetched = false;
+      this.nextEpisodePrefetchPromise = null;
       this.pendingNextEpisode = null;
       this.nextEpisodeTriggered = false;
     }
@@ -3335,7 +3407,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
    */
   closeEndOverlay() {
     this.showEndOverlay.set(false);
-    this.nextEpisodePrefetched = false;
+    this.nextEpisodePrefetchPromise = null;
     this.pendingNextEpisode = null;
   }
 
@@ -3386,7 +3458,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.cancelNextEpisodeCountdown();
     this.showEndOverlay.set(false);
     this.showRetryNextEpisode.set(false);
-    this.nextEpisodePrefetched = false;
+    this.nextEpisodePrefetchPromise = null;
     this.pendingNextEpisode = null;
     this.nextEpisodeTriggered = false;
     this.nextEpisodeProgress.set(0);

@@ -3459,6 +3459,58 @@ app.get('/health', (req, res) => {
   });
 });
 
+// TheIntroDB Proxy - Get skip times for credits/intros
+// API Docs: https://theintrodb.org/docs
+app.get('/api/theintrodb/media', async (req, res) => {
+  const { tmdb_id, season, episode } = req.query;
+  
+  if (!tmdb_id) {
+    return res.status(400).json({ error: 'tmdb_id is required' });
+  }
+  
+  try {
+    // Build query params
+    const params = new URLSearchParams();
+    params.set('tmdb_id', tmdb_id);
+    if (season) params.set('season', season);
+    if (episode) params.set('episode', episode);
+    
+    const url = `https://api.theintrodb.org/v1/media?${params.toString()}`;
+    console.log(`[TheIntroDB] Fetching: ${url}`);
+    
+    const response = await axios.get(url, {
+      headers: {
+        'Accept': 'application/json',
+      },
+      httpAgent: httpAgentGlobal,
+      httpsAgent: httpsAgentGlobal,
+      timeout: 10000,
+    });
+    
+    console.log(`[TheIntroDB] Response:`, JSON.stringify(response.data));
+    res.json(response.data);
+  } catch (err) {
+    const status = err?.response?.status || 500;
+    console.warn(`[TheIntroDB] Error fetching tmdb_id=${tmdb_id}:`, err?.message || err);
+    
+    // Return empty data for 404 (not found in database)
+    if (status === 404) {
+      return res.json({
+        tmdb_id: parseInt(tmdb_id),
+        type: season ? 'tv' : 'movie',
+        intro: null,
+        recap: null,
+        credits: null,
+      });
+    }
+    
+    res.status(status).json({
+      error: 'Failed to fetch from TheIntroDB',
+      message: err?.message || 'Unknown error',
+    });
+  }
+});
+
 // Mirror stats
 app.get('/api/mirror-stats', (req, res) => {
   try {
