@@ -39,6 +39,10 @@ export class FirebaseAuthService {
     return current?.displayName || current?.email || 'User';
   });
 
+  photoUrl = computed(() => {
+    return this.user()?.photoURL || null;
+  });
+
   isAuthenticated = computed(() => !!this.user());
 
   constructor() {
@@ -58,7 +62,7 @@ export class FirebaseAuthService {
       this.app = initializeApp(config);
       this.auth = getAuth(this.app);
       this.available.set(true);
-      onAuthStateChanged(this.auth, (user) => {
+      onAuthStateChanged(this.auth, (user: User | null) => {
         this.user.set(user);
         this.ready.set(true);
       });

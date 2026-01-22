@@ -3,7 +3,7 @@
 // ========================================
 // Las variables de color se heredan del archivo global styles.scss
 
-// Variables locales (mantener para compatibilidad)
+// Fallback SCSS variables (CSS custom properties override these)
 $bg-primary: #0a0a0a;
 $bg-secondary: #141414;
 $bg-card: #1a1a1a;
@@ -12,26 +12,26 @@ $text-primary: #ffffff;
 $text-secondary: rgba(255, 255, 255, 0.7);
 $text-muted: rgba(255, 255, 255, 0.5);
 
-// Usar color primario (naranja) en lugar de rojo
+// Fallback colors (CSS variables override these)
 $accent-primary: #e5a00d;
 $accent-primary-light: #f5c518;
 $accent-error: #ff6b6b;
 
-// Backward compatibility
-$accent-orange: $accent-primary;
-$accent-gold: $accent-primary-light;
+// Use CSS custom properties throughout
+// Usage: color: var(--accent-primary, $accent-primary);
 
 :host {
   display: block;
-  background: $bg-primary;
+  background: var(--bg-primary, $bg-primary);
   min-height: 100vh;
 }
 
 .home-page {
-  background: $bg-primary;
-  color: $text-primary;
+  background: var(--bg-primary, $bg-primary);
+  color: var(--text-primary, $text-primary);
   min-height: 100vh;
   animation: homePageFadeIn 0.5s ease-out forwards;
+  transition: background-color 0.3s ease, color 0.3s ease;
   
   // Transición suave de idioma - mantiene interfaz estable
   &.lang-transitioning {
@@ -107,29 +107,39 @@ $accent-gold: $accent-primary-light;
   justify-content: space-between;
   padding: 0 4%;
   height: 64px;
-  background: $bg-secondary;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-secondary, $bg-secondary);
+  border-bottom: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
+  transition: background-color 0.3s ease;
 }
 
 .nav-left {
   display: flex;
   align-items: center;
+  gap: 32px;
+}
+
+.nav-center {
+  flex: 1;
 }
 
 .logo {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 22px;
+  font-size: var(--text-xl, 22px);
   font-weight: 800;
-  color: $accent-orange;
+  color: var(--accent-primary, $accent-primary);
   cursor: pointer;
+
+  span:not(.logo-img) {
+    font-size: var(--text-xl, 22px);
+  }
 
   .logo-img {
     width: 28px;
     height: 28px;
     display: block;
-    background-color: $accent-primary;
+    background-color: var(--accent-primary, $accent-primary);
     -webkit-mask: url('/assets/logo.png') no-repeat center / contain;
     mask: url('/assets/logo.png') no-repeat center / contain;
   }
@@ -137,20 +147,20 @@ $accent-gold: $accent-primary-light;
 
 .nav-tabs {
   display: flex;
-  gap: 4px;
-  height: 100%;
+  gap: 0;
+  height: 64px;
 }
 
 .nav-tab {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 24px;
+  padding: 0 18px;
   height: 100%;
   background: transparent;
   border: none;
-  color: $text-secondary;
-  font-size: 14px;
+  color: var(--text-secondary, $text-secondary);
+  font-size: var(--text-base, 14px);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
@@ -164,14 +174,14 @@ $accent-gold: $accent-primary-light;
   }
 
   &:hover {
-    color: $text-primary;
-    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary, $text-primary);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.05));
   }
 
   &.active {
-    color: $accent-orange;
-    border-bottom-color: $accent-orange;
-    background: rgba(229, 160, 13, 0.1);
+    color: var(--accent-primary, $accent-primary);
+    border-bottom-color: var(--accent-primary, $accent-primary);
+    background: rgba(var(--accent-rgb, 229, 160, 13), 0.1);
   }
 
   @media (max-width: 600px) {
@@ -189,352 +199,231 @@ $accent-gold: $accent-primary-light;
   gap: 12px;
 }
 
-.auth-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.user-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  color: $text-primary;
-  font-size: 13px;
-  font-weight: 600;
-
-  mat-icon {
-    font-size: 20px;
-    width: 20px;
-    height: 20px;
-    color: $accent-orange;
-  }
-
-  .user-text {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  @media (max-width: 800px) {
-    .user-text {
-      display: none;
-    }
-  }
-}
-
-.auth-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 16px;
-  border: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: $text-secondary;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  mat-icon {
-    font-size: 18px;
-    width: 18px;
-    height: 18px;
-  }
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.15);
-    color: $text-primary;
-  }
-
-  &:active {
-    transform: scale(0.97);
-  }
-
-  @media (max-width: 700px) {
-    padding: 6px 10px;
-
-    span {
-      display: none;
-    }
-  }
-}
-
-// Content Density Toggle
-.density-toggle {
-  display: flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 2px;
-}
-
-.density-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  mat-icon {
-    font-size: 18px;
-    width: 18px;
-    height: 18px;
-    color: rgba(255, 255, 255, 0.4);
-    transition: color 0.2s ease;
-  }
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.08);
-
-    mat-icon {
-      color: rgba(255, 255, 255, 0.7);
-    }
-  }
-
-  &.active {
-    background: rgba(255, 255, 255, 0.12);
-
-    mat-icon {
-      color: #fff;
-    }
-  }
-}
-
-// Language Selector - Transición suave
-.language-selector {
-  display: flex;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 2px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  
-  // Efecto sutil cuando se está cambiando el idioma
-  .lang-transitioning & {
-    box-shadow: 0 0 12px rgba($accent-primary, 0.2);
-    background: rgba($accent-primary, 0.08);
-  }
-}
-
-.lang-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-
-  // Indicador de carga sutil
-  &::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba($accent-primary, 0.15),
-      transparent
-    );
-    opacity: 0;
-    transform: translateX(-100%);
-    transition: opacity 0.2s ease;
-  }
-
-  .flag {
-    font-size: 16px;
-    display: inline-block;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    z-index: 1;
-  }
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.08);
-
-    .flag {
-      transform: scale(1.1);
-    }
-  }
-
-  &.active {
-    background: rgba(255, 255, 255, 0.12);
-
-    .flag {
-      transform: scale(1.15);
-    }
-  }
-  
-  // Estado durante la transición de idioma
-  .lang-transitioning &.active {
-    &::after {
-      opacity: 1;
-      animation: langSelectorShimmer 0.5s ease-out;
-    }
-    
-    .flag {
-      animation: flagPulse 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-  }
-}
-
-// Animaciones para el selector de idioma
-@keyframes langSelectorShimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes flagPulse {
-  0% {
-    transform: scale(1.15);
-  }
-  50% {
-    transform: scale(1.25);
-  }
-  100% {
-    transform: scale(1.15);
-  }
-}
-
-.lang-divider {
-  width: 1px;
-  height: 20px;
-  background: rgba(255, 255, 255, 0.1);
-  margin: 0 2px;
-  transition: background 0.3s ease;
-  
-  .lang-transitioning & {
-    background: rgba($accent-primary, 0.3);
-  }
-}
-
-.nav-icon-btn {
+// Grid Toggle Button (unified)
+.grid-toggle {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 40px;
   height: 40px;
-  background: transparent;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.06);
   border: none;
-  border-radius: 50%;
-  color: $text-secondary;
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-
-  // Efecto ripple suave
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(229, 160, 13, 0.15) 0%, transparent 70%);
-    opacity: 0;
-    transform: scale(0.5);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  }
+  transition: all 0.2s ease;
 
   mat-icon {
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
-                color 0.3s ease,
-                filter 0.3s ease;
-    will-change: transform;
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+    color: $text-secondary;
+    transition: all 0.2s ease;
   }
 
   &:hover {
-    color: $text-primary;
-    background: rgba(255, 255, 255, 0.08);
-    transform: scale(1.05);
-
-    &::before {
-      opacity: 1;
-      transform: scale(1);
-    }
+    background: rgba(255, 255, 255, 0.12);
 
     mat-icon {
-      transform: rotate(45deg);
-      color: $accent-orange;
+      color: $text-primary;
     }
   }
 
   &:active {
     transform: scale(0.95);
-    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+// Profile Menu Container
+.profile-menu {
+  position: relative;
+}
+
+.profile-avatar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  padding-right: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  .avatar-img {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    object-fit: cover;
   }
 
-  &.spinning {
-    cursor: not-allowed;
-    background: rgba(229, 160, 13, 0.08);
-    
-    &::before {
-      opacity: 1;
-      transform: scale(1.2);
-      animation: pulse-glow 1.5s ease-in-out infinite;
-    }
-    
-    mat-icon {
-      animation: smooth-spin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-      color: $accent-orange;
-      filter: drop-shadow(0 0 4px rgba(229, 160, 13, 0.4));
-    }
+  > mat-icon:first-of-type {
+    font-size: 28px;
+    width: 28px;
+    height: 28px;
+    color: var(--text-secondary, $text-secondary);
+  }
 
-    &:hover {
-      transform: none;
-      
-      mat-icon {
-        transform: none; // Override hover rotation during spin
+  .dropdown-caret {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    color: var(--text-secondary, $text-secondary);
+    transition: transform 0.2s ease;
+
+    &.open {
+      transform: rotate(180deg);
+    }
+  }
+
+  &:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+  }
+
+  &.authenticated {
+    > mat-icon:first-of-type {
+      color: var(--accent-primary, $accent-primary);
+    }
+  }
+}
+
+// Profile Dropdown
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  background: var(--bg-secondary, $bg-secondary);
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.15));
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px);
+  transition: all 0.2s ease;
+  z-index: 1000;
+  overflow: hidden;
+
+  &.open {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-header {
+  padding: 16px 16px 12px;
+
+  .user-name {
+    font-size: var(--text-sm, 14px);
+    font-weight: 600;
+    color: var(--text-primary, $text-primary);
+  }
+}
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border-primary, rgba(255, 255, 255, 0.1));
+  margin: 4px 0;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, $text-secondary);
+  font-size: var(--text-sm, 14px);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  mat-icon {
+    font-size: 20px;
+    width: 20px;
+    height: 20px;
+  }
+
+  &:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    color: var(--text-primary, $text-primary);
+  }
+
+  &.has-submenu {
+    .submenu-arrow {
+      margin-left: auto;
+      transition: transform 0.2s ease;
+
+      &.open {
+        transform: rotate(90deg);
       }
     }
   }
 
-  &:disabled {
-    opacity: 0.6;
-    pointer-events: none;
+  &.sign-out {
+    color: rgba(255, 100, 100, 0.9);
+
+    &:hover {
+      background: rgba(255, 100, 100, 0.1);
+      color: #ff6b6b;
+    }
   }
 }
 
-@keyframes smooth-spin {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
+// Language Submenu
+.dropdown-submenu {
+  position: relative;
+}
+
+.submenu-content {
+  max-height: 0;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  transition: max-height 0.25s ease;
+
+  &.open {
+    max-height: 120px;
   }
 }
 
-@keyframes pulse-glow {
-  0%, 100% {
-    opacity: 0.5;
-    transform: scale(1);
+.submenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px 10px 48px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, $text-secondary);
+  font-size: var(--text-xs, 13px);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  .flag {
+    font-size: 16px;
   }
-  50% {
-    opacity: 1;
-    transform: scale(1.3);
+
+  .check-icon {
+    margin-left: auto;
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    color: var(--accent-primary, $accent-primary);
+  }
+
+  &:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, $text-primary);
+  }
+
+  &.selected {
+    color: var(--text-primary, $text-primary);
   }
 }
 
@@ -555,7 +444,7 @@ $accent-gold: $accent-primary-light;
 .loading-progress {
   height: 100%;
   width: 30%;
-  background: linear-gradient(90deg, $accent-orange, $accent-gold);
+  background: linear-gradient(90deg, var(--accent-primary, $accent-primary), var(--accent-light, $accent-primary-light));
   animation: loading 1.5s ease-in-out infinite;
 }
 
@@ -601,10 +490,10 @@ $accent-gold: $accent-primary-light;
   inset: 0;
   background: linear-gradient(
     to top,
-    $bg-primary 0%,
-    rgba($bg-primary, 0.95) 15%,
-    rgba($bg-primary, 0.7) 40%,
-    rgba($bg-primary, 0.3) 70%,
+    var(--bg-primary, $bg-primary) 0%,
+    var(--bg-primary-95, rgba($bg-primary, 0.95)) 15%,
+    var(--bg-primary-70, rgba($bg-primary, 0.7)) 40%,
+    var(--bg-primary-30, rgba($bg-primary, 0.3)) 70%,
     transparent 100%
   );
   z-index: 1;
@@ -622,7 +511,7 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   gap: 6px;
   padding: 6px 14px;
-  background: $accent-orange;
+  background: var(--accent-primary, $accent-primary);
   color: #000;
   font-size: 12px;
   font-weight: 700;
@@ -647,9 +536,9 @@ $accent-gold: $accent-primary-light;
 }
 
 .hero-overview {
-  font-size: 15px;
+  font-size: var(--text-base, 15px);
   line-height: 1.5;
-  color: $text-secondary;
+  color: var(--text-secondary, $text-secondary);
   margin: 0 0 16px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -661,8 +550,8 @@ $accent-gold: $accent-primary-light;
   display: flex;
   align-items: center;
   gap: 16px;
-  font-size: 14px;
-  color: $text-secondary;
+  font-size: var(--text-sm, 14px);
+  color: var(--text-secondary, $text-secondary);
   margin-bottom: 20px;
 }
 
@@ -670,7 +559,7 @@ $accent-gold: $accent-primary-light;
   display: flex;
   align-items: center;
   gap: 4px;
-  color: $accent-gold;
+  color: var(--accent-light, $accent-primary-light);
   font-weight: 600;
 
   mat-icon {
@@ -693,7 +582,7 @@ $accent-gold: $accent-primary-light;
   padding: 12px 28px;
   border: none;
   border-radius: 6px;
-  font-size: 15px;
+  font-size: var(--text-base, 15px);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
@@ -706,21 +595,21 @@ $accent-gold: $accent-primary-light;
 }
 
 .btn-play {
-  background: $accent-orange;
+  background: var(--accent-primary, $accent-primary);
   color: #000;
 
   &:hover {
-    background: $accent-gold;
+    background: var(--accent-light, $accent-primary-light);
     transform: scale(1.02);
   }
 }
 
 .btn-info {
-  background: rgba(255, 255, 255, 0.15);
-  color: $text-primary;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.15));
+  color: var(--text-primary, $text-primary);
 
   &:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.25));
   }
 }
 
@@ -772,18 +661,18 @@ $accent-gold: $accent-primary-light;
   justify-content: space-between;
   margin-bottom: 20px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
 }
 
 .section-title {
-  font-size: 22px;
+  font-size: var(--text-xl, 22px);
   font-weight: 700;
   margin: 0;
 }
 
 .section-count {
-  font-size: 13px;
-  color: $text-muted;
+  font-size: var(--text-xs, 13px);
+  color: var(--text-muted, $text-muted);
 }
 
 // ========================================
@@ -902,7 +791,7 @@ $accent-gold: $accent-primary-light;
   aspect-ratio: 2/3;
   border-radius: 8px;
   overflow: hidden;
-  background: $bg-card;
+  background: var(--bg-card, $bg-card);
 
   img {
     width: 100%;
@@ -940,7 +829,7 @@ $accent-gold: $accent-primary-light;
 }
 
 .card-rank {
-  background: $accent-orange;
+  background: var(--accent-primary, $accent-primary);
   color: #000;
   font-size: 11px;
   font-weight: 800;
@@ -950,8 +839,8 @@ $accent-gold: $accent-primary-light;
 
 .media-badge {
   background: rgba(0, 0, 0, 0.7);
-  color: $text-primary;
-  font-size: 10px;
+  color: var(--text-primary, $text-primary);
+  font-size: var(--text-2xs, 10px);
   font-weight: 600;
   padding: 4px 8px;
   border-radius: 4px;
@@ -964,7 +853,7 @@ $accent-gold: $accent-primary-light;
   justify-content: center;
   width: 50px;
   height: 50px;
-  background: $accent-orange;
+  background: var(--accent-primary, $accent-primary);
   color: #000;
   border: none;
   border-radius: 50%;
@@ -980,7 +869,7 @@ $accent-gold: $accent-primary-light;
   }
 
   &:hover {
-    background: $accent-gold;
+    background: var(--accent-light, $accent-primary-light);
     transform: scale(1.1) !important;
   }
 }
@@ -993,7 +882,7 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   gap: 3px;
   background: rgba(0, 0, 0, 0.75);
-  color: $accent-gold;
+  color: var(--accent-light, $accent-primary-light);
   font-size: 12px;
   font-weight: 700;
   padding: 4px 8px;
@@ -1011,9 +900,9 @@ $accent-gold: $accent-primary-light;
 }
 
 .card-title {
-  font-size: 14px;
+  font-size: var(--text-sm, 14px);
   font-weight: 600;
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1021,15 +910,15 @@ $accent-gold: $accent-primary-light;
 }
 
 .card-year {
-  font-size: 12px;
-  color: $text-muted;
+  font-size: var(--text-xs, 12px);
+  color: var(--text-muted, $text-muted);
 }
 
 // ========================================
 // Search Tab
 // ========================================
 .search-tab {
-  background: $bg-primary;
+  background: var(--bg-primary, $bg-primary);
 }
 
 .search-main {
@@ -1057,8 +946,8 @@ $accent-gold: $accent-primary-light;
 }
 
 .search-subtitle {
-  font-size: 16px;
-  color: $text-secondary;
+  font-size: var(--text-base, 16px);
+  color: var(--text-secondary, $text-secondary);
   margin: 0;
 }
 
@@ -1071,21 +960,21 @@ $accent-gold: $accent-primary-light;
   position: relative;
   display: flex;
   align-items: center;
-  background: $bg-card;
+  background: var(--bg-card, $bg-card);
   border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--border-primary, rgba(255, 255, 255, 0.1));
   transition: border-color 0.2s;
   overflow: hidden;
 
   &:focus-within {
-    border-color: $accent-orange;
+    border-color: var(--accent-primary, $accent-primary);
   }
 }
 
 .search-icon {
   position: absolute;
   left: 16px;
-  color: $text-muted;
+  color: var(--text-muted, $text-muted);
   font-size: 24px;
   width: 24px;
   height: 24px;
@@ -1096,12 +985,12 @@ $accent-gold: $accent-primary-light;
   padding: 16px 16px 16px 52px;
   background: transparent;
   border: none;
-  color: $text-primary;
-  font-size: 16px;
+  color: var(--text-primary, $text-primary);
+  font-size: var(--text-base, 16px);
   outline: none;
 
   &::placeholder {
-    color: $text-muted;
+    color: var(--text-muted, $text-muted);
   }
 }
 
@@ -1112,16 +1001,16 @@ $accent-gold: $accent-primary-light;
   width: 40px;
   height: 40px;
   margin-right: 8px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.1));
   border: none;
   border-radius: 50%;
-  color: $text-secondary;
+  color: var(--text-secondary, $text-secondary);
   cursor: pointer;
   transition: all 0.2s;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: $text-primary;
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.2));
+    color: var(--text-primary, $text-primary);
   }
 }
 
@@ -1135,23 +1024,23 @@ $accent-gold: $accent-primary-light;
 
 .filter-chip {
   padding: 8px 18px;
-  background: $bg-card;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--bg-card, $bg-card);
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.15));
   border-radius: 20px;
-  color: $text-secondary;
-  font-size: 13px;
+  color: var(--text-secondary, $text-secondary);
+  font-size: var(--text-xs, 13px);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 
   &:hover {
-    border-color: $accent-orange;
-    color: $text-primary;
+    border-color: var(--accent-primary, $accent-primary);
+    color: var(--text-primary, $text-primary);
   }
 
   &.active {
-    background: $accent-orange;
-    border-color: $accent-orange;
+    background: var(--accent-primary, $accent-primary);
+    border-color: var(--accent-primary, $accent-primary);
     color: #000;
   }
 }
@@ -1162,14 +1051,14 @@ $accent-gold: $accent-primary-light;
   justify-content: center;
   gap: 12px;
   padding: 40px;
-  color: $text-secondary;
+  color: var(--text-secondary, $text-secondary);
 }
 
 .spinner {
   width: 24px;
   height: 24px;
   border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: $accent-orange;
+  border-top-color: var(--accent-primary, $accent-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -1199,7 +1088,7 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   justify-content: center;
   padding: 80px 20px;
-  color: $text-muted;
+  color: var(--text-muted, $text-muted);
   text-align: center;
 
   mat-icon {
@@ -1211,7 +1100,7 @@ $accent-gold: $accent-primary-light;
   }
 
   p {
-    font-size: 18px;
+    font-size: var(--text-lg, 18px);
     margin: 0;
   }
 }
@@ -1234,16 +1123,16 @@ $accent-gold: $accent-primary-light;
 
 .btn-retry {
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.1));
   border: none;
   border-radius: 6px;
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.2));
   }
 }
 
@@ -1253,9 +1142,9 @@ $accent-gold: $accent-primary-light;
 .footer {
   padding: 30px 4%;
   text-align: center;
-  color: $text-muted;
-  font-size: 13px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--text-muted, $text-muted);
+  font-size: var(--text-xs, 13px);
+  border-top: 1px solid var(--border-primary, rgba(255, 255, 255, 0.05));
 
   p {
     margin: 0;
@@ -1269,7 +1158,7 @@ $accent-gold: $accent-primary-light;
   .skeleton-title {
     width: 200px;
     height: 24px;
-    background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+    background: linear-gradient(90deg, var(--bg-card, $bg-card) 25%, var(--bg-card-hover, $bg-card-hover) 50%, var(--bg-card, $bg-card) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 6px;
@@ -1278,7 +1167,7 @@ $accent-gold: $accent-primary-light;
   .skeleton-count {
     width: 80px;
     height: 16px;
-    background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+    background: linear-gradient(90deg, var(--bg-card, $bg-card) 25%, var(--bg-card-hover, $bg-card-hover) 50%, var(--bg-card, $bg-card) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 4px;
@@ -1294,13 +1183,13 @@ $accent-gold: $accent-primary-light;
   aspect-ratio: 2/3;
   border-radius: 8px;
   overflow: hidden;
-  background: $bg-card;
+  background: var(--bg-card, $bg-card);
 }
 
 .skeleton-shimmer {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+  background: linear-gradient(90deg, var(--bg-card, $bg-card) 25%, var(--bg-card-hover, $bg-card-hover) 50%, var(--bg-card, $bg-card) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
@@ -1315,7 +1204,7 @@ $accent-gold: $accent-primary-light;
 }
 
 .skeleton-text {
-  background: linear-gradient(90deg, $bg-card 25%, $bg-card-hover 50%, $bg-card 75%);
+  background: linear-gradient(90deg, var(--bg-card, $bg-card) 25%, var(--bg-card-hover, $bg-card-hover) 50%, var(--bg-card, $bg-card) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 4px;

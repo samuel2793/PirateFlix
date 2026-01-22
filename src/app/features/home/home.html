@@ -1,124 +1,126 @@
 <div class="home-page" [class.lang-transitioning]="isChangingLanguage()">
   <!-- Navigation Bar -->
   <nav class="navbar">
+    <!-- Left Section: Logo + Tabs -->
     <div class="nav-left">
       <div class="logo">
         <span class="logo-img" aria-hidden="true"></span>
         <span>PirateFlix</span>
       </div>
+
+      <div class="nav-tabs">
+        <button
+          class="nav-tab"
+          [class.active]="activeTab() === 'movies'"
+          (click)="activeTab.set('movies')"
+        >
+          <mat-icon>movie</mat-icon>
+          <span class="translate-text">{{ 'Movies' | t }}</span>
+        </button>
+        <button
+          class="nav-tab"
+          [class.active]="activeTab() === 'tv'"
+          (click)="activeTab.set('tv')"
+        >
+          <mat-icon>tv</mat-icon>
+          <span class="translate-text">{{ 'TV Shows' | t }}</span>
+        </button>
+        <button
+          class="nav-tab"
+          [class.active]="activeTab() === 'search'"
+          (click)="activeTab.set('search')"
+        >
+          <mat-icon>search</mat-icon>
+          <span class="translate-text">{{ 'Search' | t }}</span>
+        </button>
+      </div>
     </div>
 
-    <div class="nav-tabs">
-      <button
-        class="nav-tab"
-        [class.active]="activeTab() === 'movies'"
-        (click)="activeTab.set('movies')"
-      >
-        <mat-icon>movie</mat-icon>
-        <span class="translate-text">{{ 'Movies' | t }}</span>
-      </button>
-      <button
-        class="nav-tab"
-        [class.active]="activeTab() === 'tv'"
-        (click)="activeTab.set('tv')"
-      >
-        <mat-icon>tv</mat-icon>
-        <span class="translate-text">{{ 'TV Shows' | t }}</span>
-      </button>
-      <button
-        class="nav-tab"
-        [class.active]="activeTab() === 'search'"
-        (click)="activeTab.set('search')"
-      >
-        <mat-icon>search</mat-icon>
-        <span class="translate-text">{{ 'Search' | t }}</span>
-      </button>
-    </div>
+    <!-- Center Section: Empty -->
+    <div class="nav-center"></div>
 
+    <!-- Right Section: Grid Toggle + Profile -->
     <div class="nav-right">
-      <div class="auth-actions" *ngIf="authAvailable()">
-        <div class="user-badge" *ngIf="isAuthenticated()">
-          <mat-icon>account_circle</mat-icon>
-          <span class="user-text">{{ userDisplayName() }}</span>
-        </div>
-        <button
-          class="auth-btn"
-          *ngIf="!isAuthenticated()"
-          (click)="login()"
-          [title]="'Sign in' | t"
-        >
-          <mat-icon>login</mat-icon>
-          <span class="translate-text">{{ 'Sign in' | t }}</span>
-        </button>
-        <button
-          class="auth-btn"
-          *ngIf="isAuthenticated()"
-          (click)="logout()"
-          [title]="'Sign out' | t"
-        >
-          <mat-icon>logout</mat-icon>
-          <span class="translate-text">{{ 'Sign out' | t }}</span>
-        </button>
-      </div>
-
-      <!-- Content Density Toggle -->
-      <div class="density-toggle">
-        <button
-          class="density-btn"
-          [class.active]="gridSize() === 1"
-          (click)="setGridSize(1)"
-          [title]="'Compact' | t"
-        >
-          <mat-icon>grid_view</mat-icon>
-        </button>
-        <button
-          class="density-btn"
-          [class.active]="gridSize() === 2"
-          (click)="setGridSize(2)"
-          [title]="'Normal' | t"
-        >
-          <mat-icon>view_comfy</mat-icon>
-        </button>
-        <button
-          class="density-btn"
-          [class.active]="gridSize() === 3"
-          (click)="setGridSize(3)"
-          [title]="'Large' | t"
-        >
-          <mat-icon>view_module</mat-icon>
-        </button>
-      </div>
-
-      <!-- Language Selector -->
-      <div class="language-selector">
-        <button
-          class="lang-btn"
-          [class.active]="currentLang() === 'en'"
-          (click)="changeLang('en')"
-          title="English"
-        >
-          <span class="flag">🇬🇧</span>
-        </button>
-        <div class="lang-divider"></div>
-        <button
-          class="lang-btn"
-          [class.active]="currentLang() === 'es'"
-          (click)="changeLang('es')"
-          title="Español"
-        >
-          <span class="flag">🇪🇸</span>
-        </button>
-      </div>
-
+      <!-- Grid Toggle (unified) -->
       <button
-        class="nav-icon-btn"
-        [class.spinning]="refreshing()"
-        (click)="softRefresh()"
-        [disabled]="refreshing()"
-        [attr.title]="lastRefresh() ? 'Última actualización: ' + lastRefresh()?.toLocaleTimeString() : 'Recargar contenido'"
+        class="grid-toggle"
+        (click)="cycleGridSize()"
+        [title]="'Toggle view' | t"
       >
-        <mat-icon>refresh</mat-icon>
+        <mat-icon>{{ getGridIcon() }}</mat-icon>
       </button>
+
+      <!-- Profile Menu -->
+      <div class="profile-menu">
+        <button
+          class="profile-avatar"
+          [class.authenticated]="isAuthenticated()"
+          (click)="toggleProfileMenu()"
+          [title]="isAuthenticated() ? userDisplayName() : ('Sign in' | t)"
+        >
+          <mat-icon>account_circle</mat-icon>
+          <mat-icon class="dropdown-caret" [class.open]="profileMenuOpen()">expand_more</mat-icon>
+        </button>
+
+        <!-- Profile Dropdown Menu -->
+        <div class="profile-dropdown" [class.open]="profileMenuOpen()">
+          <div class="dropdown-header" *ngIf="isAuthenticated()">
+            <span class="user-name">{{ userDisplayName() }}</span>
+          </div>
+          
+          <div class="dropdown-divider" *ngIf="isAuthenticated()"></div>
+
+          <button class="dropdown-item" *ngIf="!isAuthenticated()" (click)="login(); closeProfileMenu()">
+            <mat-icon>login</mat-icon>
+            <span class="translate-text">{{ 'Sign in' | t }}</span>
+          </button>
+
+          <button class="dropdown-item" *ngIf="isAuthenticated()" (click)="navigateToProfile(); closeProfileMenu()">
+            <mat-icon>person</mat-icon>
+            <span class="translate-text">{{ 'Profile' | t }}</span>
+          </button>
+
+          <button class="dropdown-item" (click)="navigateToSettings(); closeProfileMenu()">
+            <mat-icon>settings</mat-icon>
+            <span class="translate-text">{{ 'Settings' | t }}</span>
+          </button>
+
+          <div class="dropdown-submenu">
+            <button class="dropdown-item has-submenu" (click)="toggleLanguageSubmenu()">
+              <mat-icon>language</mat-icon>
+              <span class="translate-text">{{ 'Language' | t }}</span>
+              <mat-icon class="submenu-arrow" [class.open]="languageSubmenuOpen()">chevron_right</mat-icon>
+            </button>
+            <div class="submenu-content" [class.open]="languageSubmenuOpen()">
+              <button 
+                class="submenu-item" 
+                [class.selected]="currentLang() === 'en'"
+                (click)="changeLang('en'); closeProfileMenu()"
+              >
+                <span class="flag">🇬🇧</span>
+                <span>English</span>
+                <mat-icon *ngIf="currentLang() === 'en'" class="check-icon">check</mat-icon>
+              </button>
+              <button 
+                class="submenu-item" 
+                [class.selected]="currentLang() === 'es'"
+                (click)="changeLang('es'); closeProfileMenu()"
+              >
+                <span class="flag">🇪🇸</span>
+                <span>Español</span>
+                <mat-icon *ngIf="currentLang() === 'es'" class="check-icon">check</mat-icon>
+              </button>
+            </div>
+          </div>
+
+          <div class="dropdown-divider" *ngIf="isAuthenticated()"></div>
+
+          <button class="dropdown-item sign-out" *ngIf="isAuthenticated()" (click)="logout(); closeProfileMenu()">
+            <mat-icon>logout</mat-icon>
+            <span class="translate-text">{{ 'Sign out' | t }}</span>
+          </button>
+        </div>
+      </div>
     </div>
   </nav>
 

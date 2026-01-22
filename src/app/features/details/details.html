@@ -163,44 +163,47 @@
           </div>
         </div>
 
-        <div class="episode-grid" *ngIf="!seasonEpisodesLoading() && episodeOptions().length">
-          <button
-            class="episode-card"
-            type="button"
-            *ngFor="let episode of episodeOptions()"
-            (click)="selectEpisode(episode.episode_number)"
-            [class.active]="selectedEpisode() === episode.episode_number"
-            [attr.aria-pressed]="selectedEpisode() === episode.episode_number">
-            <div class="episode-thumb">
-              <img [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
-              <span class="episode-chip" *ngIf="episodeCode(episode)">{{ episodeCode(episode) }}</span>
-              <span class="episode-runtime" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
-              <span class="episode-rating" *ngIf="episodeRatingLabel(episode) as rating">
-                <mat-icon>star</mat-icon>
-                {{ rating }}
-              </span>
-            </div>
-            
-            <div class="episode-body">
-              <h3 class="episode-title">{{ episodeTitle(episode) }}</h3>
-              <div class="episode-meta" *ngIf="episodeMeta(episode)">{{ episodeMeta(episode) }}</div>
-              <p class="episode-overview" *ngIf="episodeOverview(episode) as overview; else noEpisodeOverview">
-                {{ overview }}
-              </p>
-              <ng-template #noEpisodeOverview>
-                <p class="episode-overview muted translate-text">{{ 'No description available.' | t }}</p>
-              </ng-template>
-            </div>
-          </button>
+        <div class="netflix-episode-row-wrapper" *ngIf="!seasonEpisodesLoading() && episodeOptions().length">
+          <div class="netflix-episode-row">
+            <button
+              class="netflix-episode-card"
+              type="button"
+              *ngFor="let episode of episodeOptions()"
+              (click)="selectEpisode(episode.episode_number)"
+              [class.active]="selectedEpisode() === episode.episode_number"
+              [attr.aria-pressed]="selectedEpisode() === episode.episode_number">
+              <div class="episode-thumbnail">
+                <img [src]="episodeStill(episode)" [alt]="episodeTitle(episode)" loading="lazy" />
+                <span class="episode-badge">E{{ episode.episode_number }}</span>
+                <span class="episode-runtime" *ngIf="episodeRuntime(episode)">{{ episodeRuntime(episode) }}</span>
+                <div class="thumbnail-overlay"></div>
+                <button class="episode-play-btn" type="button" (click)="playEpisode(episode, $event)" aria-label="Play">
+                  <mat-icon>play_arrow</mat-icon>
+                </button>
+              </div>
+              
+              <div class="episode-info">
+                <h3 class="episode-name">{{ episodeTitle(episode) }}</h3>
+                <p class="episode-description" *ngIf="episodeOverview(episode) as overview; else noEpisodeDesc">
+                  {{ overview }}
+                </p>
+                <ng-template #noEpisodeDesc>
+                  <p class="episode-description muted translate-text">{{ 'No description available.' | t }}</p>
+                </ng-template>
+              </div>
+            </button>
+          </div>
         </div>
 
-        <div class="episode-grid skeleton" *ngIf="seasonEpisodesLoading()">
-          <div class="episode-card skeleton" *ngFor="let item of [1, 2, 3]">
-            <div class="episode-thumb"></div>
-            <div class="episode-body">
-              <div class="skeleton-line wide"></div>
-              <div class="skeleton-line"></div>
-              <div class="skeleton-line short"></div>
+        <div class="netflix-episode-row-wrapper" *ngIf="seasonEpisodesLoading()">
+          <div class="netflix-episode-row skeleton">
+            <div class="netflix-episode-card skeleton" *ngFor="let item of [1, 2, 3, 4, 5]">
+              <div class="episode-thumbnail"></div>
+              <div class="episode-info">
+                <div class="skeleton-line title"></div>
+                <div class="skeleton-line desc"></div>
+                <div class="skeleton-line desc short"></div>
+              </div>
             </div>
           </div>
         </div>

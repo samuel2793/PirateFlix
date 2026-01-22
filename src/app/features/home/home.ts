@@ -1,5 +1,5 @@
 import { CommonModule, ViewportScroller, DOCUMENT } from '@angular/common';
-import { Component, inject, signal, computed, OnDestroy, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, OnDestroy, ElementRef, HostListener } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
@@ -67,10 +67,48 @@ export class HomeComponent implements OnDestroy {
   authAvailable = this.auth.available;
   isAuthenticated = this.auth.isAuthenticated;
   userDisplayName = this.auth.displayName;
+  userPhotoUrl = this.auth.photoUrl;
+
+  // Profile menu state
+  profileMenuOpen = signal(false);
+  languageSubmenuOpen = signal(false);
 
   // Language
   currentLang = this.language.currentLang;
   isChangingLanguage = this.language.isChangingLanguage;
+
+  toggleProfileMenu() {
+    this.profileMenuOpen.update(v => !v);
+    if (!this.profileMenuOpen()) {
+      this.languageSubmenuOpen.set(false);
+    }
+  }
+
+  closeProfileMenu() {
+    this.profileMenuOpen.set(false);
+    this.languageSubmenuOpen.set(false);
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    const profileMenu = target.closest('.profile-menu');
+    if (!profileMenu && this.profileMenuOpen()) {
+      this.closeProfileMenu();
+    }
+  }
+
+  toggleLanguageSubmenu() {
+    this.languageSubmenuOpen.update(v => !v);
+  }
+
+  navigateToProfile() {
+    this.router.navigate(['/profile']);
+  }
+
+  navigateToSettings() {
+    this.router.navigate(['/settings']);
+  }
 
   changeLang(lang: SupportedLang) {
     this.language.setLang(lang);
@@ -82,6 +120,20 @@ export class HomeComponent implements OnDestroy {
 
   logout() {
     void this.auth.signOut();
+  }
+
+  // Grid size cycling for single toggle button
+  cycleGridSize() {
+    const current = this.gridSize();
+    const next = current === 3 ? 1 : current + 1;
+    this.setGridSize(next);
+  }
+
+  getGridIcon(): string {
+    const size = this.gridSize();
+    if (size === 1) return 'grid_view';
+    if (size === 2) return 'view_comfy';
+    return 'view_module';
   }
 
   // Trending

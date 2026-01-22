@@ -267,30 +267,23 @@ export class DetailsComponent {
     if (!Number.isFinite(parsed)) return;
     if (this.selectedSeason() === parsed) return;
 
-    // Transición natural y simple
+    // Transición natural y simple con reset de episodio
     this.smoothSeasonChange(() => {
       this.selectedSeason.set(parsed);
       this.seasonEpisodes.set([]);
-      const count = this.getEpisodeCount(parsed);
-      const currentEpisode = this.selectedEpisode();
-      if (!Number.isFinite(count) || count <= 0) {
-        this.selectedEpisode.set(null);
-        return;
-      }
-
-      if (!currentEpisode || currentEpisode > count) {
-        this.selectedEpisode.set(1);
-      }
+      
+      // Cada temporada es independiente - resetear selección de episodio
+      this.selectedEpisode.set(null);
 
       this.loadSeasonEpisodes(parsed);
     });
   }
 
   /**
-   * Transición de temporada natural y sin saltos
-   * - Sin FLIP complejo, sin transforms exagerados
-   * - Solo un micro-fade casi imperceptible
-   * - Mantiene scroll estable
+   * Transición de temporada fluida y sin saltos
+   * - Fade suave sin movimiento vertical
+   * - Mantiene scroll 100% estable
+   * - Cambio instantáneo sin sensación de recarga
    */
   private smoothSeasonChange(changeCallback: () => void): void {
     // Respetar prefers-reduced-motion: swap instantáneo
@@ -299,49 +292,52 @@ export class DetailsComponent {
       return;
     }
 
-    const gridEl = this.elementRef.nativeElement.querySelector('.episode-grid') as HTMLElement;
+    const rowWrapper = this.elementRef.nativeElement.querySelector('.netflix-episode-row-wrapper') as HTMLElement;
+    const gridEl = this.elementRef.nativeElement.querySelector('.netflix-episode-row') as HTMLElement;
+    
     if (!gridEl) {
       changeCallback();
       return;
     }
 
-    // Capturar posición del grid antes del cambio
-    const gridRect = gridEl.getBoundingClientRect();
-    const gridTopBefore = gridRect.top;
-
     // Marcar como transitioning (bloquea interacciones)
     this.seasonTransitioning.set(true);
     
-    // Micro-fade out casi imperceptible (opacity 1 → 0.97)
-    gridEl.style.opacity = '0.97';
+    // Fijar altura del wrapper para evitar saltos de layout
+    if (rowWrapper) {
+      const currentHeight = rowWrapper.offsetHeight;
+      rowWrapper.style.minHeight = `${currentHeight}px`;
+    }
+    
+    // Fade out suave sin desplazamiento
+    gridEl.style.transition = 'opacity 200ms ease-out';
+    gridEl.style.opacity = '0';
     gridEl.style.pointerEvents = 'none';
 
-    // Ejecutar el cambio de datos
-    changeCallback();
+    // Ejecutar el cambio de datos después del fade out
+    setTimeout(() => {
+      changeCallback();
 
-    // Después del render, hacer el fade-in
-    requestAnimationFrame(() => {
+      // Después del render, hacer el fade-in
       requestAnimationFrame(() => {
-        // Ajustar scroll si el grid se movió
-        const gridTopAfter = gridEl.getBoundingClientRect().top;
-        const scrollDelta = gridTopAfter - gridTopBefore;
-        if (Math.abs(scrollDelta) > 2) {
-          window.scrollBy({ top: scrollDelta, behavior: 'instant' });
-        }
+        requestAnimationFrame(() => {
+          // Fade in suave
+          gridEl.style.transition = 'opacity 280ms ease-in';
+          gridEl.style.opacity = '1';
 
-        // Micro-fade in (0.97 → 1)
-        gridEl.style.transition = 'opacity 180ms ease-out';
-        gridEl.style.opacity = '1';
-
-        // Cleanup después de la transición
-        setTimeout(() => {
-          gridEl.style.transition = '';
-          gridEl.style.opacity = '';
-          gridEl.style.pointerEvents = '';
-          this.seasonTransitioning.set(false);
-        }, 200);
+          // Cleanup después de la transición
+          setTimeout(() => {
+            gridEl.style.transition = '';
+            gridEl.style.opacity = '';
+            gridEl.style.pointerEvents = '';
+            if (rowWrapper) {
+              rowWrapper.style.minHeight = '';
+            }
+            this.seasonTransitioning.set(false);
+          }, 300);
+        });
       });
-    });
+    }, 210);
   }
 
   setEpisode(value: string) {
