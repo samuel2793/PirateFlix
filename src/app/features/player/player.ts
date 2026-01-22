@@ -1,11 +1,20 @@
-import { Component, inject, signal, ElementRef, ViewChild, OnDestroy } from '@angular/core';
+import { Component, inject, signal, ElementRef, ViewChild, OnDestroy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule, ParamMap } from '@angular/router';
 import { AlertController } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { TmdbService } from '../../core/services/tmdb';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, Subject, combineLatest, takeUntil } from 'rxjs';
+
+interface NextEpisodeInfo {
+  season: number;
+  episode: number;
+  name: string;
+  overview: string;
+  stillPath: string | null;
+  airDate: string | null;
+}
 
 type MediaType = 'movie' | 'tv';
 
@@ -121,7 +130,7 @@ interface LoadingLogEntry {
   templateUrl: './player.html',
   styleUrl: './player.scss',
 })
-export class PlayerComponent implements OnDestroy {
+export class PlayerComponent implements OnInit, OnDestroy {
   private static readonly SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
   private static readonly searchCache = new Map<
     string,
@@ -129,6 +138,7 @@ export class PlayerComponent implements OnDestroy {
   >();
 
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly alertController = inject(AlertController);
   private readonly http = inject(HttpClient);
   private readonly tmdb = inject(TmdbService);
@@ -188,6 +198,33 @@ export class PlayerComponent implements OnDestroy {
   transcodePercent = signal<number | null>(null);
   transcodeEta = signal<string>('');
   transcodeLabel = signal<string>('');
+  transcodeMode = signal<string>('');
+  transcodeDownloadPercent = signal<number | null>(null);
+  transcodeDownloadSpeed = signal<string>('');
+  transcodeOutputSize = signal<string>('');
+  transcodeTimemark = signal<string>('');
+
+  // Next Episode Auto-play
+  autoplayNextEpisode = signal<boolean>(this.loadSettingsPref('autoplayNextEpisode', true));
+  showNextEpisodeOverlay = signal<boolean>(false);
+  nextEpisodeCountdown = signal<number>(15);
+  nextEpisodeInfo = signal<NextEpisodeInfo | null>(null);
+  showEndOverlay = signal<boolean>(false);
+  showRetryNextEpisode = signal<boolean>(false);
+  nextEpisodeErrorMessage = signal<string>('');
+  nextEpisodeProgress = signal<number>(0); // Progress bar for countdown (0-100)
+  private nextEpisodeCountdownTimer: any = null;
+  private readonly NEXT_EPISODE_COUNTDOWN_SECONDS = 15;
+  // Credits typically start at ~95-97% of episode duration (last 1-3 minutes for a 40-60min show)
+  private readonly NEXT_EPISODE_TRIGGER_PERCENT = 0.97; // 97% of video = ~1.5 min before end for 50min episode
+  private readonly NEXT_EPISODE_MIN_TRIGGER_SECONDS = 30; // At minimum, trigger 30 seconds before end
+  private readonly NEXT_EPISODE_MAX_TRIGGER_SECONDS = 120; // At maximum, trigger 2 minutes before end
+  private nextEpisodePrefetched = false;
+  private pendingNextEpisode: NextEpisodeInfo | null = null;
+  private nextEpisodeTriggered = false; // Prevent multiple triggers
+
+  // Route subscription for handling navigation to next episodes
+  private readonly destroy$ = new Subject<void>();
 
   private readonly API_URL = (() => {
     const hostname = window.location.hostname;
@@ -258,6 +295,11 @@ export class PlayerComponent implements OnDestroy {
     this.transcodePercent.set(null);
     this.transcodeEta.set('');
     this.transcodeLabel.set('');
+    this.transcodeMode.set('');
+    this.transcodeDownloadPercent.set(null);
+    this.transcodeDownloadSpeed.set('');
+    this.transcodeOutputSize.set('');
+    this.transcodeTimemark.set('');
   }
 
   private pushLoadingLog(message: string, level: LoadingLogLevel = 'info') {
@@ -290,15 +332,51 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
+  private loadSettingsPref<T>(key: string, defaultValue: T): T {
+    try {
+      const settingsRaw = localStorage.getItem('pirateflix_settings');
+      if (!settingsRaw) return defaultValue;
+      const settings = JSON.parse(settingsRaw);
+      return settings[key] !== undefined ? settings[key] : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  }
+
   async ngOnInit() {
-    const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
-    const idStr = this.route.snapshot.paramMap.get('id');
-    const seasonStr = this.route.snapshot.paramMap.get('season');
-    const episodeStr = this.route.snapshot.paramMap.get('episode');
-    const preferMultiAudioParam = this.route.snapshot.queryParamMap.get('multiAudio');
-    const preferSeekableParam = this.route.snapshot.queryParamMap.get('seekable');
-    const preferSubtitlesParam = this.route.snapshot.queryParamMap.get('subtitles');
-    const forceYearParam = this.route.snapshot.queryParamMap.get('forceYear');
+    // Subscribe to route params to handle navigation to next episodes
+    combineLatest([
+      this.route.paramMap,
+      this.route.queryParamMap
+    ]).pipe(
+      takeUntil(this.destroy$)
+    ).subscribe(([paramMap, queryParamMap]) => {
+      this.handleRouteParams(paramMap, queryParamMap);
+    });
+  }
+
+  private async handleRouteParams(paramMap: ParamMap, queryParamMap: ParamMap) {
+    const type = paramMap.get('type') as MediaType | null;
+    const idStr = paramMap.get('id');
+    const seasonStr = paramMap.get('season');
+    const episodeStr = paramMap.get('episode');
+    const preferMultiAudioParam = queryParamMap.get('multiAudio');
+    const preferSeekableParam = queryParamMap.get('seekable');
+    const preferSubtitlesParam = queryParamMap.get('subtitles');
+    const forceYearParam = queryParamMap.get('forceYear');
+
+    // Check if this is a new episode (different from current)
+    const newSeason = seasonStr ? Number(seasonStr) : null;
+    const newEpisode = episodeStr ? Number(episodeStr) : null;
+    const isNewContent = 
+      this.season() !== newSeason || 
+      this.episode() !== newEpisode || 
+      this.id() !== (idStr ? Number(idStr) : 0);
+
+    // Stop current playback if loading new content
+    if (isNewContent && this.videoSrc()) {
+      this.stopPlaybackAndPolling();
+    }
 
     if (type === 'movie' || type === 'tv') this.type.set(type);
     if (idStr) this.id.set(Number(idStr));
@@ -313,7 +391,15 @@ export class PlayerComponent implements OnDestroy {
     this.preferSubtitles.set(preferSubtitlesParam === '1' || preferSubtitlesParam === 'true');
     this.forceYearInSearch.set(forceYearParam === '1' || forceYearParam === 'true');
 
-    await this.searchAndPlayTorrent();
+    // Only start new playback if this is new content or initial load
+    if (isNewContent || !this.videoSrc()) {
+      // Reset next episode state
+      this.cancelNextEpisodeCountdown();
+      this.showEndOverlay.set(false);
+      this.showRetryNextEpisode.set(false);
+      
+      await this.searchAndPlayTorrent();
+    }
   }
 
   private stopPlaybackAndPolling() {
@@ -338,6 +424,12 @@ export class PlayerComponent implements OnDestroy {
     this.currentVideoFileIndex = null;
     this.resetTranscodeTracking();
     this.cancelAudioSwitch();
+
+    // Reset next episode state for new playback
+    this.nextEpisodePrefetched = false;
+    this.pendingNextEpisode = null;
+    this.nextEpisodeTriggered = false;
+    this.nextEpisodeProgress.set(0);
 
     // Cierra de verdad la conexión de vídeo y range-requests
     const v = this.videoPlayer?.nativeElement;
@@ -1767,6 +1859,78 @@ export class PlayerComponent implements OnDestroy {
     this.pushLoadingLog('Error al cargar el video.', 'error');
   }
 
+  // Tiempo del último seek para evitar seeks repetidos
+  private lastSeekTime = 0;
+  private seekDebounceTimer: any = null;
+  private isUsingSeekEndpoint = false;
+
+  onVideoSeeking(event: Event) {
+    // El seeking nativo del navegador funciona correctamente con el endpoint /stream/
+    // que soporta range requests. No necesitamos intervenir.
+    // Solo actualizamos lastSeekTime para tracking interno.
+    const v = this.videoPlayer?.nativeElement;
+    if (v) {
+      this.lastSeekTime = v.currentTime;
+    }
+  }
+
+  // Verifica si un tiempo específico ya está en el buffer del video
+  private isTimeBuffered(video: HTMLVideoElement, time: number): boolean {
+    try {
+      const buffered = video.buffered;
+      for (let i = 0; i < buffered.length; i++) {
+        const start = buffered.start(i);
+        const end = buffered.end(i);
+        // Si el tiempo está dentro de un rango buffereado (con pequeño margen)
+        if (time >= start - 0.5 && time <= end + 0.5) {
+          return true;
+        }
+      }
+    } catch {
+      // Si hay error leyendo buffered, asumir que no está buffereado
+    }
+    return false;
+  }
+
+  private performSeekViaEndpoint(seekTime: number) {
+    if (!this.currentTorrentHash || this.currentVideoFileIndex === null) return;
+
+    const v = this.videoPlayer?.nativeElement;
+    const wasPlaying = v && !v.paused;
+
+    // Construir URL con el nuevo endpoint de seek
+    const seekUrl = this.buildSeekUrl(seekTime);
+    console.log(`🎯 Seek rápido a ${seekTime}s via endpoint`);
+
+    this.lastSeekTime = seekTime;
+    this.isUsingSeekEndpoint = true;
+    this.videoSrc.set(seekUrl);
+
+    // Restaurar reproducción después de cargar
+    if (wasPlaying && v) {
+      const playWhenReady = () => {
+        v.play().catch(() => {});
+        v.removeEventListener('loadeddata', playWhenReady);
+      };
+      v.addEventListener('loadeddata', playWhenReady);
+    }
+  }
+
+  private buildSeekUrl(seekTime: number): string {
+    if (!this.currentTorrentHash || this.currentVideoFileIndex === null) return '';
+    const base = `${this.API_URL}/stream-seek/${this.currentTorrentHash}/${this.currentVideoFileIndex}`;
+    const params = new URLSearchParams();
+
+    params.set('time', String(seekTime));
+
+    const selection = this.selectedAudioTrack();
+    if (selection !== 'auto') {
+      params.set('audioStream', String(selection));
+    }
+
+    return `${base}?${params.toString()}`;
+  }
+
   formatAudioTrackLabel(track: AudioTrack): string {
     const pieces: string[] = [];
     if (track.language) pieces.push(track.language);
@@ -2375,23 +2539,49 @@ export class PlayerComponent implements OnDestroy {
     const downloadPercent = Number(data?.downloadPercent);
     const timemark = String(data?.timemark || '');
     const mode = String(data?.mode || '');
+    const outputBytes = Number(data?.outputBytes);
     const now = Date.now();
+
+    // Actualizar mode
+    if (mode) {
+      this.transcodeMode.set(mode);
+    }
+
+    // Actualizar timemark
+    if (timemark) {
+      this.transcodeTimemark.set(timemark);
+    }
+
+    // Actualizar porcentaje de descarga
+    if (Number.isFinite(downloadPercent)) {
+      this.transcodeDownloadPercent.set(Math.max(0, Math.min(100, downloadPercent)));
+    }
+
+    // Actualizar tamaño de salida
+    if (Number.isFinite(outputBytes) && outputBytes > 0) {
+      this.transcodeOutputSize.set(this.formatBytes(outputBytes));
+    }
 
     if (status && status !== this.lastTranscodeStatus) {
       this.lastTranscodeStatus = status;
       if (status === 'queued') {
-        this.pushLoadingLog('Preparando transcodificación para habilitar seeking...');
+        this.pushLoadingLog('Preparando proceso para habilitar seeking...');
       } else if (status === 'running') {
-        const label =
-          mode === 'remux'
-            ? 'Reempaquetando video para habilitar seeking...'
-            : 'Transcodificando video para habilitar seeking...';
+        let label: string;
+        if (mode === 'remux') {
+          label = 'Moviendo metadatos al inicio (proceso rápido)...';
+        } else if (mode === 'audio') {
+          label = 'Convirtiendo pista de audio...';
+        } else {
+          label = 'Transcodificando video completo (esto puede tardar)...';
+        }
         this.pushLoadingLog(label);
       } else if (status === 'ready') {
-        this.pushLoadingLog('Transcodificación completa, cargando video...');
-      } else if (status === 'error' || status === 'aborted') {
-        this.pushLoadingLog('Error al transcodificar el video.', 'error');
+        this.pushLoadingLog('¡Proceso completado! Cargando video...');
+      } else if (status === 'error') {
+        this.pushLoadingLog('Error al procesar el video.', 'error');
       }
+      // No log para 'aborted' - el usuario canceló intencionalmente
     }
 
     if (
@@ -2414,17 +2604,22 @@ export class PlayerComponent implements OnDestroy {
     }
 
     if (status === 'queued') {
-      this.transcodeLabel.set('Preparando transcodificación...');
+      this.transcodeLabel.set('Preparando...');
     } else if (status === 'running') {
-      this.transcodeLabel.set(
-        mode === 'remux'
-          ? 'Reempaquetando video para habilitar seeking...'
-          : 'Transcodificando video para habilitar seeking...'
-      );
+      // Etiquetas más descriptivas según el modo
+      if (mode === 'remux') {
+        this.transcodeLabel.set('Moviendo metadatos (rápido)');
+      } else if (mode === 'audio') {
+        this.transcodeLabel.set('Convirtiendo audio');
+      } else {
+        this.transcodeLabel.set('Transcodificando video (lento)');
+      }
     } else if (status === 'ready') {
-      this.transcodeLabel.set('Transcodificación completa.');
-    } else if (status === 'error' || status === 'aborted') {
-      this.transcodeLabel.set('Transcodificación fallida.');
+      this.transcodeLabel.set('¡Listo!');
+    } else if (status === 'error') {
+      this.transcodeLabel.set('Error en transcodificación');
+    } else if (status === 'aborted') {
+      this.transcodeLabel.set('Cancelado');
     }
 
     if (Number.isFinite(percent)) {
@@ -2435,7 +2630,7 @@ export class PlayerComponent implements OnDestroy {
         const total = elapsed / (clamped / 100);
         const etaSeconds = total - elapsed;
         if (Number.isFinite(etaSeconds) && etaSeconds > 0) {
-          this.transcodeEta.set(`ETA ${this.formatEta(etaSeconds)}`);
+          this.transcodeEta.set(this.formatEta(etaSeconds));
         } else {
           this.transcodeEta.set('');
         }
@@ -2445,7 +2640,7 @@ export class PlayerComponent implements OnDestroy {
     } else {
       this.transcodePercent.set(null);
       if (status === 'running') {
-        this.transcodeEta.set('ETA calculando...');
+        this.transcodeEta.set('Calculando...');
       }
     }
 
@@ -2471,12 +2666,21 @@ export class PlayerComponent implements OnDestroy {
       }
     }
 
-    if (status === 'error' || status === 'aborted') {
+    // Solo mostrar error si es un error real, no si el usuario canceló
+    if (status === 'error') {
       if (!this.errorMessage()) {
         this.errorMessage.set('No se pudo transcodificar el video.');
       }
       this.loading.set(false);
     }
+    // Si es aborted, no hacer nada - el usuario puede haber saltado la transcodificación
+  }
+
+  private formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 
   private formatEta(seconds: number): string {
@@ -2496,6 +2700,48 @@ export class PlayerComponent implements OnDestroy {
   showTranscodeUI(): boolean {
     const status = this.transcodeStatus();
     return status === 'queued' || status === 'running' || status === 'ready';
+  }
+
+  // Omitir la espera de transcodificación y reproducir sin seeking
+  skipTranscodeWait() {
+    if (!this.currentTorrentHash || this.currentVideoFileIndex === null) return;
+
+    // Cambiar preferSeekable a false temporalmente
+    this.preferSeekable.set(false);
+
+    // Construir URL sin seekable
+    const base = `${this.API_URL}/stream/${this.currentTorrentHash}/${this.currentVideoFileIndex}`;
+    const params = new URLSearchParams();
+
+    const selection = this.selectedAudioTrack();
+    if (selection !== 'auto') {
+      params.set('audioStream', String(selection));
+    }
+    params.set('t', String(Date.now())); // Cache bust
+
+    const streamUrl = params.toString() ? `${base}?${params.toString()}` : base;
+
+    console.log('⏭️ Omitiendo transcodificación, reproduciendo sin seeking');
+    this.pushLoadingLog('Reproduciendo sin esperar transcodificación (sin seeking)');
+
+    // Resetear estado de transcodificación completamente
+    this.transcodeStatus.set('idle');
+    this.transcodePercent.set(null);
+    this.transcodeEta.set('');
+    this.transcodeLabel.set('');
+    this.transcodeMode.set('');
+    this.transcodeDownloadPercent.set(null);
+    this.transcodeOutputSize.set('');
+    this.transcodeTimemark.set('');
+    
+    // Limpiar cualquier mensaje de error
+    this.errorMessage.set('');
+    
+    // Mantener loading activo para el nuevo stream
+    this.loading.set(true);
+    this.loadingPhase.set('streaming');
+
+    this.videoSrc.set(streamUrl);
   }
 
   getLanguageName(code: string): string {
@@ -2809,7 +3055,324 @@ export class PlayerComponent implements OnDestroy {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Next Episode Auto-play Logic
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Calculate the trigger point for showing next episode overlay.
+   * Uses a percentage-based approach to detect when credits likely start.
+   */
+  private calculateTriggerSeconds(duration: number): number {
+    // Calculate based on percentage (credits usually start at ~97% of episode)
+    const percentBasedTrigger = duration * (1 - this.NEXT_EPISODE_TRIGGER_PERCENT);
+    
+    // Clamp between min and max values
+    return Math.max(
+      this.NEXT_EPISODE_MIN_TRIGGER_SECONDS,
+      Math.min(this.NEXT_EPISODE_MAX_TRIGGER_SECONDS, percentBasedTrigger)
+    );
+  }
+
+  /**
+   * Called on every timeupdate event to check if we're near the end of the video
+   * and should start showing the next episode countdown.
+   */
+  onVideoTimeUpdate() {
+    // Only process for TV shows with valid episode context
+    if (this.type() !== 'tv' || this.season() === null || this.episode() === null) {
+      return;
+    }
+
+    // Skip if autoplay is disabled
+    if (!this.autoplayNextEpisode()) {
+      return;
+    }
+
+    // Skip if overlay is already showing or we already know there's no next episode
+    if (this.showNextEpisodeOverlay() || this.showEndOverlay() || this.showRetryNextEpisode()) {
+      return;
+    }
+
+    // Skip if already triggered this playback session
+    if (this.nextEpisodeTriggered) {
+      return;
+    }
+
+    const v = this.videoPlayer?.nativeElement;
+    if (!v || !v.duration || !Number.isFinite(v.duration)) {
+      return;
+    }
+
+    const duration = v.duration;
+    const currentTime = v.currentTime;
+    const remainingTime = duration - currentTime;
+    
+    // Calculate smart trigger point based on video duration
+    const triggerSeconds = this.calculateTriggerSeconds(duration);
+    const prefetchSeconds = triggerSeconds + 30; // Prefetch 30s before showing overlay
+    
+    // Prefetch next episode info when we're approaching the trigger point
+    if (remainingTime <= prefetchSeconds && !this.nextEpisodePrefetched) {
+      this.nextEpisodePrefetched = true;
+      this.prefetchNextEpisodeInfo();
+    }
+
+    // Start showing the countdown when we reach the trigger point
+    if (remainingTime <= triggerSeconds && remainingTime > 0) {
+      console.log(`🎬 Triggering next episode at ${triggerSeconds.toFixed(0)}s before end (${(this.NEXT_EPISODE_TRIGGER_PERCENT * 100).toFixed(0)}% of ${duration.toFixed(0)}s video)`);
+      this.nextEpisodeTriggered = true;
+      this.triggerNextEpisodeCountdown();
+    }
+  }
+
+  /**
+   * Prefetch next episode info to avoid delay when showing the overlay
+   */
+  private async prefetchNextEpisodeInfo() {
+    console.log('📥 Prefetching next episode info...');
+    const nextEp = await this.fetchNextEpisodeInfo();
+    this.pendingNextEpisode = nextEp;
+    console.log('📥 Prefetched:', nextEp);
+  }
+
+  /**
+   * Trigger the next episode countdown overlay
+   */
+  private async triggerNextEpisodeCountdown() {
+    // Use prefetched info if available, otherwise fetch now
+    let nextEp = this.pendingNextEpisode;
+    if (nextEp === null && !this.nextEpisodePrefetched) {
+      nextEp = await this.fetchNextEpisodeInfo();
+    }
+
+    if (!nextEp) {
+      // No next episode available - this is the end of the series
+      console.log('🎬 No next episode found - showing end overlay');
+      this.showEndOverlay.set(true);
+      this.showControls.set(true);
+      this.clearControlsHideTimer();
+      return;
+    }
+
+    // Show the next episode overlay with countdown
+    console.log('✅ Showing next episode overlay for:', nextEp);
+    this.nextEpisodeInfo.set(nextEp);
+    this.nextEpisodeCountdown.set(this.NEXT_EPISODE_COUNTDOWN_SECONDS);
+    this.showNextEpisodeOverlay.set(true);
+    this.showControls.set(true);
+    this.clearControlsHideTimer();
+
+    // Start the countdown timer
+    this.startNextEpisodeCountdown();
+  }
+
+  async onVideoEnded() {
+    console.log('🎬 Video ended event triggered');
+    console.log('  type:', this.type());
+    console.log('  season:', this.season());
+    console.log('  episode:', this.episode());
+    console.log('  autoplayNextEpisode:', this.autoplayNextEpisode());
+
+    // Solo para series con episodio definido
+    if (this.type() !== 'tv' || this.season() === null || this.episode() === null) {
+      console.log('  ❌ Not a TV episode, skipping autoplay');
+      return;
+    }
+
+    // Verificar si autoplay está habilitado
+    if (!this.autoplayNextEpisode()) {
+      console.log('  ❌ Autoplay is disabled in settings');
+      return;
+    }
+
+    // If overlay is already showing, just continue the countdown
+    if (this.showNextEpisodeOverlay()) {
+      console.log('  ⏳ Countdown already in progress');
+      return;
+    }
+
+    // If end overlay is already showing, do nothing
+    if (this.showEndOverlay()) {
+      console.log('  🎬 End overlay already showing');
+      return;
+    }
+
+    // Trigger countdown (will use prefetched data if available)
+    await this.triggerNextEpisodeCountdown();
+  }
+
+  private async fetchNextEpisodeInfo(): Promise<NextEpisodeInfo | null> {
+    const showId = this.id();
+    const currentSeason = this.season();
+    const currentEpisode = this.episode();
+
+    if (!showId || currentSeason === null || currentEpisode === null) {
+      return null;
+    }
+
+    try {
+      // Primero intentar con el siguiente episodio en la misma temporada
+      const seasonData = await firstValueFrom(this.tmdb.tvSeason(showId, currentSeason));
+      const episodes = seasonData?.episodes || [];
+      
+      const nextEpInSeason = episodes.find((ep: any) => ep.episode_number === currentEpisode + 1);
+      if (nextEpInSeason) {
+        return {
+          season: currentSeason,
+          episode: nextEpInSeason.episode_number,
+          name: nextEpInSeason.name || `Episode ${nextEpInSeason.episode_number}`,
+          overview: nextEpInSeason.overview || '',
+          stillPath: nextEpInSeason.still_path,
+          airDate: nextEpInSeason.air_date,
+        };
+      }
+
+      // Si no hay más episodios, intentar con la siguiente temporada
+      const showData = await firstValueFrom(this.tmdb.details('tv', showId));
+      const numberOfSeasons = showData?.number_of_seasons || 0;
+      
+      if (currentSeason < numberOfSeasons) {
+        const nextSeasonData = await firstValueFrom(this.tmdb.tvSeason(showId, currentSeason + 1));
+        const nextSeasonEpisodes = nextSeasonData?.episodes || [];
+        const firstEp = nextSeasonEpisodes.find((ep: any) => ep.episode_number === 1);
+        
+        if (firstEp) {
+          return {
+            season: currentSeason + 1,
+            episode: 1,
+            name: firstEp.name || 'Episode 1',
+            overview: firstEp.overview || '',
+            stillPath: firstEp.still_path,
+            airDate: firstEp.air_date,
+          };
+        }
+      }
+
+      return null; // Es el último episodio
+    } catch (err) {
+      console.error('Error fetching next episode info:', err);
+      return null;
+    }
+  }
+
+  private startNextEpisodeCountdown() {
+    this.cancelNextEpisodeCountdown(false); // Don't reset overlay
+    
+    // Update progress every 100ms for smooth animation
+    const totalMs = this.NEXT_EPISODE_COUNTDOWN_SECONDS * 1000;
+    let elapsed = 0;
+    
+    this.nextEpisodeCountdownTimer = setInterval(() => {
+      elapsed += 100;
+      const remaining = Math.ceil((totalMs - elapsed) / 1000);
+      const progress = (elapsed / totalMs) * 100;
+      
+      this.nextEpisodeProgress.set(Math.min(100, progress));
+      
+      if (remaining !== this.nextEpisodeCountdown()) {
+        this.nextEpisodeCountdown.set(remaining);
+      }
+      
+      if (elapsed >= totalMs) {
+        this.playNextEpisode();
+      }
+    }, 100);
+  }
+
+  cancelNextEpisodeCountdown(resetOverlay = true) {
+    if (this.nextEpisodeCountdownTimer) {
+      clearInterval(this.nextEpisodeCountdownTimer);
+      this.nextEpisodeCountdownTimer = null;
+    }
+    if (resetOverlay) {
+      this.showNextEpisodeOverlay.set(false);
+      this.nextEpisodeInfo.set(null);
+      this.nextEpisodeCountdown.set(this.NEXT_EPISODE_COUNTDOWN_SECONDS);
+      this.nextEpisodeProgress.set(0);
+      this.nextEpisodePrefetched = false;
+      this.pendingNextEpisode = null;
+      this.nextEpisodeTriggered = false;
+    }
+  }
+
+  async playNextEpisode() {
+    const nextEp = this.nextEpisodeInfo();
+    if (!nextEp) {
+      this.cancelNextEpisodeCountdown();
+      return;
+    }
+
+    // Limpiar antes de navegar
+    this.cancelNextEpisodeCountdown();
+    this.stopPlaybackAndPolling();
+
+    // Navegar al siguiente episodio preservando los query params actuales
+    const showId = this.id();
+    
+    // Build query params preserving current preferences
+    const queryParams: any = {};
+    if (this.preferSeekable()) queryParams['seekable'] = '1';
+    if (this.preferMultiAudio()) queryParams['multiAudio'] = '1';
+    if (this.preferSubtitles()) queryParams['subtitles'] = '1';
+    if (this.forceYearInSearch()) queryParams['forceYear'] = '1';
+    
+    try {
+      await this.router.navigate(
+        ['/play', 'tv', showId, nextEp.season, nextEp.episode],
+        { queryParams }
+      );
+    } catch (error: any) {
+      console.error('Error navigating to next episode:', error);
+      this.nextEpisodeErrorMessage.set(error?.message || 'Failed to load next episode');
+      this.showRetryNextEpisode.set(true);
+      this.pendingNextEpisode = nextEp;
+    }
+  }
+
+  /**
+   * Close the end of series overlay
+   */
+  closeEndOverlay() {
+    this.showEndOverlay.set(false);
+    this.nextEpisodePrefetched = false;
+    this.pendingNextEpisode = null;
+  }
+
+  /**
+   * Close the retry overlay
+   */
+  closeRetryOverlay() {
+    this.showRetryNextEpisode.set(false);
+    this.nextEpisodeErrorMessage.set('');
+    this.pendingNextEpisode = null;
+  }
+
+  /**
+   * Retry loading the next episode after an error
+   */
+  async retryNextEpisode() {
+    const nextEp = this.pendingNextEpisode;
+    if (!nextEp) {
+      this.closeRetryOverlay();
+      return;
+    }
+
+    this.closeRetryOverlay();
+    this.nextEpisodeInfo.set(nextEp);
+    await this.playNextEpisode();
+  }
+
+  getEpisodeStillUrl(path: string | null): string {
+    if (!path) return '';
+    return `https://image.tmdb.org/t/p/w300${path}`;
+  }
+
   ngOnDestroy() {
+    // Complete destroy subject to unsubscribe from route params
+    this.destroy$.next();
+    this.destroy$.complete();
+
     // Limpiar interval de progreso
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
@@ -2818,6 +3381,15 @@ export class PlayerComponent implements OnDestroy {
 
     // Limpiar temporizador de controles
     this.clearControlsHideTimer();
+
+    // Limpiar countdown de siguiente episodio y overlays relacionados
+    this.cancelNextEpisodeCountdown();
+    this.showEndOverlay.set(false);
+    this.showRetryNextEpisode.set(false);
+    this.nextEpisodePrefetched = false;
+    this.pendingNextEpisode = null;
+    this.nextEpisodeTriggered = false;
+    this.nextEpisodeProgress.set(0);
 
     // Limpiar estilos de subtítulos
     this.cleanupSubtitleStyles();
