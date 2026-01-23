@@ -137,11 +137,6 @@
 
     <section class="section episodes-section" *ngIf="isTv() && seasons().length">
       <div class="series-picker">
-        <div class="series-header">
-          <div class="series-title-group">
-            <span class="series-heading translate-text">{{ 'Episodes' | t }}</span>
-          </div>
-        </div>
         <div class="season-picker">
           <div class="season-top">
             <span class="season-caption translate-text">{{ 'Season' | t }}</span>
@@ -155,7 +150,11 @@
               (click)="setSeason(season.season_number)"
               [class.active]="selectedSeason() === season.season_number"
               [attr.aria-pressed]="selectedSeason() === season.season_number">
-              <span class="season-name">{{ formatSeasonLabel(season) }}</span>
+              <span class="season-name translate-text" *ngIf="getSeasonInfo(season) as info">
+                <ng-container *ngIf="info.customName">{{ info.customName }}</ng-container>
+                <ng-container *ngIf="!info.customName && info.isSpecial">{{ 'Specials' | t }}</ng-container>
+                <ng-container *ngIf="!info.customName && !info.isSpecial">{{ 'Season' | t }} {{ info.number }}</ng-container>
+              </span>
               <span class="season-count translate-text" *ngIf="season.episode_count">
                 {{ season.episode_count }} {{ 'Episodes' | t | lowercase }}
               </span>

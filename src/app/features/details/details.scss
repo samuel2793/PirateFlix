@@ -534,7 +534,7 @@ $accent-gold: $accent-primary-light;
 }
 
 .season-caption {
-  font-size: var(--text-xs, 12px);
+  font-size: var(--text-sm, 14px);
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -877,7 +877,7 @@ $accent-gold: $accent-primary-light;
 }
 
 .episode-description {
-  font-size: var(--text-xs, 13px);
+  font-size: var(--text-sm, 14px);
   line-height: 1.6;
   color: var(--text-secondary, $text-secondary);
   margin: 0;
@@ -885,7 +885,7 @@ $accent-gold: $accent-primary-light;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: calc(13px * 1.6 * 2.5);
+  min-height: calc(14px * 1.6 * 2.5);
 
   &.muted {
     color: var(--text-muted, $text-muted);

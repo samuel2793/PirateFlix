@@ -9,6 +9,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
 import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
+import { TranslationService } from '../../shared/services/translation.service';
 import { LanguageService } from '../../shared/services/language.service';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -37,6 +38,7 @@ export class DetailsComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly tmdb = inject(TmdbService);
   private readonly router = inject(Router);
+  private readonly translation = inject(TranslationService);
   private readonly language = inject(LanguageService);
   private readonly document = inject(DOCUMENT);
   private readonly elementRef = inject(ElementRef);
@@ -368,13 +370,25 @@ export class DetailsComponent {
     this.play();
   }
 
-  formatSeasonLabel(season: any) {
+  // Retorna info de la temporada para mostrar en el template
+  getSeasonInfo(season: any): { customName: string; number: number; isSpecial: boolean } | null {
     const name = String(season?.name || '').trim();
-    if (name) return name;
     const number = Number(season?.season_number);
-    if (!Number.isFinite(number)) return 'Season';
-    if (number === 0) return 'Specials';
-    return `Season ${number}`;
+    
+    if (!Number.isFinite(number)) return null;
+    
+    // Si tiene nombre personalizado (no es "Season X", "Temporada X" o "Specials")
+    const isCustomName = name && 
+      !name.startsWith('Season') && 
+      !name.startsWith('Temporada') && 
+      name !== 'Specials' &&
+      name !== 'Especiales';
+    
+    return {
+      customName: isCustomName ? name : '',
+      number: number,
+      isSpecial: number === 0
+    };
   }
 
   formatEpisodeLabel(episode: any) {
