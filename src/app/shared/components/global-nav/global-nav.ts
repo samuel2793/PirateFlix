@@ -6,6 +6,7 @@ import { filter } from 'rxjs/operators';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { TranslatePipe } from '../../pipes/translate.pipe';
 import { FirebaseAuthService } from '../../../core/services/firebase-auth';
+import { UserDataService } from '../../../core/services/user-data.service';
 import { LanguageService, SupportedLang } from '../../services/language.service';
 
 @Component({
@@ -19,12 +20,35 @@ export class GlobalNavComponent {
   private readonly router = inject(Router);
   private readonly location = inject(Location);
   private readonly auth = inject(FirebaseAuthService);
+  private readonly userData = inject(UserDataService);
   private readonly language = inject(LanguageService);
 
   authAvailable = this.auth.available;
   isAuthenticated = this.auth.isAuthenticated;
-  userDisplayName = this.auth.displayName;
-  userPhotoUrl = this.auth.photoUrl;
+  userDisplayName = computed(() => {
+    // Prefer Firestore profile name over Auth name
+    const profile = this.userData.profile();
+    if (profile?.displayName) return profile.displayName;
+    return this.auth.displayName();
+  });
+  userPhotoUrl = computed(() => {
+    // Prefer Firestore profile photo over Auth photo
+    const profile = this.userData.profile();
+    if (profile?.photoURL) return profile.photoURL;
+    return this.auth.photoUrl();
+  });
+
+  // User initials for default avatar
+  userInitials = computed(() => {
+    const name = this.userDisplayName();
+    if (!name) return '?';
+    
+    const words = name.trim().split(/\s+/);
+    if (words.length >= 2) {
+      return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  });
 
   // Language
   currentLang = this.language.currentLang;

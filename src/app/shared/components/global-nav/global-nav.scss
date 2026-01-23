@@ -139,6 +139,13 @@ $text-secondary: rgba(255, 255, 255, 0.7);
     object-fit: cover;
   }
 
+  .avatar-icon {
+    font-size: 32px;
+    width: 32px;
+    height: 32px;
+    color: var(--text-secondary, $text-secondary);
+  }
+
   > mat-icon:first-of-type {
     font-size: 28px;
     width: 28px;
@@ -165,6 +172,16 @@ $text-secondary: rgba(255, 255, 255, 0.7);
   &.authenticated {
     > mat-icon:first-of-type {
       color: var(--accent-primary, #e5a00d);
+    }
+    
+    .avatar-icon {
+      color: var(--accent-primary, #e5a00d);
+    }
+  }
+
+  &.has-photo {
+    .avatar-img {
+      border: 2px solid var(--accent-primary, #e5a00d);
     }
   }
 }

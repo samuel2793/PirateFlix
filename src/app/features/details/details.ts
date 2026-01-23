@@ -1,4 +1,4 @@
-import { Component, inject, signal, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, ElementRef } from '@angular/core';
 import { CommonModule, DOCUMENT, LowerCasePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -7,6 +7,8 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
+import { UserDataService } from '../../core/services/user-data.service';
+import { FirebaseAuthService } from '../../core/services/firebase-auth';
 import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { TranslationService } from '../../shared/services/translation.service';
@@ -42,6 +44,8 @@ export class DetailsComponent {
   private readonly language = inject(LanguageService);
   private readonly document = inject(DOCUMENT);
   private readonly elementRef = inject(ElementRef);
+  private readonly userData = inject(UserDataService);
+  private readonly auth = inject(FirebaseAuthService);
   
   // Exponer para la vista
   isChangingLanguage = this.language.isChangingLanguage;
@@ -66,7 +70,16 @@ export class DetailsComponent {
   preferSubtitles = signal(this.loadPref('preferSubtitles'));
   preferYearInSearch = signal(this.loadPref('preferYearInSearch'));
   showInfo = signal(false);
-  inMyList = signal(false);
+  
+  // My List integration with Firestore
+  inMyList = computed(() => {
+    const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
+    const idStr = this.route.snapshot.paramMap.get('id');
+    const id = idStr ? Number(idStr) : NaN;
+    
+    if (!type || !Number.isFinite(id)) return false;
+    return this.userData.isInMyList(type, id);
+  });
 
   // Load preference from localStorage
   private loadPref(key: string, defaultValue = false): boolean {
@@ -129,9 +142,6 @@ export class DetailsComponent {
       this.credits.set(creditsData);
       this.videos.set(videosData?.results || []);
       this.initializeSeriesSelection(data);
-
-      // Check if item is in My List
-      this.inMyList.set(this.isInMyList());
     } catch (e: any) {
       this.error.set(e?.message ?? String(e));
     } finally {
@@ -594,64 +604,43 @@ export class DetailsComponent {
   }
 
   // My List functionality
-  toggleMyList() {
-    const type = this.route.snapshot.paramMap.get('type');
-    const id = this.route.snapshot.paramMap.get('id');
+  async toggleMyList() {
+    const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
+    const idStr = this.route.snapshot.paramMap.get('id');
+    const id = idStr ? Number(idStr) : NaN;
     const it = this.item();
 
-    if (!type || !id || !it) return;
-
-    const myList = this.getMyList();
-    const itemKey = `${type}_${id}`;
-
-    if (this.inMyList()) {
-      // Remove from list
-      delete myList[itemKey];
-      this.inMyList.set(false);
-    } else {
-      // Add to list
-      myList[itemKey] = {
-        id: Number(id),
-        type,
-        title: this.title(),
-        poster: it.poster_path,
-        backdrop: it.backdrop_path,
-        rating: it.vote_average,
-        year: this.year(),
-        addedAt: new Date().toISOString(),
-      };
-      this.inMyList.set(true);
+    if (!type || !Number.isFinite(id) || !it) return;
+    
+    // Check authentication
+    if (!this.auth.isAuthenticated()) {
+      console.log('User not authenticated, cannot modify list');
+      return;
     }
 
-    this.saveMyList(myList);
-  }
-
-  private isInMyList(): boolean {
-    const type = this.route.snapshot.paramMap.get('type');
-    const id = this.route.snapshot.paramMap.get('id');
-
-    if (!type || !id) return false;
-
-    const myList = this.getMyList();
-    return `${type}_${id}` in myList;
-  }
-
-  private getMyList(): Record<string, any> {
     try {
-      const data = localStorage.getItem('pirateflix_myList');
-      return data ? JSON.parse(data) : {};
-    } catch {
-      return {};
+      if (this.inMyList()) {
+        // Remove from list
+        const itemId = `${type}_${id}`;
+        await this.userData.removeFromMyList(itemId);
+      } else {
+        // Add to list
+        await this.userData.addToMyList({
+          mediaType: type,
+          tmdbId: id,
+          title: this.title(),
+          poster: it.poster_path,
+          backdrop: it.backdrop_path,
+          rating: it.vote_average,
+          year: this.year(),
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling My List:', error);
     }
   }
 
-  private saveMyList(list: Record<string, any>) {
-    try {
-      localStorage.setItem('pirateflix_myList', JSON.stringify(list));
-    } catch {
-      // Ignore storage errors
-    }
-  }
+  // My List methods removed - now using UserDataService with Firestore
 
   private formatDate(value: string | null | undefined) {
     if (!value) return '—';

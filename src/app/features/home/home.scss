@@ -258,6 +258,20 @@ $accent-error: #ff6b6b;
     object-fit: cover;
   }
 
+  .avatar-initials {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: var(--bg-card, #1a1a1a);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent-primary, $accent-primary);
+    user-select: none;
+  }
+
   > mat-icon:first-of-type {
     font-size: 28px;
     width: 28px;
@@ -284,6 +298,16 @@ $accent-error: #ff6b6b;
   &.authenticated {
     > mat-icon:first-of-type {
       color: var(--accent-primary, $accent-primary);
+    }
+    
+    .avatar-initials {
+      border: 2px solid var(--accent-primary, $accent-primary);
+    }
+  }
+
+  &.has-photo {
+    .avatar-img {
+      border: 2px solid var(--accent-primary, $accent-primary);
     }
   }
 }

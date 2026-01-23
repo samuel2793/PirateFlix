@@ -25,10 +25,12 @@
       <button
         class="profile-avatar"
         [class.authenticated]="isAuthenticated()"
+        [class.has-photo]="userPhotoUrl()"
         (click)="toggleProfileMenu()"
         [title]="isAuthenticated() ? userDisplayName() : ('Sign in' | t)"
       >
-        <mat-icon>account_circle</mat-icon>
+        <img *ngIf="userPhotoUrl()" [src]="userPhotoUrl()" alt="Profile" class="avatar-img" />
+        <mat-icon *ngIf="!userPhotoUrl()" class="avatar-icon">account_circle</mat-icon>
         <mat-icon class="dropdown-caret" [class.open]="profileMenuOpen()">expand_more</mat-icon>
       </button>
 

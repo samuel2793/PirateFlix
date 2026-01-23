@@ -4,6 +4,8 @@ import { ActivatedRoute, Router, RouterModule, ParamMap } from '@angular/router'
 import { AlertController } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
 import { TmdbService } from '../../core/services/tmdb';
+import { UserDataService } from '../../core/services/user-data.service';
+import { FirebaseAuthService } from '../../core/services/firebase-auth';
 import { CreditsDetectionService } from '../../core/services/credits-detection.service';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { firstValueFrom, Subject, combineLatest, takeUntil } from 'rxjs';
@@ -144,6 +146,8 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly tmdb = inject(TmdbService);
   private readonly creditsDetection = inject(CreditsDetectionService);
+  private readonly userData = inject(UserDataService);
+  private readonly auth = inject(FirebaseAuthService);
 
   @ViewChild('videoPlayer', { static: false }) videoPlayer!: ElementRef<HTMLVideoElement>;
 
@@ -260,6 +264,11 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private audioSwitchPreviousSrc = '';
   private audioSwitchPreviousSelection: 'auto' | number = 'auto';
   private audioSwitchTargetSrc = '';
+  
+  // Watch progress tracking
+  private progressSaveInterval: any = null;
+  private lastSavedProgress = 0;
+  private currentMediaData: any = null; // Store TMDB data for saving progress
 
   private startNewPlaybackSession() {
     this.playbackSessionSeed += 1;
@@ -597,6 +606,9 @@ export class PlayerComponent implements OnInit, OnDestroy {
       this.pushLoadingLog(`Obteniendo datos de TMDB: ${type}/${id}`);
       const movieData = await firstValueFrom(this.tmdb.details(type, id));
       if (!this.isSessionActive(sessionId)) return;
+      
+      // Store media data for progress tracking
+      this.currentMediaData = movieData;
 
       const title = movieData.title || movieData.name;
       const year = (movieData.release_date || movieData.first_air_date || '').substring(0, 4);
@@ -2510,6 +2522,87 @@ export class PlayerComponent implements OnInit, OnDestroy {
         console.error('Error al obtener progreso:', error);
       }
     }, 1000);
+    
+    // Start watch progress saving (every 30 seconds)
+    this.startWatchProgressSaving();
+  }
+  
+  private startWatchProgressSaving() {
+    // Clear any existing interval
+    if (this.progressSaveInterval) {
+      clearInterval(this.progressSaveInterval);
+      this.progressSaveInterval = null;
+    }
+    
+    // Save progress every 30 seconds
+    this.progressSaveInterval = setInterval(() => {
+      this.saveWatchProgress();
+    }, 30000); // 30 seconds
+  }
+  
+  private async saveWatchProgress() {
+    console.log('💾 saveWatchProgress called');
+    
+    // Check if user is authenticated
+    if (!this.auth.isAuthenticated()) {
+      console.log('⚠️ User not authenticated, skipping save');
+      return;
+    }
+    
+    const v = this.videoPlayer?.nativeElement;
+    if (!v || !v.duration || !Number.isFinite(v.duration)) {
+      console.log('⚠️ Video not ready, skipping save', { 
+        hasVideo: !!v, 
+        duration: v?.duration,
+        isFinite: v?.duration ? Number.isFinite(v.duration) : false 
+      });
+      return;
+    }
+    
+    const currentTime = v.currentTime;
+    const duration = v.duration;
+    const progress = Math.min(100, Math.max(0, (currentTime / duration) * 100));
+    
+    // Only save if progress changed significantly (more than 1%)
+    if (Math.abs(progress - this.lastSavedProgress) < 1) {
+      console.log(`⏭️ Progress change too small (${Math.abs(progress - this.lastSavedProgress).toFixed(1)}%), skipping save`);
+      return;
+    }
+    
+    this.lastSavedProgress = progress;
+    
+    try {
+      const mediaData = this.currentMediaData;
+      if (!mediaData) {
+        console.log('⚠️ No media data available, skipping save');
+        return;
+      }
+      
+      const type = this.type();
+      const id = this.id();
+      const season = this.season();
+      const episode = this.episode();
+      
+      console.log(`📝 Preparing to save progress: ${progress.toFixed(1)}% for ${type} ${id}`);
+      
+      await this.userData.updateWatchProgress({
+        mediaType: type,
+        tmdbId: id,
+        title: mediaData.title || mediaData.name || 'Unknown',
+        poster: mediaData.poster_path,
+        backdrop: mediaData.backdrop_path,
+        progress,
+        lastPosition: currentTime,
+        season: season ?? undefined,
+        episode: episode ?? undefined,
+        runtime: Math.round(duration / 60), // Convert to minutes
+        genres: mediaData.genres?.map((g: any) => g.id),
+      });
+      
+      console.log(`✅ Progress saved: ${progress.toFixed(1)}% at ${Math.round(currentTime)}s`);
+    } catch (error) {
+      console.error('Error saving watch progress:', error);
+    }
   }
 
   private async pollTranscodeStatus() {
@@ -3441,6 +3534,9 @@ export class PlayerComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy() {
+    // Save final watch progress before leaving
+    this.saveWatchProgress();
+    
     // Complete destroy subject to unsubscribe from route params
     this.destroy$.next();
     this.destroy$.complete();
@@ -3449,6 +3545,12 @@ export class PlayerComponent implements OnInit, OnDestroy {
     if (this.progressInterval) {
       clearInterval(this.progressInterval);
       this.progressInterval = null;
+    }
+    
+    // Limpiar interval de guardado de progreso
+    if (this.progressSaveInterval) {
+      clearInterval(this.progressSaveInterval);
+      this.progressSaveInterval = null;
     }
 
     // Limpiar temporizador de controles

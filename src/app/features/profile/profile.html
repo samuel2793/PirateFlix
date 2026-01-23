@@ -1,5 +1,378 @@
 <app-global-nav></app-global-nav>
 
-<div class="profile-page">
-  <!-- Empty for now -->
+<div class="profile-page" [class.lang-transitioning]="isChangingLanguage()">
+  <!-- Loading State -->
+  <div class="loading-state" *ngIf="loading()">
+    <mat-spinner diameter="48"></mat-spinner>
+    <p class="translate-text">{{ 'Loading profile...' | t }}</p>
+  </div>
+
+  <!-- Not Authenticated -->
+  <div class="not-authenticated" *ngIf="!loading() && !isAuthenticated()">
+    <mat-icon>account_circle</mat-icon>
+    <h2 class="translate-text">{{ 'Sign in to view your profile' | t }}</h2>
+    <p class="translate-text">{{ 'Track your watch history, manage your list, and more' | t }}</p>
+    <button mat-flat-button color="primary" routerLink="/">
+      <mat-icon>home</mat-icon>
+      <span class="translate-text">{{ 'Home' | t }}</span>
+    </button>
+  </div>
+
+  <!-- Profile Content -->
+  <ng-container *ngIf="!loading() && isAuthenticated()">
+    <!-- Header -->
+    <header class="profile-header">
+      <div class="header-background"></div>
+      <div class="header-content">
+        <!-- Profile Info -->
+        <div class="profile-info">
+          <div class="avatar-section">
+            <div class="avatar" [class.has-photo]="photoUrl()">
+              <img *ngIf="photoUrl()" [src]="photoUrl()" alt="Profile" />
+              <div class="avatar-initials" *ngIf="!photoUrl()">{{ userInitials() }}</div>
+            </div>
+            <button class="avatar-edit-btn" (click)="openPhotoUpload()" [matTooltip]="'Change photo' | t">
+              <mat-icon>photo_camera</mat-icon>
+            </button>
+            <input 
+              #photoInput 
+              type="file" 
+              accept="image/*" 
+              style="display: none" 
+              (change)="onPhotoSelected($event)"
+            />
+          </div>
+          
+          <div class="user-details">
+            <div class="name-row" *ngIf="!editingProfile()">
+              <h1>{{ displayName() }}</h1>
+              <button class="btn-edit" (click)="startEditProfile()" [matTooltip]="'Edit profile' | t">
+                <mat-icon>edit</mat-icon>
+              </button>
+            </div>
+            <div class="name-edit" *ngIf="editingProfile()">
+              <input 
+                type="text" 
+                [(ngModel)]="editName" 
+                class="edit-input"
+                title="Display name"
+                [placeholder]="'Enter your name' | t"
+                maxlength="30"
+              />
+              <button class="btn-save" (click)="saveProfile()">
+                <mat-icon>check</mat-icon>
+              </button>
+              <button class="btn-cancel" (click)="cancelEditProfile()">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+            <p class="email">{{ userEmail() }}</p>
+            <p class="member-since translate-text">{{ 'Member since' | t }} {{ memberSince() }}</p>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="header-actions">
+          <button class="btn-action" (click)="goToSettings()">
+            <mat-icon>settings</mat-icon>
+            <span class="translate-text">{{ 'Settings' | t }}</span>
+          </button>
+          <button class="btn-action btn-logout" (click)="logout()">
+            <mat-icon>logout</mat-icon>
+            <span class="translate-text">{{ 'Sign out' | t }}</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Stats Cards -->
+    <section class="stats-section">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <mat-icon>movie</mat-icon>
+          <div class="stat-content">
+            <span class="stat-value">{{ stats().moviesWatched }}</span>
+            <span class="stat-label translate-text">{{ 'Movies watched' | t }}</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <mat-icon>tv</mat-icon>
+          <div class="stat-content">
+            <span class="stat-value">{{ stats().episodesWatched }}</span>
+            <span class="stat-label translate-text">{{ 'Episodes watched' | t }}</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <mat-icon>schedule</mat-icon>
+          <div class="stat-content">
+            <span class="stat-value">{{ formattedWatchTime() }}</span>
+            <span class="stat-label translate-text">{{ 'Total watch time' | t }}</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <mat-icon>local_fire_department</mat-icon>
+          <div class="stat-content">
+            <span class="stat-value">{{ stats().currentStreak }}</span>
+            <span class="stat-label translate-text">{{ 'Day streak' | t }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tabs -->
+    <nav class="profile-tabs">
+      <button 
+        class="tab-btn" 
+        [class.active]="activeTab() === 'overview'"
+        (click)="setTab('overview')">
+        <mat-icon>dashboard</mat-icon>
+        <span class="translate-text">{{ 'Overview' | t }}</span>
+      </button>
+      <button 
+        class="tab-btn" 
+        [class.active]="activeTab() === 'history'"
+        (click)="setTab('history')">
+        <mat-icon>history</mat-icon>
+        <span class="translate-text">{{ 'History' | t }}</span>
+      </button>
+      <button 
+        class="tab-btn" 
+        [class.active]="activeTab() === 'list'"
+        (click)="setTab('list')">
+        <mat-icon>bookmark</mat-icon>
+        <span class="translate-text">{{ 'My List' | t }}</span>
+      </button>
+    </nav>
+
+    <!-- Tab Content -->
+    <main class="profile-content">
+      <!-- Overview Tab -->
+      <div class="tab-content" *ngIf="activeTab() === 'overview'">
+        <!-- Top Genres -->
+        <section class="content-section" *ngIf="topGenres().length">
+          <h2 class="section-title translate-text">
+            <mat-icon>category</mat-icon>
+            {{ 'Top genres' | t }}
+          </h2>
+          <div class="genres-grid">
+            <div class="genre-chip" *ngFor="let genre of topGenres()">
+              <span class="genre-name">{{ getGenreName(genre.genreId) }}</span>
+              <span class="genre-count">{{ genre.count }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Continue Watching -->
+        <section class="content-section" *ngIf="continueWatching().length">
+          <h2 class="section-title translate-text">
+            <mat-icon>play_circle</mat-icon>
+            {{ 'Continue watching' | t }}
+          </h2>
+          <div class="media-grid horizontal-scroll">
+            <div 
+              class="media-card" 
+              *ngFor="let item of continueWatching()"
+              (click)="navigateToItem(item)">
+              <div class="media-poster">
+                <img [src]="getPosterUrl(item.poster)" [alt]="item.title" [title]="item.title" loading="lazy" />
+                <div class="progress-bar">
+                  <div class="progress-fill" [style.width.%]="item.progress"></div>
+                </div>
+                <button class="play-btn" (click)="playItem(item, $event)">
+                  <mat-icon>play_arrow</mat-icon>
+                </button>
+              </div>
+              <div class="media-info">
+                <h3 class="media-title">{{ item.title }}</h3>
+                <p class="media-meta" *ngIf="item.mediaType === 'tv'">
+                  {{ formatEpisodeLabel(item) }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Recent from My List -->
+        <section class="content-section" *ngIf="myList().length">
+          <div class="section-header">
+            <h2 class="section-title translate-text">
+              <mat-icon>bookmark</mat-icon>
+              {{ 'My List' | t }}
+            </h2>
+            <button class="btn-see-all" (click)="setTab('list')">
+              <span class="translate-text">{{ 'See all' | t }}</span>
+              <mat-icon>arrow_forward</mat-icon>
+            </button>
+          </div>
+          <div class="media-grid horizontal-scroll">
+            <div 
+              class="media-card" 
+              *ngFor="let item of myList().slice(0, 6)"
+              (click)="navigateToItem(item)">
+              <div class="media-poster">
+                <img [src]="getPosterUrl(item.poster)" [alt]="item.title" [title]="item.title" loading="lazy" />
+              </div>
+              <div class="media-info">
+                <h3 class="media-title">{{ item.title }}</h3>
+                <p class="media-meta" *ngIf="item.year">{{ item.year }}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Empty State -->
+        <div class="empty-state" *ngIf="!continueWatching().length && !myList().length && !topGenres().length">
+          <mat-icon>explore</mat-icon>
+          <h3 class="translate-text">{{ 'Start exploring' | t }}</h3>
+          <p class="translate-text">{{ 'Watch some content to see your activity here' | t }}</p>
+          <button mat-flat-button color="primary" routerLink="/">
+            <mat-icon>home</mat-icon>
+            <span class="translate-text">{{ 'Browse content' | t }}</span>
+          </button>
+        </div>
+
+        <!-- Account Section -->
+        <section class="content-section account-section">
+          <h2 class="section-title translate-text">
+            <mat-icon>manage_accounts</mat-icon>
+            {{ 'Account' | t }}
+          </h2>
+          <div class="account-actions">
+            <button class="account-btn" (click)="exportData()" [disabled]="exportingData()">
+              <mat-icon>download</mat-icon>
+              <div class="btn-text">
+                <span class="translate-text">{{ 'Export data' | t }}</span>
+                <span class="btn-desc translate-text">{{ 'Download all your data' | t }}</span>
+              </div>
+              <mat-spinner diameter="20" *ngIf="exportingData()"></mat-spinner>
+            </button>
+            <button class="account-btn danger" (click)="showDeleteAccountConfirm()">
+              <mat-icon>delete_forever</mat-icon>
+              <div class="btn-text">
+                <span class="translate-text">{{ 'Delete account data' | t }}</span>
+                <span class="btn-desc translate-text">{{ 'Remove all your data from our servers' | t }}</span>
+              </div>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <!-- History Tab -->
+      <div class="tab-content" *ngIf="activeTab() === 'history'">
+        <div class="tab-header" *ngIf="watchHistory().length">
+          <h2 class="translate-text">{{ 'Watch history' | t }}</h2>
+          <button class="btn-clear" (click)="clearAllHistory()">
+            <mat-icon>delete_sweep</mat-icon>
+            <span class="translate-text">{{ 'Clear all' | t }}</span>
+          </button>
+        </div>
+
+        <div class="history-list" *ngIf="watchHistory().length">
+          <div 
+            class="history-item" 
+            *ngFor="let item of watchHistory()"
+            (click)="navigateToItem(item)">
+            <div class="history-poster">
+              <img [src]="getPosterUrl(item.poster)" [alt]="item.title" [title]="item.title" loading="lazy" />
+              <div class="progress-bar" *ngIf="item.progress < 100">
+                <div class="progress-fill" [style.width.%]="item.progress"></div>
+              </div>
+              <mat-icon class="completed-icon" *ngIf="item.progress >= 95">check_circle</mat-icon>
+            </div>
+            <div class="history-info">
+              <h3 class="history-title">{{ item.title }}</h3>
+              <p class="history-meta">
+                <span *ngIf="item.mediaType === 'tv'">{{ formatEpisodeLabel(item) }}</span>
+                <span *ngIf="item.episodeTitle"> · {{ item.episodeTitle }}</span>
+              </p>
+              <p class="history-date">{{ formatDate(item.watchedAt) }}</p>
+            </div>
+            <div class="history-actions">
+              <button 
+                class="action-btn" 
+                *ngIf="item.progress < 95"
+                (click)="playItem(item, $event)"
+                [matTooltip]="'Continue' | t">
+                <mat-icon>play_arrow</mat-icon>
+              </button>
+              <button 
+                class="action-btn" 
+                (click)="removeFromHistory(item, $event)"
+                [matTooltip]="'Remove' | t">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="empty-state" *ngIf="!watchHistory().length">
+          <mat-icon>history</mat-icon>
+          <h3 class="translate-text">{{ 'No watch history' | t }}</h3>
+          <p class="translate-text">{{ 'Content you watch will appear here' | t }}</p>
+        </div>
+      </div>
+
+      <!-- My List Tab -->
+      <div class="tab-content" *ngIf="activeTab() === 'list'">
+        <div class="tab-header" *ngIf="myList().length">
+          <h2 class="translate-text">{{ 'My List' | t }}</h2>
+          <span class="item-count">{{ myList().length }} {{ myList().length === 1 ? ('item' | t) : ('items' | t) }}</span>
+        </div>
+
+        <div class="list-grid" *ngIf="myList().length">
+          <div 
+            class="list-card" 
+            *ngFor="let item of myList()"
+            (click)="navigateToItem(item)">
+            <div class="list-poster">
+              <img [src]="getPosterUrl(item.poster)" [alt]="item.title" [title]="item.title" loading="lazy" />
+              <button 
+                class="remove-btn" 
+                (click)="removeFromList(item, $event)"
+                [matTooltip]="'Remove from list' | t">
+                <mat-icon>close</mat-icon>
+              </button>
+            </div>
+            <div class="list-info">
+              <h3 class="list-title">{{ item.title }}</h3>
+              <div class="list-meta">
+                  <span class="media-type">{{ item.mediaType === 'movie' ? ('Movie' | t) : ('TV' | t) }}</span>
+                  <span *ngIf="item.year" class="year-badge">{{ item.year }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="empty-state" *ngIf="!myList().length">
+          <mat-icon>bookmark_border</mat-icon>
+          <h3 class="translate-text">{{ 'Your list is empty' | t }}</h3>
+          <p class="translate-text">{{ 'Add movies and shows to your list to watch later' | t }}</p>
+          <button mat-flat-button color="primary" routerLink="/">
+            <mat-icon>explore</mat-icon>
+            <span class="translate-text">{{ 'Explore content' | t }}</span>
+          </button>
+        </div>
+      </div>
+    </main>
+  </ng-container>
+
+  <!-- Delete Confirmation Modal -->
+  <div class="modal-overlay" *ngIf="showDeleteConfirm()" (click)="cancelDeleteAccount()">
+    <div class="modal-content" (click)="$event.stopPropagation()">
+      <div class="modal-icon danger">
+        <mat-icon>warning</mat-icon>
+      </div>
+      <h2 class="translate-text">{{ 'Delete account data?' | t }}</h2>
+      <p class="translate-text">{{ 'This will permanently delete all your watch history, lists, and preferences. This action cannot be undone.' | t }}</p>
+      <div class="modal-actions">
+        <button class="btn-cancel" (click)="cancelDeleteAccount()">
+          <span class="translate-text">{{ 'Cancel' | t }}</span>
+        </button>
+        <button class="btn-delete" (click)="confirmDeleteAccount()" [disabled]="deletingAccount()">
+          <mat-spinner diameter="18" *ngIf="deletingAccount()"></mat-spinner>
+          <span *ngIf="!deletingAccount()" class="translate-text">{{ 'Delete' | t }}</span>
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
