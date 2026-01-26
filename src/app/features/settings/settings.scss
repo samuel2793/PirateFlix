@@ -1,0 +1,667 @@
+// ========================================
+// Settings Page - Premium Streaming Design
+// Netflix / Apple TV Level Polish
+// ========================================
+
+// Fallback SCSS variables (CSS custom properties override these)
+$bg-page: #080808;
+$bg-elevated: #111111;
+$bg-card: #161616;
+$bg-subtle: rgba(255, 255, 255, 0.03);
+$bg-hover: rgba(255, 255, 255, 0.04);
+
+$text-primary: #f5f5f5;
+$text-secondary: rgba(255, 255, 255, 0.65);
+$text-tertiary: rgba(255, 255, 255, 0.45);
+
+$accent-gold: #d4a012;
+$accent-gold-bright: #e8b52a;
+$accent-gold-muted: rgba(212, 160, 18, 0.15);
+$accent-gold-subtle: rgba(212, 160, 18, 0.08);
+
+$border-default: rgba(255, 255, 255, 0.06);
+$border-hover: rgba(255, 255, 255, 0.12);
+$border-focus: rgba(212, 160, 18, 0.5);
+
+$shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+$shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+$radius-sm: 6px;
+$radius-md: 10px;
+$radius-lg: 14px;
+
+$spacing-xs: 8px;
+$spacing-sm: 12px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
+$spacing-xl: 32px;
+$spacing-2xl: 48px;
+
+$transition-fast: 0.15s ease;
+$transition-normal: 0.25s ease;
+$transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+:host {
+  display: block;
+  background: var(--bg-primary, $bg-page);
+  min-height: 100vh;
+}
+
+.settings-page {
+  background: var(--bg-primary, $bg-page);
+  color: var(--text-primary, $text-primary);
+  min-height: 100vh;
+  padding-top: 64px;
+  animation: settingsFadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &.lang-transitioning {
+    pointer-events: none;
+    
+    .translate-text {
+      opacity: 0.6;
+      transition: opacity $transition-fast;
+    }
+  }
+}
+
+@keyframes settingsFadeIn {
+  from { 
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ========================================
+// Header - Clean & Spacious
+// ========================================
+.settings-header {
+  background: linear-gradient(180deg, var(--bg-secondary, $bg-elevated) 0%, var(--bg-primary, $bg-page) 100%);
+  padding: $spacing-2xl 0 $spacing-xl;
+  position: relative;
+  
+  // Subtle accent line
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(100%, 900px);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-default, $border-default) 20%, var(--border-default, $border-default) 80%, transparent);
+    margin: 0 40px;
+  }
+}
+
+.header-content {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 $spacing-xl + 8px;
+  display: flex;
+  flex-direction: column;
+
+  @media (max-width: 768px) {
+    padding: 0 $spacing-lg;
+  }
+
+  h1 {
+    display: block;
+    font-size: var(--text-2xl, 28px);
+    font-weight: 600;
+    margin: 0 0 $spacing-sm;
+    letter-spacing: -0.025em;
+    color: var(--text-primary, $text-primary);
+
+    @media (max-width: 768px) {
+      font-size: var(--text-xl, 24px);
+    }
+  }
+}
+
+.header-subtitle {
+  display: block;
+  font-size: var(--text-md, 15px);
+  color: var(--text-tertiary, $text-tertiary);
+  margin: $spacing-xs 0 0 0;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+
+// ========================================
+// Content Container
+// ========================================
+.settings-content {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: $spacing-xl $spacing-xl + 8px $spacing-2xl + 20px;
+
+  @media (max-width: 768px) {
+    padding: $spacing-lg $spacing-lg $spacing-2xl;
+  }
+}
+
+// ========================================
+// Section Structure
+// ========================================
+.settings-section {
+  margin-bottom: $spacing-xl;
+  animation: sectionSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+
+  &:last-of-type {
+    margin-bottom: $spacing-lg;
+  }
+  
+  @for $i from 1 through 5 {
+    &:nth-child(#{$i}) {
+      animation-delay: #{$i * 0.05}s;
+    }
+  }
+}
+
+@keyframes sectionSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+  padding-left: 2px;
+
+  mat-icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    color: var(--accent-primary, $accent-gold);
+    opacity: 0.9;
+  }
+
+  h2 {
+    font-size: var(--text-xs, 11px);
+    font-weight: 600;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-tertiary, $text-tertiary);
+  }
+}
+
+// ========================================
+// Cards - Subtle & Refined
+// ========================================
+.settings-card {
+  background: var(--bg-card, $bg-card);
+  border: 1px solid var(--border-default, $border-default);
+  border-radius: $radius-lg;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm, $shadow-card);
+  transition: border-color $transition-normal, box-shadow $transition-normal, background-color $transition-normal;
+}
+
+// ========================================
+// Setting Items - Consistent Rhythm
+// ========================================
+.setting-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-lg $spacing-lg;
+  border-bottom: 1px solid var(--border-default, $border-default);
+  transition: background $transition-fast;
+  min-height: 72px;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &:hover {
+    background: var(--bg-hover, $bg-hover);
+  }
+
+  &.vertical {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: $spacing-md;
+    padding: $spacing-lg;
+  }
+
+  @media (max-width: 600px) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: $spacing-sm;
+    padding: $spacing-md $spacing-lg;
+    min-height: auto;
+  }
+}
+
+.setting-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.setting-label {
+  font-size: var(--text-md, 15px);
+  font-weight: 500;
+  color: var(--text-primary, $text-primary);
+  letter-spacing: -0.01em;
+}
+
+.setting-description {
+  font-size: var(--text-sm, 13px);
+  color: var(--text-tertiary, $text-tertiary);
+  line-height: 1.45;
+  max-width: 400px;
+}
+
+// ========================================
+// Option Chips - Elegant Selection
+// ========================================
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-xs;
+
+  &.scrollable {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    margin-bottom: -2px;
+    max-width: 100%;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+}
+
+.option-chip {
+  position: relative;
+  padding: $spacing-sm $spacing-md + 2px;
+  background: var(--bg-subtle, $bg-subtle);
+  border: 1px solid var(--border-default, $border-default);
+  border-radius: $radius-md;
+  color: var(--text-secondary, $text-secondary);
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all $transition-normal;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+
+  &:hover {
+    background: var(--bg-hover, $bg-hover);
+    border-color: var(--border-hover, $border-hover);
+    color: var(--text-primary, $text-primary);
+  }
+
+  &.active {
+    background: var(--accent-muted, $accent-gold-subtle);
+    border-color: var(--accent-primary, $accent-gold);
+    color: var(--accent-light, $accent-gold-bright);
+    font-weight: 600;
+    
+    // Inner glow effect
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 212, 160, 18), 0.2);
+  }
+}
+
+// ========================================
+// Theme Options - Refined Cards
+// ========================================
+.theme-options {
+  display: flex;
+  gap: $spacing-sm;
+
+  @media (max-width: 600px) {
+    width: 100%;
+  }
+}
+
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-xs;
+  padding: $spacing-lg $spacing-lg;
+  background: var(--bg-subtle, $bg-subtle);
+  border: 1px solid var(--border-default, $border-default);
+  border-radius: $radius-md;
+  color: var(--text-tertiary, $text-tertiary);
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all $transition-normal;
+  flex: 1;
+  min-width: 88px;
+  min-height: 80px;
+
+  mat-icon {
+    font-size: 24px;
+    width: 24px;
+    height: 24px;
+    color: var(--text-tertiary, $text-tertiary);
+    transition: color $transition-fast, transform $transition-normal;
+  }
+
+  &:hover {
+    background: var(--bg-hover, $bg-hover);
+    border-color: var(--border-hover, $border-hover);
+    color: var(--text-secondary, $text-secondary);
+
+    mat-icon {
+      color: var(--text-secondary, $text-secondary);
+      transform: scale(1.05);
+    }
+  }
+
+  &.active {
+    background: var(--accent-muted, $accent-gold-subtle);
+    border-color: var(--accent-primary, $accent-gold);
+    color: var(--accent-light, $accent-gold-bright);
+
+    mat-icon {
+      color: var(--accent-primary, $accent-gold);
+    }
+  }
+}
+
+// ========================================
+// Accent Color Picker - Swatch Grid
+// ========================================
+.accent-color-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+}
+
+.accent-color-swatch {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: var(--swatch-color, #d4a012);
+  cursor: pointer;
+  transition: all $transition-normal;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  // Inner ring effect
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border-radius: 50%;
+    background: var(--swatch-color, #d4a012);
+    transition: all $transition-normal;
+  }
+  
+  // Outer glow on hover
+  &:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+  }
+  
+  &.active {
+    border-color: var(--swatch-color, #d4a012);
+    box-shadow: 
+      0 0 0 2px var(--bg-card, $bg-card),
+      0 0 0 4px var(--swatch-color, #d4a012);
+    
+    &::before {
+      inset: 4px;
+    }
+  }
+  
+  .swatch-check {
+    position: relative;
+    z-index: 1;
+    color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    
+    mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      font-weight: bold;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    width: 38px;
+    height: 38px;
+    
+    .swatch-check mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+  }
+}
+
+// ========================================
+// Language Switcher - Pill Style
+// ========================================
+.language-switcher {
+  display: flex;
+  background: var(--bg-subtle, $bg-subtle);
+  border: 1px solid var(--border-default, $border-default);
+  border-radius: $radius-md;
+  padding: 3px;
+  gap: 2px;
+}
+
+.lang-btn {
+  position: relative;
+  padding: $spacing-sm $spacing-md + 4px;
+  background: transparent;
+  border: none;
+  border-radius: $radius-sm;
+  color: var(--text-tertiary, $text-tertiary);
+  font-size: var(--text-sm, 13px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all $transition-normal;
+  letter-spacing: 0.02em;
+
+  &:hover {
+    color: var(--text-primary, $text-primary);
+    background: var(--bg-hover, $bg-hover);
+  }
+
+  &.active {
+    background: var(--accent-primary, $accent-gold);
+    color: #0a0a0a;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  }
+}
+
+// ========================================
+// Material Slide Toggle - Custom Theme
+// ========================================
+::ng-deep {
+  .mat-mdc-slide-toggle {
+    --mdc-switch-track-height: 24px;
+    --mdc-switch-track-width: 44px;
+    --mdc-switch-handle-height: 18px;
+    --mdc-switch-handle-width: 18px;
+    
+    // Selected (ON) state - use CSS variables
+    --mdc-switch-selected-track-color: var(--accent-primary, #{$accent-gold}) !important;
+    --mdc-switch-selected-handle-color: #fff !important;
+    --mdc-switch-selected-hover-track-color: var(--accent-light, #{$accent-gold-bright}) !important;
+    --mdc-switch-selected-focus-track-color: var(--accent-primary, #{$accent-gold}) !important;
+    --mdc-switch-selected-pressed-track-color: var(--accent-primary, #{$accent-gold}) !important;
+    --mdc-switch-selected-hover-handle-color: #fff !important;
+    --mdc-switch-selected-focus-handle-color: #fff !important;
+    --mdc-switch-selected-pressed-handle-color: #fff !important;
+    
+    // Unselected (OFF) state
+    --mdc-switch-unselected-track-color: rgba(255, 255, 255, 0.15) !important;
+    --mdc-switch-unselected-handle-color: rgba(255, 255, 255, 0.5) !important;
+    --mdc-switch-unselected-hover-track-color: rgba(255, 255, 255, 0.2) !important;
+    --mdc-switch-unselected-hover-handle-color: rgba(255, 255, 255, 0.6) !important;
+    --mdc-switch-unselected-focus-track-color: rgba(255, 255, 255, 0.18) !important;
+    --mdc-switch-unselected-focus-handle-color: rgba(255, 255, 255, 0.55) !important;
+    
+    // Remove ripple
+    .mdc-switch__ripple {
+      display: none;
+    }
+  }
+}
+
+// ========================================
+// Reset Section - Serious but Subtle
+// ========================================
+.reset-section {
+  display: flex;
+  justify-content: center;
+  padding-top: $spacing-lg;
+  margin-top: $spacing-sm;
+}
+
+.btn-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm + 2px $spacing-lg;
+  background: transparent;
+  border: 1px solid var(--border-default, $border-default);
+  border-radius: $radius-md;
+  color: var(--text-tertiary, $text-tertiary);
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all $transition-normal;
+  letter-spacing: 0.01em;
+
+  mat-icon {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    opacity: 0.7;
+    transition: transform $transition-normal;
+  }
+
+  &:hover {
+    color: var(--text-secondary, $text-secondary);
+    border-color: var(--border-hover, $border-hover);
+    background: var(--bg-hover, $bg-hover);
+
+    mat-icon {
+      transform: rotate(-45deg);
+      opacity: 1;
+    }
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+// ========================================
+// Snackbar Override - Integrated Toast
+// ========================================
+::ng-deep {
+  .mat-mdc-snack-bar-container {
+    --mdc-snackbar-container-color: var(--bg-elevated, #{$bg-elevated});
+    --mdc-snackbar-supporting-text-color: var(--text-primary, #{$text-primary});
+    
+    .mdc-snackbar__surface {
+      background: var(--bg-elevated, $bg-elevated) !important;
+      border: 1px solid var(--border-default, $border-default);
+      border-radius: $radius-md !important;
+      box-shadow: $shadow-elevated !important;
+      
+      // Accent line - uses CSS variable
+      &::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--accent-primary, $accent-gold);
+        border-radius: $radius-md 0 0 $radius-md;
+      }
+    }
+    
+    .mdc-snackbar__label {
+      font-size: var(--text-sm, 14px);
+      font-weight: 500;
+      padding-left: $spacing-md;
+      color: var(--text-primary, $text-primary) !important;
+    }
+    
+    .mat-mdc-button.mat-mdc-snack-bar-action {
+      color: var(--accent-primary, $accent-gold) !important;
+      font-weight: 600;
+    }
+  }
+}
+
+// ========================================
+// Focus States - Accessibility
+// ========================================
+.option-chip:focus-visible,
+.theme-option:focus-visible,
+.lang-btn:focus-visible,
+.btn-reset:focus-visible,
+.accent-color-swatch:focus-visible {
+  outline: 2px solid var(--accent-primary, $accent-gold);
+  outline-offset: 2px;
+}
+
+// ========================================
+// Responsive Refinements
+// ========================================
+@media (max-width: 480px) {
+  .settings-header {
+    padding: $spacing-xl 0 $spacing-lg;
+  }
+  
+  .header-content h1 {
+    font-size: 22px;
+  }
+  
+  .theme-options {
+    gap: $spacing-xs;
+  }
+  
+  .theme-option {
+    padding: $spacing-md;
+    min-height: 70px;
+    
+    mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+  }
+  
+  .option-chip {
+    padding: $spacing-sm $spacing-sm + 4px;
+    font-size: 12px;
+  }
+}

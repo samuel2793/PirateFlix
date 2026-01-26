@@ -21,13 +21,13 @@ $accent-gold: $accent-primary-light;
 
 :host {
   display: block;
-  background: $bg-primary;
+  background: var(--bg-primary, $bg-primary);
   min-height: 100vh;
 }
 
 .details-page {
-  background: $bg-primary;
-  color: $text-primary;
+  background: var(--bg-primary, $bg-primary);
+  color: var(--text-primary, $text-primary);
   min-height: 100vh;
   padding-top: 64px; // Space for global navbar
   animation: detailsPageEnter 0.5s ease-out forwards;
@@ -52,18 +52,18 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: $bg-primary;
+  background: var(--bg-primary, $bg-primary);
 }
 
 .loading-spinner {
   text-align: center;
-  color: $text-secondary;
+  color: var(--text-secondary, $text-secondary);
 
   .spinner {
     width: 48px;
     height: 48px;
     border: 3px solid rgba(255, 255, 255, 0.1);
-    border-top-color: $accent-primary;
+    border-top-color: var(--accent-primary, $accent-primary);
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 0 auto 16px;
@@ -101,12 +101,12 @@ $accent-gold: $accent-primary-light;
   }
 
   h2 {
-    font-size: 24px;
+    font-size: var(--text-2xl, 24px);
     margin-bottom: 8px;
   }
 
   p {
-    color: $text-secondary;
+    color: var(--text-secondary, $text-secondary);
     margin-bottom: 24px;
   }
 }
@@ -137,11 +137,11 @@ $accent-gold: $accent-primary-light;
   inset: 0;
   background: linear-gradient(
     to top,
-    $bg-primary 0%,
-    rgba($bg-primary, 0.9) 15%,
-    rgba($bg-primary, 0.6) 40%,
-    rgba($bg-primary, 0.3) 60%,
-    rgba($bg-primary, 0.1) 80%,
+    var(--bg-primary, $bg-primary) 0%,
+    var(--bg-primary-90, rgba($bg-primary, 0.9)) 15%,
+    var(--bg-primary-60, rgba($bg-primary, 0.6)) 40%,
+    var(--bg-primary-30, rgba($bg-primary, 0.3)) 60%,
+    var(--bg-primary-10, rgba($bg-primary, 0.1)) 80%,
     transparent 100%
   );
 }
@@ -151,8 +151,8 @@ $accent-gold: $accent-primary-light;
   inset: 0;
   background: linear-gradient(
     to right,
-    rgba($bg-primary, 0.8) 0%,
-    rgba($bg-primary, 0.4) 30%,
+    var(--bg-primary-80, rgba($bg-primary, 0.8)) 0%,
+    var(--bg-primary-40, rgba($bg-primary, 0.4)) 30%,
     transparent 60%
   );
 }
@@ -222,7 +222,7 @@ $accent-gold: $accent-primary-light;
   font-weight: 700;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: $accent-primary;
+  color: var(--accent-primary, $accent-primary);
   margin-bottom: 16px;
   padding-left: 2.5px;
 }
@@ -237,9 +237,9 @@ $accent-gold: $accent-primary-light;
 }
 
 .tagline {
-  font-size: 20px;
+  font-size: var(--text-xl, 20px);
   font-style: italic;
-  color: $text-secondary;
+  color: var(--text-secondary, $text-secondary);
   margin: 0;
   letter-spacing: 0.02em;
 }
@@ -259,8 +259,8 @@ $accent-gold: $accent-primary-light;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba($accent-gold, 0.15);
-  color: $accent-gold;
+  background: rgba(var(--accent-rgb, 229, 160, 13), 0.15);
+  color: var(--accent-light, $accent-gold);
   padding: 6px 14px;
   border-radius: 6px;
   font-weight: 700;
@@ -274,15 +274,15 @@ $accent-gold: $accent-primary-light;
 }
 
 .meta-item {
-  font-size: 17px;
-  color: $text-secondary;
+  font-size: var(--text-base, 17px);
+  color: var(--text-secondary, $text-secondary);
   font-weight: 500;
 }
 
 .meta-divider {
   width: 5px;
   height: 5px;
-  background: $text-muted;
+  background: var(--text-muted, $text-muted);
   border-radius: 50%;
 }
 
@@ -294,23 +294,23 @@ $accent-gold: $accent-primary-light;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 20px;
-  font-size: 16px;
-  color: $text-secondary;
+  font-size: var(--text-base, 16px);
+  color: var(--text-secondary, $text-secondary);
   font-weight: 500;
 }
 
 .genre-dot {
   margin: 0 10px;
-  color: $text-muted;
+  color: var(--text-muted, $text-muted);
 }
 
 // ========================================
 // Overview
 // ========================================
 .overview {
-  font-size: 18px;
+  font-size: var(--text-lg, 18px);
   line-height: 1.7;
-  color: $text-secondary;
+  color: var(--text-secondary, $text-secondary);
   margin: 0 0 24px;
   max-width: 650px;
   font-weight: 400;
@@ -336,24 +336,24 @@ $accent-gold: $accent-primary-light;
 }
 
 .crew-label {
-  color: $text-muted;
+  color: var(--text-muted, $text-muted);
   margin-right: 8px;
   font-weight: 400;
 }
 
 .crew-value {
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   font-weight: 600;
 }
 
 .crew-link {
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   text-decoration: none;
   transition: color 0.2s ease, text-decoration 0.2s ease;
   cursor: pointer;
 
   &:hover {
-    color: $accent-primary;
+    color: var(--accent-primary, $accent-primary);
     text-decoration: underline;
   }
 }
@@ -373,12 +373,12 @@ $accent-gold: $accent-primary-light;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  background: $text-primary;
-  color: $bg-primary;
+  background: var(--text-primary, $text-primary);
+  color: var(--bg-primary, $bg-primary);
   border: none;
   padding: 16px 36px;
   border-radius: 6px;
-  font-size: 18px;
+  font-size: var(--text-lg, 18px);
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -391,7 +391,7 @@ $accent-gold: $accent-primary-light;
   }
 
   &:hover {
-    background: rgba(255, 255, 255, 0.85);
+    background: var(--text-secondary, rgba(255, 255, 255, 0.85));
     transform: scale(1.03);
   }
 }
@@ -401,11 +401,11 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   gap: 10px;
   background: rgba(229, 9, 20, 0.9);
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   border: none;
   padding: 16px 32px;
   border-radius: 6px;
-  font-size: 18px;
+  font-size: var(--text-lg, 18px);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -426,12 +426,12 @@ $accent-gold: $accent-primary-light;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.15);
-  color: $text-primary;
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.15));
+  color: var(--text-primary, $text-primary);
   border: none;
   padding: 16px 32px;
   border-radius: 6px;
-  font-size: 18px;
+  font-size: var(--text-lg, 18px);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -443,16 +443,16 @@ $accent-gold: $accent-primary-light;
   }
 
   &:hover {
-    background: rgba(255, 255, 255, 0.25);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.25));
   }
 
   &.active {
-    background: rgba(255, 255, 255, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.25));
+    border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.4));
 
     &:hover {
-      background: rgba(255, 255, 255, 0.3);
-      border-color: rgba(255, 255, 255, 0.5);
+      background: var(--bg-elevated, rgba(255, 255, 255, 0.3));
+      border-color: var(--border-secondary, rgba(255, 255, 255, 0.5));
     }
   }
 }
@@ -464,9 +464,9 @@ $accent-gold: $accent-primary-light;
   width: 50px;
   height: 50px;
   background: transparent;
-  border: 2px solid $text-secondary;
+  border: 2px solid var(--text-secondary, $text-secondary);
   border-radius: 50%;
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   cursor: pointer;
   transition: all 0.2s ease;
 
@@ -477,8 +477,8 @@ $accent-gold: $accent-primary-light;
   }
 
   &:hover {
-    border-color: $text-primary;
-    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--text-primary, $text-primary);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.1));
   }
 }
 
@@ -488,65 +488,68 @@ $accent-gold: $accent-primary-light;
 .series-picker {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 20px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  gap: 24px;
+  padding: 28px 24px;
+  background: var(--bg-elevated, linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%));
   border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.4);
 }
 
 .series-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px 24px;
+  gap: 16px 28px;
   flex-wrap: wrap;
 }
 
 .series-title-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .series-heading {
-  font-size: 16px;
+  font-size: var(--text-lg, 18px);
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
+  padding-left: 6px;
 }
 
 .season-picker {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
 }
 
 .season-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
 .season-caption {
-  font-size: 11px;
-  letter-spacing: 1px;
+  font-size: var(--text-sm, 14px);
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: $text-muted;
+  color: var(--text-muted, $text-muted);
+  padding-left: 6px;
 }
 
 .season-list {
   display: flex;
-  gap: 12px;
+  gap: 14px;
   overflow-x: auto;
-  padding-bottom: 6px;
+  padding-bottom: 8px;
   scroll-snap-type: x mandatory;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 
   &::-webkit-scrollbar {
     height: 6px;
@@ -566,243 +569,374 @@ $accent-gold: $accent-primary-light;
   position: relative;
   z-index: 0;
   flex: 0 0 auto;
-  min-width: 170px;
+  min-width: 180px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
-  padding: 12px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.45);
-  color: $text-primary;
+  gap: 5px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  background: var(--bg-card, rgba(0, 0, 0, 0.5));
+  color: var(--text-primary, $text-primary);
   text-align: left;
   cursor: pointer;
   font-family: inherit;
   scroll-snap-align: start;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.4s ease;
 
-  // Evita superponer tarjetas vecinas: solo realza con glow, sin mover el hitbox
   &:hover,
   &:focus-visible {
-    transform: none;
-    border-color: rgba($accent-primary, 0.4);
-    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.35);
-    z-index: 1;
+    border-color: rgba(var(--accent-rgb, 229, 160, 13), 0.4);
+    background: rgba(0, 0, 0, 0.6);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   }
 
   &:focus-visible {
-    outline: 2px solid $accent-primary;
+    outline: 2px solid var(--accent-primary, $accent-primary);
     outline-offset: 2px;
   }
 
   &.active {
-    border-color: rgba($accent-primary, 0.7);
-    background: linear-gradient(135deg, rgba($accent-primary, 0.28) 0%, rgba(0, 0, 0, 0.6) 100%);
-    box-shadow: 0 12px 26px rgba($accent-primary, 0.2);
+    border-color: var(--accent-primary, $accent-primary);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 229, 160, 13), 0.18) 0%, rgba(0, 0, 0, 0.65) 100%);
+    box-shadow: 
+      0 0 0 1px rgba(var(--accent-rgb, 229, 160, 13), 0.3),
+      0 4px 20px rgba(var(--accent-rgb, 229, 160, 13), 0.2),
+      0 8px 32px rgba(0, 0, 0, 0.4);
   }
 }
 
 .season-name {
-  font-size: 15px;
+  font-size: var(--text-base, 15px);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 .season-count {
-  font-size: 11px;
+  font-size: var(--text-2xs, 11px);
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: $text-muted;
+  color: var(--text-muted, rgba($text-muted, 0.9));
 }
 
 .series-summary {
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.12em;
-  color: $accent-primary;
-  padding: 6px 12px;
+  letter-spacing: 0.1em;
+  color: var(--accent-primary, $accent-primary);
+  padding: 7px 14px;
   border-radius: 999px;
-  background: rgba($accent-primary, 0.12);
-  border: 1px solid rgba($accent-primary, 0.35);
+  background: rgba(var(--accent-rgb, 229, 160, 13), 0.14);
+  border: 1px solid rgba(var(--accent-rgb, 229, 160, 13), 0.4);
 }
 
-.episode-grid {
-  display: grid;
-  gap: 16px;
-}
-
-@media (min-width: 1024px) {
-  .episode-grid {
-    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+// ========================================
+// Netflix-style Episode Row (Horizontal Scroll)
+// ========================================
+.netflix-episode-row-wrapper {
+  position: relative;
+  margin: 0 -24px;
+  padding: 0 24px;
+  
+  // Fade edges for smooth visual transition
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 48px;
+    pointer-events: none;
+    z-index: 3;
+  }
+  
+  &::before {
+    left: 0;
+    background: linear-gradient(to right, rgba(20, 20, 20, 1) 0%, transparent 100%);
+  }
+  
+  &::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(20, 20, 20, 1) 0%, transparent 100%);
   }
 }
 
-.episode-card {
-  display: grid;
-  grid-template-columns: minmax(180px, 260px) 1fr;
-  gap: 16px;
-  align-items: stretch;
-  text-align: left;
-  background: rgba(9, 9, 9, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 12px;
+.netflix-episode-row {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 16px 24px 28px;
+  margin: 0;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+
+  &::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 4px;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.4);
+    }
+  }
+}
+
+.netflix-episode-card {
+  flex: 0 0 auto;
+  width: clamp(280px, 24vw, 340px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card, rgba(255, 255, 255, 0.02));
+  border: 2px solid var(--border-primary, rgba(255, 255, 255, 0.08));
+  border-radius: 10px;
   color: inherit;
   cursor: pointer;
   font-family: inherit;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  text-align: left;
+  scroll-snap-align: start;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.4s ease;
+  outline: none;
 
   &:hover {
-    transform: translateY(-2px);
-    border-color: rgba($accent-primary, 0.4);
-    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
+    border-color: rgba(var(--accent-rgb, 229, 160, 13), 0.35);
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+
+    .thumbnail-overlay {
+      opacity: 0.3;
+    }
+
+    .episode-play-btn {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .episode-name {
+      color: var(--accent-primary, $accent-primary);
+    }
   }
 
   &:focus-visible {
-    outline: 2px solid $accent-primary;
-    outline-offset: 2px;
+    border-color: var(--accent-primary, $accent-primary);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb, 229, 160, 13), 0.25);
   }
 
   &.active {
-    border-color: rgba($accent-primary, 0.8);
-    background: rgba($accent-primary, 0.12);
-    box-shadow: 0 12px 30px rgba($accent-primary, 0.18);
+    border-color: var(--accent-primary, $accent-primary);
+    background: rgba(var(--accent-rgb, 229, 160, 13), 0.06);
+    box-shadow: 
+      0 0 0 1px rgba(var(--accent-rgb, 229, 160, 13), 0.4),
+      0 4px 24px rgba(var(--accent-rgb, 229, 160, 13), 0.25),
+      0 8px 40px rgba(0, 0, 0, 0.5);
+
+    .episode-badge {
+      background: var(--accent-primary, $accent-primary);
+      color: #000;
+      font-weight: 800;
+    }
+
+    .episode-name {
+      color: var(--accent-primary, $accent-primary);
+    }
   }
 }
 
-.episode-thumb {
+.episode-thumbnail {
   position: relative;
-  border-radius: 12px;
+  border-radius: 8px 8px 0 0;
   overflow: hidden;
-  background: #1c1c1c;
-  min-height: 120px;
+  background: linear-gradient(135deg, #1a1a1a 0%, #0d0d0d 100%);
+  aspect-ratio: 16 / 9;
 
   img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
-    transition: transform 0.35s ease;
+    transition: opacity 0.3s ease;
   }
 }
 
-.episode-card:hover .episode-thumb img {
-  transform: scale(1.05);
+// Play button for episodes
+.episode-play-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.9);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb, 229, 160, 13), 0.95);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease, background 0.2s ease;
+  z-index: 2;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  mat-icon {
+    color: #000;
+    font-size: 26px;
+    width: 26px;
+    height: 26px;
+    margin-left: 2px;
+  }
+
+  &:hover {
+    background: var(--accent-primary, $accent-primary);
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+
+  &:active {
+    transform: translate(-50%, -50%) scale(0.95);
+  }
 }
 
-.episode-chip {
+.thumbnail-overlay {
   position: absolute;
-  left: 10px;
-  bottom: 10px;
-  background: rgba(0, 0, 0, 0.7);
-  color: $text-primary;
-  font-size: 11px;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.7) 0%,
+    transparent 50%
+  );
+  opacity: 0.5;
+  transition: opacity 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+  pointer-events: none;
+}
+
+.episode-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.9);
+  color: var(--text-primary, $text-primary);
+  font-size: var(--text-2xs, 11px);
   font-weight: 700;
-  letter-spacing: 0.12em;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  letter-spacing: 0.06em;
+  padding: 6px 11px;
+  border-radius: 5px;
   text-transform: uppercase;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  transition: all 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .episode-runtime {
   position: absolute;
-  right: 10px;
-  top: 10px;
-  background: rgba(0, 0, 0, 0.65);
-  color: $text-primary;
-  font-size: 11px;
+  right: 12px;
+  bottom: 12px;
+  background: rgba(0, 0, 0, 0.9);
+  color: var(--text-primary, $text-primary);
+  font-size: var(--text-2xs, 11px);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  padding: 4px 8px;
-  border-radius: 8px;
-  text-transform: uppercase;
+  padding: 5px 9px;
+  border-radius: 5px;
+  letter-spacing: 0.03em;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.episode-rating {
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba($accent-primary, 0.9);
-  color: $bg-primary;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 4px 8px;
-  border-radius: 8px;
-  text-transform: uppercase;
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
-
-  mat-icon {
-    font-size: 14px;
-    width: 14px;
-    height: 14px;
-  }
-}
-
-.episode-body {
+.episode-info {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-right: 8px;
+  padding: 16px 6px 10px;
 }
 
-.episode-title {
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0;
-  color: $text-primary;
-}
-
-.episode-meta {
-  font-size: 11px;
+.episode-name {
+  font-size: var(--text-base, 15px);
   font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: $text-muted;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--text-primary, $text-primary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color 0.25s cubic-bezier(0.4, 0.0, 0.2, 1);
 }
 
-.episode-overview {
-  font-size: 14px;
-  line-height: 1.55;
-  color: $text-secondary;
+.episode-description {
+  font-size: var(--text-sm, 14px);
+  line-height: 1.6;
+  color: var(--text-secondary, $text-secondary);
   margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  min-height: calc(14px * 1.6 * 2.5);
 
   &.muted {
-    color: $text-muted;
+    color: var(--text-muted, $text-muted);
+    font-style: italic;
   }
 }
 
-.episode-grid.skeleton {
-  .episode-card {
+// Skeleton Loading State
+.netflix-episode-row.skeleton {
+  .netflix-episode-card {
     cursor: default;
-    background: rgba(255, 255, 255, 0.04);
-    border-style: dashed;
-    border-color: rgba(255, 255, 255, 0.12);
+    pointer-events: none;
 
     &:hover {
       transform: none;
-      box-shadow: none;
-      border-color: rgba(255, 255, 255, 0.12);
     }
   }
 
-  .episode-thumb {
-    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+  .episode-thumbnail {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
     background-size: 200% 100%;
     animation: shimmer 1.6s infinite;
   }
+
+  .episode-info {
+    gap: 10px;
+  }
+
+  .skeleton-line {
+    height: 12px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
+    background-size: 200% 100%;
+    animation: shimmer 1.6s infinite;
+
+    &.title {
+      width: 70%;
+      height: 14px;
+    }
+
+    &.desc {
+      width: 100%;
+    }
+
+    &.short {
+      width: 60%;
+    }
+  }
 }
 
+// Legacy skeleton line support (for non-episode skeletons)
 .skeleton-line {
   height: 10px;
   border-radius: 999px;
@@ -823,16 +957,19 @@ $accent-gold: $accent-primary-light;
 .episodes-empty {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px;
-  color: $text-muted;
-  font-size: 14px;
+  gap: 14px;
+  padding: 24px 20px;
+  color: var(--text-muted, $text-muted);
+  font-size: var(--text-sm, 14px);
+  border-radius: 8px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.06));
 
   mat-icon {
-    font-size: 24px;
-    width: 24px;
-    height: 24px;
-    color: $accent-primary;
+    font-size: 28px;
+    width: 28px;
+    height: 28px;
+    color: var(--accent-primary, $accent-primary);
   }
 }
 
@@ -855,8 +992,8 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  font-size: 13px;
-  color: $text-secondary;
+  font-size: var(--text-xs, 13px);
+  color: var(--text-secondary, $text-secondary);
 
   input {
     display: none;
@@ -865,7 +1002,7 @@ $accent-gold: $accent-primary-light;
   .toggle-track {
     width: 36px;
     height: 20px;
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.2));
     border-radius: 10px;
     position: relative;
     transition: background 0.2s ease;
@@ -877,14 +1014,14 @@ $accent-gold: $accent-primary-light;
       left: 2px;
       width: 16px;
       height: 16px;
-      background: $text-primary;
+      background: var(--text-primary, $text-primary);
       border-radius: 50%;
       transition: transform 0.2s ease;
     }
   }
 
   input:checked + .toggle-track {
-    background: $accent-primary;
+    background: var(--accent-primary, $accent-primary);
 
     &::after {
       transform: translateX(16px);
@@ -904,10 +1041,10 @@ $accent-gold: $accent-primary-light;
 }
 
 .section-title {
-  font-size: 26px;
+  font-size: var(--text-2xl, 26px);
   font-weight: 700;
   margin: 0 0 28px;
-  color: $text-primary;
+  color: var(--text-primary, $text-primary);
   letter-spacing: -0.01em;
 }
 
@@ -915,7 +1052,7 @@ $accent-gold: $accent-primary-light;
 // Cast Section
 // ========================================
 .cast-section {
-  background: $bg-primary;
+  background: var(--bg-primary, $bg-primary);
   animation: sectionSlide 0.6s ease-out;
 }
 
@@ -955,7 +1092,7 @@ $accent-gold: $accent-primary-light;
 .cast-card {
   flex: 0 0 auto;
   width: 160px;
-  background: $bg-card;
+  background: var(--bg-card, $bg-card);
   border-radius: 10px;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -993,7 +1130,7 @@ $accent-gold: $accent-primary-light;
 }
 
 .cast-name {
-  font-size: 15px;
+  font-size: var(--text-base, 15px);
   font-weight: 600;
   margin-bottom: 4px;
   white-space: nowrap;
@@ -1002,8 +1139,8 @@ $accent-gold: $accent-primary-light;
 }
 
 .cast-role {
-  font-size: 13px;
-  color: $text-muted;
+  font-size: var(--text-xs, 13px);
+  color: var(--text-muted, $text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1013,7 +1150,7 @@ $accent-gold: $accent-primary-light;
 // Info Section (Collapsible)
 // ========================================
 .info-section {
-  background: $bg-primary;
+  background: var(--bg-primary, $bg-primary);
   padding: 0 4% 40px !important;
 }
 
@@ -1023,18 +1160,18 @@ $accent-gold: $accent-primary-light;
   justify-content: space-between;
   width: 100%;
   padding: 16px 20px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-card, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.1));
   border-radius: 12px;
-  color: $text-primary;
-  font-size: 16px;
+  color: var(--text-primary, $text-primary);
+  font-size: var(--text-base, 16px);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.15);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+    border-color: var(--border-secondary, rgba(255, 255, 255, 0.15));
   }
 
   .toggle-left {
@@ -1046,7 +1183,7 @@ $accent-gold: $accent-primary-light;
       font-size: 22px;
       width: 22px;
       height: 22px;
-      color: $text-secondary;
+      color: var(--text-secondary, $text-secondary);
     }
   }
 
@@ -1054,7 +1191,7 @@ $accent-gold: $accent-primary-light;
     font-size: 24px;
     width: 24px;
     height: 24px;
-    color: $text-secondary;
+    color: var(--text-secondary, $text-secondary);
     transition: transform 0.3s ease;
 
     &.expanded {
@@ -1094,16 +1231,16 @@ $accent-gold: $accent-primary-light;
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
   border-radius: 8px;
-  color: $text-secondary;
-  font-size: 14px;
+  color: var(--text-secondary, $text-secondary);
+  font-size: var(--text-sm, 14px);
 
   mat-icon {
     font-size: 18px;
     width: 18px;
     height: 18px;
-    color: $accent-primary;
+    color: var(--accent-primary, $accent-primary);
   }
 }
 
@@ -1113,9 +1250,9 @@ $accent-gold: $accent-primary-light;
   gap: 16px;
   margin-top: 24px;
   padding: 20px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-card, rgba(255, 255, 255, 0.04));
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.06));
 }
 
 .info-column {
@@ -1124,18 +1261,18 @@ $accent-gold: $accent-primary-light;
   gap: 12px;
 
   .info-label {
-    font-size: 13px;
+    font-size: var(--text-xs, 13px);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: $text-muted;
+    color: var(--text-muted, $text-muted);
     min-width: 120px;
     flex-shrink: 0;
   }
 
   .info-value {
-    font-size: 15px;
-    color: $text-primary;
+    font-size: var(--text-base, 15px);
+    color: var(--text-primary, $text-primary);
     line-height: 1.5;
     font-weight: 500;
   }
@@ -1148,11 +1285,11 @@ $accent-gold: $accent-primary-light;
   gap: 8px;
   margin-top: 24px;
   padding: 14px 24px;
-  background: linear-gradient(135deg, rgba($accent-primary, 0.15) 0%, rgba($accent-primary, 0.08) 100%);
-  border: 1px solid rgba($accent-primary, 0.3);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb, 229, 160, 13), 0.15) 0%, rgba(var(--accent-rgb, 229, 160, 13), 0.08) 100%);
+  border: 1px solid rgba(var(--accent-rgb, 229, 160, 13), 0.3);
   border-radius: 10px;
-  color: $text-primary;
-  font-size: 14px;
+  color: var(--text-primary, $text-primary);
+  font-size: var(--text-sm, 14px);
   font-weight: 600;
   text-decoration: none;
   transition: all 0.3s ease;
@@ -1162,14 +1299,14 @@ $accent-gold: $accent-primary-light;
     font-size: 18px;
     width: 18px;
     height: 18px;
-    color: $accent-primary;
+    color: var(--accent-primary, $accent-primary);
   }
 
   &:hover {
-    background: linear-gradient(135deg, rgba(229, 160, 13, 0.25) 0%, rgba(229, 160, 13, 0.15) 100%);
-    border-color: rgba(229, 160, 13, 0.5);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 229, 160, 13), 0.25) 0%, rgba(var(--accent-rgb, 229, 160, 13), 0.15) 100%);
+    border-color: rgba(var(--accent-rgb, 229, 160, 13), 0.5);
     transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(229, 160, 13, 0.2);
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb, 229, 160, 13), 0.2);
   }
 }
 
@@ -1261,31 +1398,44 @@ $accent-gold: $accent-primary-light;
     padding: 10px 12px;
   }
 
-  .episode-grid {
+  // Netflix Episode Row - Mobile
+  .netflix-episode-row {
     gap: 12px;
+    padding: 4px 0 16px;
+    margin: 0;
   }
 
-  .episode-card {
-    grid-template-columns: 1fr;
-    padding: 10px;
+  .netflix-episode-card {
+    width: clamp(200px, 70vw, 280px);
   }
 
-  .episode-thumb {
-    aspect-ratio: 16 / 9;
-    min-height: 0;
+  .episode-badge {
+    font-size: 10px;
+    padding: 4px 8px;
+    top: 8px;
+    left: 8px;
   }
 
-  .episode-body {
-    padding-right: 0;
+  .episode-runtime {
+    font-size: 10px;
+    padding: 3px 6px;
+    right: 8px;
+    bottom: 8px;
   }
 
-  .episode-title {
-    font-size: 16px;
+  .episode-info {
+    padding: 10px 2px 6px;
+    gap: 4px;
   }
 
-  .episode-overview {
+  .episode-name {
     font-size: 13px;
-    -webkit-line-clamp: 4;
+  }
+
+  .episode-description {
+    font-size: 12px;
+    -webkit-line-clamp: 2;
+    min-height: calc(12px * 1.5 * 2);
   }
 
   .playback-options {

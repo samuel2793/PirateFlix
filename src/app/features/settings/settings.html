@@ -1,0 +1,214 @@
+<app-global-nav></app-global-nav>
+
+<div class="settings-page" [class.lang-transitioning]="isChangingLanguage()">
+  <header class="settings-header">
+    <div class="header-content">
+      <h1 class="translate-text">{{ 'Settings' | t }}</h1>
+      <p class="header-subtitle translate-text">{{ 'Customize your viewing experience' | t }}</p>
+    </div>
+  </header>
+
+  <main class="settings-content">
+    <!-- Playback Section -->
+    <section class="settings-section">
+      <div class="section-title-row">
+        <mat-icon>play_circle</mat-icon>
+        <h2 class="translate-text">{{ 'Playback' | t }}</h2>
+      </div>
+
+      <div class="settings-card">
+        <!-- Autoplay Next Episode -->
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Autoplay next episode' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Continue to the next episode automatically' | t }}</span>
+          </div>
+          <mat-slide-toggle 
+            [checked]="autoplayNextEpisode()" 
+            (change)="toggleAutoplayNextEpisode($event)"
+            color="primary">
+          </mat-slide-toggle>
+        </div>
+      </div>
+    </section>
+
+    <!-- Appearance Section -->
+    <section class="settings-section">
+      <div class="section-title-row">
+        <mat-icon>palette</mat-icon>
+        <h2 class="translate-text">{{ 'Appearance' | t }}</h2>
+      </div>
+
+      <div class="settings-card">
+        <!-- Theme -->
+        <div class="setting-item vertical">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Theme' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Choose your preferred color scheme' | t }}</span>
+          </div>
+          <div class="theme-options">
+            <button 
+              *ngFor="let option of themeOptions"
+              class="theme-option"
+              [class.active]="theme() === option.value"
+              (click)="setTheme(option.value)">
+              <mat-icon>{{ option.icon }}</mat-icon>
+              <span class="translate-text">{{ option.label | t }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Accent Color -->
+        <div class="setting-item vertical">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Accent color' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Customize the app highlight color' | t }}</span>
+          </div>
+          <div class="accent-color-options">
+            <button 
+              *ngFor="let color of accentColorOptions"
+              class="accent-color-swatch"
+              [class.active]="accentColor() === color.value"
+              [style.--swatch-color]="color.color"
+              [attr.title]="color.label"
+              (click)="setAccentColor(color.value)">
+              <span class="swatch-check" *ngIf="accentColor() === color.value">
+                <mat-icon>check</mat-icon>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Reduce Motion -->
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Reduce motion' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Minimize animations throughout the app' | t }}</span>
+          </div>
+          <mat-slide-toggle 
+            [checked]="reduceMotion()" 
+            (change)="toggleReduceMotion($event)"
+            color="primary">
+          </mat-slide-toggle>
+        </div>
+
+        <!-- Text Size -->
+        <div class="setting-item vertical">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Text size' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Adjust the size of text throughout the app' | t }}</span>
+          </div>
+          <div class="option-chips">
+            <button 
+              *ngFor="let option of textSizeOptions"
+              class="option-chip"
+              [class.active]="textSize() === option.value"
+              (click)="setTextSize(option.value)">
+              <span class="translate-text">{{ option.label | t }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- High Contrast -->
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'High contrast' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Increase contrast for better visibility' | t }}</span>
+          </div>
+          <mat-slide-toggle 
+            [checked]="highContrast()" 
+            (change)="toggleHighContrast($event)"
+            color="primary">
+          </mat-slide-toggle>
+        </div>
+      </div>
+    </section>
+
+    <!-- Language & Audio Section -->
+    <section class="settings-section">
+      <div class="section-title-row">
+        <mat-icon>translate</mat-icon>
+        <h2 class="translate-text">{{ 'Language & Audio' | t }}</h2>
+      </div>
+
+      <div class="settings-card">
+        <!-- Interface Language -->
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Interface language' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Language used for menus and navigation' | t }}</span>
+          </div>
+          <div class="language-switcher">
+            <button 
+              class="lang-btn" 
+              [class.active]="currentLang() === 'en'"
+              (click)="changeLang('en')">English</button>
+            <button 
+              class="lang-btn" 
+              [class.active]="currentLang() === 'es'"
+              (click)="changeLang('es')">Español</button>
+          </div>
+        </div>
+
+        <!-- Preferred Audio -->
+        <div class="setting-item vertical">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Preferred audio' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Default audio language for content' | t }}</span>
+          </div>
+          <div class="option-chips scrollable">
+            <button 
+              *ngFor="let lang of audioLanguages"
+              class="option-chip"
+              [class.active]="preferredAudioLang() === lang.value"
+              (click)="setAudioLang(lang.value)">
+              {{ lang.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Preferred Subtitles -->
+        <div class="setting-item vertical">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Subtitles' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Default subtitle language' | t }}</span>
+          </div>
+          <div class="option-chips scrollable">
+            <button 
+              *ngFor="let lang of subtitleLanguages"
+              class="option-chip"
+              [class.active]="preferredSubtitleLang() === lang.value"
+              (click)="setSubtitleLang(lang.value)">
+              {{ lang.label }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Subtitle Size -->
+        <div class="setting-item vertical" *ngIf="showSubtitles()">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Subtitle size' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Size of subtitles during playback' | t }}</span>
+          </div>
+          <div class="option-chips">
+            <button 
+              *ngFor="let option of textSizeOptions"
+              class="option-chip"
+              [class.active]="subtitleSize() === option.value"
+              (click)="setSubtitleSize(option.value)">
+              <span class="translate-text">{{ option.label | t }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reset Section -->
+    <section class="settings-section reset-section">
+      <button class="btn-reset" (click)="resetToDefaults()">
+        <mat-icon>refresh</mat-icon>
+        <span class="translate-text">{{ 'Reset to defaults' | t }}</span>
+      </button>
+    </section>
+  </main>
+</div>

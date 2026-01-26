@@ -1205,19 +1205,31 @@ async function ensureTranscodedFile({
   if (mode === 'full') {
     ffmpegCommand
       .videoCodec('libx264')
-      .videoBitrate('2500k')
       .audioCodec('aac')
-      .audioBitrate('192k')
+      .audioBitrate('128k')
       .audioChannels(2)
-      .outputOptions(['-preset ultrafast', '-tune zerolatency']);
+      .outputOptions([
+        '-preset ultrafast',
+        '-tune zerolatency',
+        '-crf 28',
+        '-threads 0',
+        '-g 30',
+        '-bf 0',
+        '-refs 1',
+        '-rc-lookahead 0',
+      ]);
   } else if (mode === 'audio') {
     ffmpegCommand
       .videoCodec('copy')
       .audioCodec('aac')
-      .audioBitrate('192k')
-      .audioChannels(2);
+      .audioBitrate('128k')
+      .audioChannels(2)
+      .outputOptions(['-threads 0']);
   } else if (mode === 'remux') {
-    ffmpegCommand.videoCodec('copy').audioCodec('copy');
+    ffmpegCommand
+      .videoCodec('copy')
+      .audioCodec('copy')
+      .outputOptions(['-threads 0']);
   }
 
   activeFFmpegProcesses.set(cacheKey, ffmpegCommand);
@@ -1388,18 +1400,161 @@ async function streamTranscodedFile({
   if (mode === 'full') {
     ffmpegCommand
       .videoCodec('libx264')
-      .videoBitrate('2500k')
       .audioCodec('aac')
-      .audioBitrate('192k')
+      .audioBitrate('128k')
       .audioChannels(2)
-      .outputOptions(['-preset ultrafast', '-tune zerolatency']);
+      .outputOptions([
+        '-preset ultrafast',
+        '-tune zerolatency',
+        '-crf 28',
+        '-threads 0',
+        '-g 30',
+        '-bf 0',
+      ]);
   } else if (mode === 'audio') {
     ffmpegCommand
       .videoCodec('copy')
       .audioCodec('aac')
-      .audioBitrate('192k')
-      .audioChannels(2);
+      .audioBitrate('128k')
+      .audioChannels(2)
+      .outputOptions(['-threads 0']);
   } else if (mode === 'remux') {
+    ffmpegCommand
+      .videoCodec('copy')
+      .audioCodec('copy')
+      .outputOptions(['-threads 0']);
+  }
+
+  activeFFmpegProcesses.set(cacheKey, ffmpegCommand);
+  ffmpegCommand.pipe(res, { end: true });
+}
+
+// =====================
+// Seek por tiempo - Stream instantáneo desde cualquier posición
+// =====================
+async function streamSeekFromTime({
+  infoHash,
+  fileIndex,
+  file,
+  filePath,
+  seekTime,
+  mode,
+  audioStreamIndex,
+  res,
+}) {
+  const cacheKey = `seek_${infoHash}_${fileIndex}_${Math.floor(seekTime)}`;
+  
+  const existing = activeFFmpegProcesses.get(cacheKey);
+  if (existing) {
+    try {
+      existing.kill('SIGKILL');
+    } catch (_) {}
+    activeFFmpegProcesses.delete(cacheKey);
+  }
+
+  const useTorrentStream = Number(file?.downloaded || 0) < Number(file?.length || 0);
+  let inputStream = null;
+  
+  // Para seek, preferimos el archivo en disco si está disponible
+  if (!useTorrentStream) {
+    try {
+      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+    } catch (err) {
+      console.warn('Advertencia: waitForFileOnDisk falló antes de seek:', err.message);
+    }
+  } else {
+    inputStream = file.createReadStream();
+  }
+
+  const inputSource = useTorrentStream ? inputStream : filePath;
+
+  const mapOptions = [];
+  if (Number.isFinite(audioStreamIndex)) {
+    mapOptions.push('-map', '0:v:0', '-map', `0:${audioStreamIndex}?`);
+  }
+
+  const outputOptions = [
+    ...mapOptions,
+    '-movflags +frag_keyframe+empty_moov+default_base_moof',
+    '-max_muxing_queue_size 1024',
+  ];
+
+  let closed = false;
+  let finished = false;
+  let ffmpegCommand = null;
+
+  const cleanup = () => {
+    if (inputStream) {
+      try {
+        inputStream.destroy();
+      } catch (_) {}
+    }
+    activeFFmpegProcesses.delete(cacheKey);
+    if (infoHash) {
+      maybeDestroyPending(infoHash);
+    }
+  };
+
+  res.on('close', () => {
+    closed = true;
+    try {
+      if (ffmpegCommand) ffmpegCommand.kill('SIGKILL');
+    } catch (_) {}
+    if (!finished) {
+      cleanup();
+    }
+  });
+
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Cache-Control': 'no-store',
+    'Accept-Ranges': 'none',
+  });
+
+  // Crear comando ffmpeg con -ss ANTES del input para seek rápido a keyframe
+  ffmpegCommand = ffmpeg()
+    .input(inputSource)
+    .inputOptions([`-ss ${seekTime}`]) // Seek rápido antes del input
+    .format('mp4')
+    .outputOptions(outputOptions)
+    .on('start', (cmd) => {
+      console.log(`🔄 FFmpeg seek streaming desde ${seekTime}s:`, file.name);
+    })
+    .on('error', (err) => {
+      if (closed) return;
+      if (!String(err.message || '').includes('SIGKILL')) {
+        console.error('❌ Error FFmpeg (seek stream):', err.message);
+      }
+      finished = true;
+      cleanup();
+    })
+    .on('end', () => {
+      finished = true;
+      cleanup();
+    });
+
+  if (mode === 'full') {
+    ffmpegCommand
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .audioBitrate('128k')
+      .audioChannels(2)
+      .outputOptions([
+        '-preset ultrafast',
+        '-tune zerolatency',
+        '-crf 28',
+        '-threads 0',
+        '-g 30',
+        '-bf 0',
+      ]);
+  } else if (mode === 'audio') {
+    ffmpegCommand
+      .videoCodec('copy')
+      .audioCodec('aac')
+      .audioBitrate('128k')
+      .audioChannels(2);
+  } else {
+    // remux o default - solo copiar
     ffmpegCommand.videoCodec('copy').audioCodec('copy');
   }
 
@@ -2915,6 +3070,61 @@ app.get('/api/transcode-status/:infoHash/:fileIndex', (req, res) => {
 });
 
 // =====================
+// Seek por tiempo - Stream instantáneo desde cualquier posición
+// =====================
+app.get('/api/stream-seek/:infoHash/:fileIndex', async (req, res) => {
+  const { infoHash, fileIndex } = req.params;
+  const timeParam = req.query.time || req.query.t;
+  const audioStreamParam = req.query.audioStream;
+  
+  const seekTime = parseFloat(timeParam) || 0;
+  const audioStreamIndex =
+    typeof audioStreamParam === 'string' && audioStreamParam.trim() !== ''
+      ? Number(audioStreamParam)
+      : null;
+  
+  const torrent = client.get(infoHash);
+  if (!torrent) return res.status(404).send('Torrent no encontrado');
+
+  const file = torrent.files[parseInt(fileIndex, 10)];
+  if (!file) return res.status(404).send('Archivo no encontrado');
+  selectOnlyFile(torrent, parseInt(fileIndex, 10));
+
+  attachStreamLifecycle(infoHash, res);
+
+  const filePath = path.join(torrent.path, file.path);
+  const transcodeDecision = await determineTranscodeMode(
+    file,
+    filePath,
+    Number.isFinite(audioStreamIndex) ? audioStreamIndex : null
+  );
+
+  console.log(
+    `🎯 Seek streaming desde ${seekTime}s:`,
+    file.name,
+    `(mode=${transcodeDecision.mode})`
+  );
+
+  try {
+    await streamSeekFromTime({
+      infoHash,
+      fileIndex,
+      file,
+      filePath,
+      seekTime,
+      mode: transcodeDecision.mode,
+      audioStreamIndex,
+      res,
+    });
+  } catch (err) {
+    console.error('Error en seek streaming:', err?.message || err);
+    if (!res.headersSent) {
+      res.status(500).send('Error al hacer seek en video');
+    }
+  }
+});
+
+// =====================
 // Streaming
 // =====================
 app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
@@ -3249,6 +3459,58 @@ app.get('/health', (req, res) => {
   });
 });
 
+// TheIntroDB Proxy - Get skip times for credits/intros
+// API Docs: https://theintrodb.org/docs
+app.get('/api/theintrodb/media', async (req, res) => {
+  const { tmdb_id, season, episode } = req.query;
+  
+  if (!tmdb_id) {
+    return res.status(400).json({ error: 'tmdb_id is required' });
+  }
+  
+  try {
+    // Build query params
+    const params = new URLSearchParams();
+    params.set('tmdb_id', tmdb_id);
+    if (season) params.set('season', season);
+    if (episode) params.set('episode', episode);
+    
+    const url = `https://api.theintrodb.org/v1/media?${params.toString()}`;
+    console.log(`[TheIntroDB] Fetching: ${url}`);
+    
+    const response = await axios.get(url, {
+      headers: {
+        'Accept': 'application/json',
+      },
+      httpAgent: httpAgentGlobal,
+      httpsAgent: httpsAgentGlobal,
+      timeout: 10000,
+    });
+    
+    console.log(`[TheIntroDB] Response:`, JSON.stringify(response.data));
+    res.json(response.data);
+  } catch (err) {
+    const status = err?.response?.status || 500;
+    console.warn(`[TheIntroDB] Error fetching tmdb_id=${tmdb_id}:`, err?.message || err);
+    
+    // Return empty data for 404 (not found in database)
+    if (status === 404) {
+      return res.json({
+        tmdb_id: parseInt(tmdb_id),
+        type: season ? 'tv' : 'movie',
+        intro: null,
+        recap: null,
+        credits: null,
+      });
+    }
+    
+    res.status(status).json({
+      error: 'Failed to fetch from TheIntroDB',
+      message: err?.message || 'Unknown error',
+    });
+  }
+});
+
 // Mirror stats
 app.get('/api/mirror-stats', (req, res) => {
   try {
@@ -3436,9 +3698,9 @@ app.post('/api/reset-state', async (req, res) => {
 });
 
 // Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor de torrents escuchando en http://localhost:${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Servidor de torrents escuchando en http://0.0.0.0:${PORT}`);
+  console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
 
   (async () => {
     try {
