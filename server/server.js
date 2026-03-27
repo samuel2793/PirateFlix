@@ -58,6 +58,19 @@ const MIRROR_RETRY_DELAY_MS = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_DELAY
 
 // Torrent providers registry.
 // Add new providers here and wire their search URL strategy.
+function resolveKikassCategory(categoryLike) {
+  const category = String(categoryLike || '')
+    .trim()
+    .toLowerCase();
+
+  const movieCategories = new Set(['200', '201', '202', '203', '204', '207', 'movies', 'movie']);
+  const tvCategories = new Set(['205', '208', 'tv', 'television']);
+
+  if (movieCategories.has(category)) return 'movies';
+  if (tvCategories.has(category)) return 'tv';
+  return null;
+}
+
 const TORRENT_PROVIDERS = Object.freeze({
   piratebay: Object.freeze({
     id: 'piratebay',
@@ -73,6 +86,19 @@ const TORRENT_PROVIDERS = Object.freeze({
     enableYtsFallback: true,
     buildSearchUrl(base, cleanQuery, category) {
       return `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
+    },
+  }),
+  kikass: Object.freeze({
+    id: 'kikass',
+    label: 'Kikass',
+    mirrors: Object.freeze(['https://kikass.to']),
+    enableYtsFallback: false,
+    buildSearchUrl(base, cleanQuery, category) {
+      const slug = resolveKikassCategory(category);
+      if (slug) {
+        return `${base}/search/${encodeURIComponent(cleanQuery)}/category/${slug}/`;
+      }
+      return `${base}/search/${encodeURIComponent(cleanQuery)}/`;
     },
   }),
 });
@@ -2225,6 +2251,9 @@ app.get('/api/search-torrent', async (req, res) => {
           lower.includes('searchresult') ||
           lower.includes('detlink') ||
           lower.includes('detname') ||
+          lower.includes('cellmainlink') ||
+          lower.includes('torrentname') ||
+          lower.includes('frontpagewidget') ||
           lower.includes('no hits') ||
           lower.includes('no results') ||
           lower.includes('nothing found')
@@ -2757,8 +2786,33 @@ app.get('/api/search-torrent', async (req, res) => {
       const detNameMatch = rowHtml.match(/class="detName"[^>]*>([^<]+)</i);
       if (detNameMatch) return decodeHtmlEntities(detNameMatch[1]).trim();
 
+      const cellMainLinkMatch = rowHtml.match(/class=['"][^'"]*cellMainLink[^'"]*['"][^>]*>([\s\S]*?)<\/a>/i);
+      if (cellMainLinkMatch) {
+        return decodeHtmlEntities(cellMainLinkMatch[1].replace(/<[^>]+>/g, ' '))
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
       const titleMatch = rowHtml.match(/title=["']Details\s+for\s+([^"']+)["']/i);
       if (titleMatch) return decodeHtmlEntities(titleMatch[1]).trim();
+
+      return 'Unknown';
+    };
+
+    const extractSize = (rowHtml) => {
+      const sizeMatch = rowHtml.match(/Size\s+([^,<]+)\s*,/i);
+      if (sizeMatch && sizeMatch[1]) return sizeMatch[1].trim();
+
+      const tdMatches = [...rowHtml.matchAll(/<td[^>]*>\s*([\s\S]*?)\s*<\/td>/gi)];
+      if (tdMatches.length >= 2) {
+        const raw = decodeHtmlEntities(String(tdMatches[1][1] || ''))
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (/\d/.test(raw) && /(kb|mb|gb|tb|kib|mib|gib|tib)\b/i.test(raw)) {
+          return raw;
+        }
+      }
 
       return 'Unknown';
     };
@@ -2793,6 +2847,7 @@ app.get('/api/search-torrent', async (req, res) => {
       const addUrl = (href) => {
         if (!href) return;
         if (href.startsWith('magnet:')) return;
+        if (href.startsWith('#') || href.startsWith('javascript:')) return;
         let resolved = href;
         if (href.startsWith('//')) {
           resolved = `https:${href}`;
@@ -2801,6 +2856,7 @@ app.get('/api/search-torrent', async (req, res) => {
         } else if (!/^https?:\/\//i.test(href)) {
           resolved = `${base}/${href.replace(/^\.?\//, '')}`;
         }
+        if (/\/download\//i.test(resolved)) return;
         if (!seen.has(resolved)) {
           seen.add(resolved);
           urls.push(resolved);
@@ -2809,8 +2865,10 @@ app.get('/api/search-torrent', async (req, res) => {
 
       const patterns = [
         /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*detLink[^'"]*['"]/gi,
+        /<a[^>]+href=['"]([^'"]+)['"][^>]*class=['"][^'"]*cellMainLink[^'"]*['"]/gi,
         /<a[^>]+href=['"]([^'"]*\/torrent\/[^'"]+)['"][^>]*>/gi,
         /<a[^>]+href=['"]([^'"]*\/desc\/[^'"]+)['"][^>]*>/gi,
+        /<a[^>]+href=['"]([^'"]*?-t\d+\.html)['"][^>]*>/gi,
       ];
       for (const pattern of patterns) {
         let match;
@@ -2821,13 +2879,15 @@ app.get('/api/search-torrent', async (req, res) => {
       return urls;
     };
 
-    const fetchMagnetsFromDetails = async (urls) => {
+    const fetchMagnetsFromDetails = async (entries) => {
       const results = [];
       const seen = new Set();
-      const limit = Math.min(urls.length, 5);
+      const limit = Math.min(entries.length, 10);
       for (let i = 0; i < limit; i++) {
         if (requestAbortSignal && requestAbortSignal.aborted) break;
-        const url = urls[i];
+        const entry = entries[i];
+        const url = typeof entry === 'string' ? entry : entry?.url;
+        if (!url) continue;
         try {
           const resp = await axios.get(url, {
             headers,
@@ -2852,14 +2912,23 @@ app.get('/api/search-torrent', async (req, res) => {
           }
           if (!magnetLink || seen.has(magnetLink)) continue;
           seen.add(magnetLink);
-          const name = extractName(magnetLink, detailHtml);
+          const detailName = extractName(magnetLink, detailHtml);
+          const rowName =
+            typeof entry === 'string' ? '' : String(entry?.name || '').trim();
+          const name = rowName && rowName !== 'Unknown' ? rowName : detailName;
+          const rowSeeders = typeof entry === 'string' ? 0 : Number(entry?.seeders) || 0;
+          const rowLeechers = typeof entry === 'string' ? 0 : Number(entry?.leechers) || 0;
+          const rowSize =
+            typeof entry === 'string'
+              ? 'Unknown'
+              : String(entry?.size || '').trim() || 'Unknown';
           results.push({
             name,
             magnetLink,
-            size: 'Unknown',
-            seeders: 0,
-            leechers: 0,
-            score: 0,
+            size: rowSize,
+            seeders: rowSeeders,
+            leechers: rowLeechers,
+            score: rowSeeders * 2 + rowLeechers,
           });
         } catch (err) {
           const msg = err && err.message ? err.message : err;
@@ -2870,6 +2939,8 @@ app.get('/api/search-torrent', async (req, res) => {
     };
 
     const seenMagnets = new Set();
+    const pendingDetailRows = [];
+    const seenPendingDetailUrls = new Set();
     const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     let rowMatch;
 
@@ -2878,25 +2949,45 @@ app.get('/api/search-torrent', async (req, res) => {
 
       const rowHtml = rowMatch[0];
       const decodedRow = decodeHtmlEntities(rowHtml);
+      const name = extractName('', decodedRow);
+      const size = extractSize(decodedRow);
+      const { seeders, leechers } = extractPeersFromRow(decodedRow);
       const magnetMatch = decodedRow.match(/magnet:\?xt=urn:btih:[^'"\s<>]+/i);
       let magnetLink = magnetMatch ? magnetMatch[0] : null;
       if (!magnetLink) {
         const hash = extractInfoHash(decodedRow);
         if (hash) {
-          const name = extractName('', decodedRow);
           magnetLink = buildMagnetFromHash(hash, name);
         }
       }
-      if (!magnetLink || seenMagnets.has(magnetLink)) continue;
+
+      if (!magnetLink) {
+        if (htmlBase) {
+          const rowDetailUrls = extractDetailUrls(decodedRow, htmlBase);
+          if (rowDetailUrls.length > 0) {
+            const detailUrl = rowDetailUrls[0];
+            if (!seenPendingDetailUrls.has(detailUrl)) {
+              seenPendingDetailUrls.add(detailUrl);
+              pendingDetailRows.push({
+                url: detailUrl,
+                name,
+                size,
+                seeders,
+                leechers,
+              });
+            }
+          }
+        }
+        continue;
+      }
+
+      if (seenMagnets.has(magnetLink)) continue;
       seenMagnets.add(magnetLink);
 
-      const name = extractName(magnetLink, decodedRow);
-      const sizeMatch = decodedRow.match(/Size\s+([^,<]+)\s*,/i);
-      const size = sizeMatch ? sizeMatch[1].trim() : 'Unknown';
-      const { seeders, leechers } = extractPeersFromRow(decodedRow);
+      const resolvedName = extractName(magnetLink, decodedRow);
 
       torrents.push({
-        name,
+        name: resolvedName,
         magnetLink,
         size,
         seeders,
@@ -2935,11 +3026,17 @@ app.get('/api/search-torrent', async (req, res) => {
       }
     }
 
-    if (torrents.length === 0 && htmlBase) {
-      const detailUrls = extractDetailUrls(html, htmlBase);
-      if (detailUrls.length > 0) {
-        console.log(`Intentando detalles para ${detailUrls.length} resultados...`);
-        const detailTorrents = await fetchMagnetsFromDetails(detailUrls);
+    const shouldResolveDetails =
+      htmlBase && torrents.length < 10 && (pendingDetailRows.length > 0 || torrents.length === 0);
+
+    if (shouldResolveDetails) {
+      const detailEntries =
+        pendingDetailRows.length > 0
+          ? pendingDetailRows
+          : extractDetailUrls(html, htmlBase).map((url) => ({ url }));
+      if (detailEntries.length > 0) {
+        console.log(`Intentando detalles para ${detailEntries.length} resultados...`);
+        const detailTorrents = await fetchMagnetsFromDetails(detailEntries);
         for (const torrent of detailTorrents) {
           if (torrents.length >= 10) break;
           if (seenMagnets.has(torrent.magnetLink)) continue;

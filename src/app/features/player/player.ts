@@ -404,17 +404,22 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private getTorrentProviderContext(): {
     configuredProvider: TorrentProviderId;
     effectiveProvider: TorrentProviderId;
+    authReady: boolean;
     isAuthenticated: boolean;
   } {
     const configuredProvider = normalizeTorrentProvider(
       this.loadSettingsPref('torrentProvider', DEFAULT_TORRENT_PROVIDER)
     );
-    const isAuthenticated = this.auth.isAuthenticated();
-    const effectiveProvider = resolveTorrentProviderForPlayback(configuredProvider, isAuthenticated);
+    const authReady = this.auth.ready();
+    const isAuthenticated = authReady && this.auth.isAuthenticated();
+    const effectiveProvider = authReady
+      ? resolveTorrentProviderForPlayback(configuredProvider, isAuthenticated)
+      : normalizeTorrentProvider(configuredProvider, DEFAULT_TORRENT_PROVIDER);
 
     return {
       configuredProvider,
       effectiveProvider,
+      authReady,
       isAuthenticated,
     };
   }
@@ -709,7 +714,11 @@ export class PlayerComponent implements OnInit, OnDestroy {
       console.log(`Buscando torrent para: ${title} (${year})`);
       this.pushLoadingLog(`Buscando torrent para: ${title} (${year})`);
       this.pushLoadingLog(`Provider de torrents: ${torrentProvider}`);
+      console.log(
+        `[Torrent Provider] configured=${torrentProviderContext.configuredProvider} effective=${torrentProvider} authReady=${torrentProviderContext.authReady} authenticated=${torrentProviderContext.isAuthenticated}`
+      );
       if (
+        torrentProviderContext.authReady &&
         !torrentProviderContext.isAuthenticated &&
         torrentProviderContext.configuredProvider !== DEFAULT_TORRENT_PROVIDER
       ) {
@@ -828,6 +837,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
         let sawNoSubtitles = false;
         let attempts = 0;
         const maxAttempts = searchQueries.length;
+        let providerCompatibilityLogged = false;
 
         const mergeResults = (results: any) => {
           for (const torrent of results.results || []) {
@@ -888,6 +898,38 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
             const results = await searchResponse.json();
             if (!this.isSessionActive(sessionId)) return { status: 'aborted' };
+
+            if (!providerCompatibilityLogged) {
+              const backendProvider = String(results?.provider || '')
+                .trim()
+                .toLowerCase();
+              const requestedProvider = String(results?.requestedProvider || '')
+                .trim()
+                .toLowerCase();
+
+              if (!backendProvider) {
+                console.warn(
+                  '⚠️ Respuesta de backend sin metadata de provider; posible backend desactualizado'
+                );
+                this.pushLoadingLog(
+                  'Backend sin metadata de provider (posible versión antigua)',
+                  'warn'
+                );
+                providerCompatibilityLogged = true;
+              } else if (backendProvider !== torrentProvider) {
+                console.warn(
+                  `⚠️ Provider solicitado=${torrentProvider}, backend usado=${backendProvider}, requested=${requestedProvider || 'n/a'}`
+                );
+                this.pushLoadingLog(
+                  `El backend usó ${backendProvider} en lugar de ${torrentProvider}`,
+                  'warn'
+                );
+                providerCompatibilityLogged = true;
+              } else {
+                console.log(`✅ Backend confirmo provider=${backendProvider}`);
+                providerCompatibilityLogged = true;
+              }
+            }
 
             if (results.results && results.results.length > 0) {
               mergeResults(results);

@@ -1,4 +1,4 @@
-export type TorrentProviderId = 'piratebay';
+export type TorrentProviderId = 'piratebay' | 'kikass';
 
 export interface TorrentProviderOption {
   value: TorrentProviderId;
@@ -14,6 +14,11 @@ export const TORRENT_PROVIDER_OPTIONS: ReadonlyArray<TorrentProviderOption> = Ob
     value: 'piratebay',
     label: 'The Pirate Bay',
     description: 'Provider por defecto compatible con la app actualmente.',
+  },
+  {
+    value: 'kikass',
+    label: 'Kikass',
+    description: 'Provider alternativo basado en el buscador de kikass.to.',
   },
 ]);
 
