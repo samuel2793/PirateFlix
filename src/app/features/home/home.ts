@@ -1,5 +1,5 @@
 import { CommonModule, ViewportScroller, DOCUMENT } from '@angular/common';
-import { Component, inject, signal, computed, OnDestroy, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, OnDestroy, ElementRef, HostListener } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
@@ -7,6 +7,7 @@ import { TmdbService } from '../../core/services/tmdb';
 import { LanguageService, SupportedLang } from '../../shared/services/language.service';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { FirebaseAuthService } from '../../core/services/firebase-auth';
+import { UserDataService } from '../../core/services/user-data.service';
 
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -63,14 +64,75 @@ export class HomeComponent implements OnDestroy {
   private readonly document = inject(DOCUMENT);
   private readonly elementRef = inject(ElementRef);
   private readonly auth = inject(FirebaseAuthService);
+  private readonly userData = inject(UserDataService);
 
   authAvailable = this.auth.available;
   isAuthenticated = this.auth.isAuthenticated;
-  userDisplayName = this.auth.displayName;
+  userDisplayName = computed(() => {
+    // Prefer Firestore profile name over Auth name
+    const profile = this.userData.profile();
+    if (profile?.displayName) return profile.displayName;
+    return this.auth.displayName();
+  });
+  userPhotoUrl = computed(() => {
+    // Prefer Firestore profile photo over Auth photo
+    const profile = this.userData.profile();
+    if (profile?.photoURL) return profile.photoURL;
+    return this.auth.photoUrl();
+  });
+
+  // User initials for default avatar
+  userInitials = computed(() => {
+    const name = this.userDisplayName();
+    if (!name) return '?';
+    
+    const words = name.trim().split(/\s+/);
+    if (words.length >= 2) {
+      return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+    }
+    return name.substring(0, 2).toUpperCase();
+  });
+
+  // Profile menu state
+  profileMenuOpen = signal(false);
+  languageSubmenuOpen = signal(false);
 
   // Language
   currentLang = this.language.currentLang;
   isChangingLanguage = this.language.isChangingLanguage;
+
+  toggleProfileMenu() {
+    this.profileMenuOpen.update(v => !v);
+    if (!this.profileMenuOpen()) {
+      this.languageSubmenuOpen.set(false);
+    }
+  }
+
+  closeProfileMenu() {
+    this.profileMenuOpen.set(false);
+    this.languageSubmenuOpen.set(false);
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    const profileMenu = target.closest('.profile-menu');
+    if (!profileMenu && this.profileMenuOpen()) {
+      this.closeProfileMenu();
+    }
+  }
+
+  toggleLanguageSubmenu() {
+    this.languageSubmenuOpen.update(v => !v);
+  }
+
+  navigateToProfile() {
+    this.router.navigate(['/profile']);
+  }
+
+  navigateToSettings() {
+    this.router.navigate(['/settings']);
+  }
 
   changeLang(lang: SupportedLang) {
     this.language.setLang(lang);
@@ -82,6 +144,20 @@ export class HomeComponent implements OnDestroy {
 
   logout() {
     void this.auth.signOut();
+  }
+
+  // Grid size cycling for single toggle button
+  cycleGridSize() {
+    const current = this.gridSize();
+    const next = current === 3 ? 1 : current + 1;
+    this.setGridSize(next);
+  }
+
+  getGridIcon(): string {
+    const size = this.gridSize();
+    if (size === 1) return 'grid_view';
+    if (size === 2) return 'view_comfy';
+    return 'view_module';
   }
 
   // Trending

@@ -5,6 +5,7 @@ import { provideHttpClient } from '@angular/common/http';
 
 import { routes } from './app.routes';
 import { TranslationService } from './shared/services/translation.service';
+import { ThemeService } from './core/services/theme.service';
 
 /**
  * Inicializador para precargar traducciones antes de que la app se renderice
@@ -18,6 +19,17 @@ function initializeTranslations(): () => Promise<void> {
   };
 }
 
+/**
+ * Inicializador para aplicar temas guardados al cargar
+ */
+function initializeTheme(): () => Promise<void> {
+  const themeService = inject(ThemeService);
+  return () => {
+    // El servicio carga y aplica los temas en su constructor
+    return Promise.resolve();
+  };
+}
+
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
@@ -27,6 +39,11 @@ export const appConfig: ApplicationConfig = {
     {
       provide: APP_INITIALIZER,
       useFactory: initializeTranslations,
+      multi: true,
+    },
+    {
+      provide: APP_INITIALIZER,
+      useFactory: initializeTheme,
       multi: true,
     },
   ]

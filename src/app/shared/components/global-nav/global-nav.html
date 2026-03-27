@@ -1,12 +1,11 @@
 <nav class="global-nav" *ngIf="showNav()">
+  <!-- Left Section: Logo + Brand + Back Button -->
   <div class="nav-left">
-    <!-- Logo - always goes home -->
-    <a class="logo" routerLink="/" [title]="'Back to home' | t" aria-label="PirateFlix">
-      <span class="logo-img" aria-hidden="true"></span>
-      <span class="logo-text">PirateFlix</span>
+    <a class="brand" routerLink="/" [title]="'Home' | t">
+      <span class="brand-logo" aria-hidden="true"></span>
+      <span class="brand-name">PirateFlix</span>
     </a>
 
-    <!-- Back button -->
     <button
       class="back-btn"
       (click)="goBack()"
@@ -17,39 +16,82 @@
     </button>
   </div>
 
-  <div class="nav-right">
-    <div class="auth-actions" *ngIf="authAvailable()">
-      <div class="user-badge" *ngIf="isAuthenticated()">
-        <mat-icon>account_circle</mat-icon>
-        <span class="user-text">{{ userDisplayName() }}</span>
-      </div>
-      <button
-        class="auth-btn"
-        *ngIf="!isAuthenticated()"
-        (click)="login()"
-        [title]="'Sign in' | t"
-      >
-        <mat-icon>login</mat-icon>
-        <span class="translate-text">{{ 'Sign in' | t }}</span>
-      </button>
-      <button
-        class="auth-btn"
-        *ngIf="isAuthenticated()"
-        (click)="logout()"
-        [title]="'Sign out' | t"
-      >
-        <mat-icon>logout</mat-icon>
-        <span class="translate-text">{{ 'Sign out' | t }}</span>
-      </button>
-    </div>
+  <!-- Center Section: Empty for balance -->
+  <div class="nav-center"></div>
 
-    <!-- Home button -->
-    <a
-      class="home-btn"
-      routerLink="/"
-      [title]="'Home' | t"
-    >
-      <mat-icon>home</mat-icon>
-    </a>
+  <!-- Right Section: Profile Avatar with Dropdown -->
+  <div class="nav-right">
+    <div class="profile-menu">
+      <button
+        class="profile-avatar"
+        [class.authenticated]="isAuthenticated()"
+        [class.has-photo]="userPhotoUrl()"
+        (click)="toggleProfileMenu()"
+        [title]="isAuthenticated() ? userDisplayName() : ('Sign in' | t)"
+      >
+        <img *ngIf="userPhotoUrl()" [src]="userPhotoUrl()" alt="Profile" class="avatar-img" />
+        <mat-icon *ngIf="!userPhotoUrl()" class="avatar-icon">account_circle</mat-icon>
+        <mat-icon class="dropdown-caret" [class.open]="profileMenuOpen()">expand_more</mat-icon>
+      </button>
+
+      <!-- Profile Dropdown Menu -->
+      <div class="profile-dropdown" [class.open]="profileMenuOpen()">
+        <div class="dropdown-header" *ngIf="isAuthenticated()">
+          <span class="user-name">{{ userDisplayName() }}</span>
+        </div>
+        
+        <div class="dropdown-divider" *ngIf="isAuthenticated()"></div>
+
+        <button class="dropdown-item" *ngIf="!isAuthenticated()" (click)="login(); closeProfileMenu()">
+          <mat-icon>login</mat-icon>
+          <span class="translate-text">{{ 'Sign in' | t }}</span>
+        </button>
+
+        <button class="dropdown-item" *ngIf="isAuthenticated()" (click)="navigateToProfile(); closeProfileMenu()">
+          <mat-icon>person</mat-icon>
+          <span class="translate-text">{{ 'Profile' | t }}</span>
+        </button>
+
+        <button class="dropdown-item" (click)="navigateToSettings(); closeProfileMenu()">
+          <mat-icon>settings</mat-icon>
+          <span class="translate-text">{{ 'Settings' | t }}</span>
+        </button>
+
+        <div class="dropdown-submenu">
+          <button class="dropdown-item has-submenu" (click)="toggleLanguageSubmenu()">
+            <mat-icon>language</mat-icon>
+            <span class="translate-text">{{ 'Language' | t }}</span>
+            <mat-icon class="submenu-arrow" [class.open]="languageSubmenuOpen()">chevron_right</mat-icon>
+          </button>
+          <div class="submenu-content" [class.open]="languageSubmenuOpen()">
+            <button 
+              class="submenu-item" 
+              [class.selected]="currentLang() === 'en'"
+              (click)="changeLang('en'); closeProfileMenu()"
+            >
+              <span class="flag">🇬🇧</span>
+              <span>English</span>
+              <mat-icon *ngIf="currentLang() === 'en'" class="check-icon">check</mat-icon>
+            </button>
+            <button 
+              class="submenu-item" 
+              [class.selected]="currentLang() === 'es'"
+              (click)="changeLang('es'); closeProfileMenu()"
+            >
+              <span class="flag">🇪🇸</span>
+              <span>Español</span>
+              <mat-icon *ngIf="currentLang() === 'es'" class="check-icon">check</mat-icon>
+            </button>
+          </div>
+        </div>
+
+        <div class="dropdown-divider" *ngIf="isAuthenticated()"></div>
+
+        <button class="dropdown-item sign-out" *ngIf="isAuthenticated()" (click)="logout(); closeProfileMenu()">
+          <mat-icon>logout</mat-icon>
+          <span class="translate-text">{{ 'Sign out' | t }}</span>
+        </button>
+      </div>
+    </div>
   </div>
 </nav>

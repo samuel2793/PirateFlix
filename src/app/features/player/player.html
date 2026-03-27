@@ -1,4 +1,4 @@
-<div class="player-page">
+<div class="player-page" (mousemove)="onUserActivity()" (click)="onUserActivity()" (keydown)="onUserActivity()" [class.hide-cursor]="!showControls()">
   @if (showPlayer()) {
     @if (loading()) {
       <div class="loading-overlay">
@@ -13,20 +13,53 @@
 
           @if (showTranscodeUI()) {
             <div class="transcode-status" aria-live="polite">
-              <div class="transcode-title">{{ transcodeLabel() }}</div>
-              <div class="transcode-meta">
-                @if (transcodePercent() !== null) {
-                  <span class="transcode-percent">{{ transcodePercent() | number:'1.0-0' }}%</span>
-                } @else {
-                  <span class="transcode-percent" i18n>Calculating...</span>
-                }
-                @if (transcodeEta()) {
-                  <span class="transcode-eta">{{ transcodeEta() }}</span>
+              <div class="transcode-header">
+                <div class="transcode-title">{{ transcodeLabel() }}</div>
+                @if (transcodeMode()) {
+                  <span class="transcode-mode" [class.fast]="transcodeMode() === 'remux'" [class.slow]="transcodeMode() === 'full'">
+                    @if (transcodeMode() === 'remux') {
+                      ⚡ Rápido
+                    } @else if (transcodeMode() === 'audio') {
+                      🔊 Audio
+                    } @else {
+                      🐢 Lento
+                    }
+                  </span>
                 }
               </div>
-              <div class="progress-bar" [class.indeterminate]="transcodePercent() === null">
-                <div class="progress-fill" [style.width.%]="transcodePercent() ?? 0"></div>
+              
+              <div class="transcode-progress-container">
+                <div class="transcode-percent-display">
+                  @if (transcodePercent() !== null) {
+                    <span class="percent-value">{{ transcodePercent() | number:'1.0-0' }}</span>
+                    <span class="percent-symbol">%</span>
+                  } @else {
+                    <span class="percent-value">—</span>
+                  }
+                </div>
+                
+                <div class="transcode-progress-info">
+                  <div class="progress-bar" [class.indeterminate]="transcodePercent() === null">
+                    <div class="progress-fill" [style.width.%]="transcodePercent() ?? 0"></div>
+                  </div>
+                  
+                  <div class="transcode-details">
+                    @if (transcodeTimemark()) {
+                      <span class="detail-item">⏱️ {{ transcodeTimemark() }}</span>
+                    }
+                    @if (transcodeOutputSize()) {
+                      <span class="detail-item">💾 {{ transcodeOutputSize() }}</span>
+                    }
+                    @if (transcodeEta()) {
+                      <span class="detail-item eta">⏳ {{ transcodeEta() }}</span>
+                    }
+                  </div>
+                </div>
               </div>
+              
+              <button class="skip-transcode-btn" (click)="skipTranscodeWait()" type="button">
+                <span class="translate-text">{{ 'Play without waiting (no seeking)' | t }}</span>
+              </button>
             </div>
           } @else {
             <ul class="loading-logs" aria-live="polite">
@@ -59,7 +92,10 @@
     @if (videoSrc()) {
       <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()" crossorigin="anonymous"
         (loadedmetadata)="onVideoLoadedMetadata()"
-        (error)="onVideoError()">
+        (error)="onVideoError()"
+        (seeking)="onVideoSeeking($event)"
+        (timeupdate)="onVideoTimeUpdate()"
+        (ended)="onVideoEnded()">
         @for (subtitle of subtitleTracks(); track subtitle.index) {
           <track
             [label]="subtitle.language"
@@ -72,7 +108,114 @@
     }
   }
 
-  <div class="hud">
+  <!-- Next Episode Overlay - Netflix Style -->
+  @if (showNextEpisodeOverlay() && nextEpisodeInfo()) {
+    <div class="next-episode-overlay netflix-style">
+      <div class="next-episode-card">
+        <!-- Background image blur -->
+        @if (nextEpisodeInfo()?.stillPath) {
+          <div class="card-backdrop" [style.background-image]="'url(' + getEpisodeStillUrl(nextEpisodeInfo()?.stillPath ?? null) + ')'"></div>
+        }
+        
+        <div class="card-content">
+          <div class="next-episode-header">
+            <span class="next-label">{{ 'Next Episode' | t }}</span>
+          </div>
+          
+          <div class="next-episode-preview">
+            @if (nextEpisodeInfo()?.stillPath) {
+              <img 
+                class="episode-thumbnail" 
+                [src]="getEpisodeStillUrl(nextEpisodeInfo()?.stillPath ?? null)" 
+                alt="Next episode thumbnail">
+            } @else {
+              <div class="episode-thumbnail placeholder">
+                <span class="placeholder-icon">▶</span>
+              </div>
+            }
+            
+            <div class="episode-details">
+              <span class="episode-number">S{{ nextEpisodeInfo()?.season }} : E{{ nextEpisodeInfo()?.episode }}</span>
+              <span class="episode-title">{{ nextEpisodeInfo()?.name }}</span>
+            </div>
+          </div>
+          
+          <div class="next-episode-actions">
+            <button class="action-btn secondary" (click)="cancelNextEpisodeCountdown()">
+              <span class="btn-icon">✕</span>
+              <span>{{ 'Cancel' | t }}</span>
+            </button>
+            <button class="action-btn primary" (click)="playNextEpisode()">
+              <span class="btn-icon">▶</span>
+              <span>{{ 'Play Now' | t }}</span>
+              <div class="countdown-ring">
+                <svg viewBox="0 0 36 36">
+                  <circle class="ring-bg" cx="18" cy="18" r="16"/>
+                  <circle class="ring-progress" cx="18" cy="18" r="16" 
+                    [style.stroke-dashoffset]="100.53 - (nextEpisodeProgress() / 100 * 100.53)"/>
+                </svg>
+                <span class="countdown-number">{{ nextEpisodeCountdown() }}</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- End of Series Overlay -->
+  @if (showEndOverlay()) {
+    <div class="next-episode-overlay netflix-style end-overlay">
+      <div class="next-episode-card">
+        <div class="card-content">
+          <div class="end-content">
+            <div class="end-icon-container">
+              <span class="end-icon">🎬</span>
+            </div>
+            <h2 class="end-title">{{ 'End of series' | t }}</h2>
+            <p class="end-description">{{ 'You have watched all available episodes' | t }}</p>
+          </div>
+          
+          <div class="next-episode-actions">
+            <button class="action-btn secondary" (click)="closeEndOverlay()">
+              <span>{{ 'Close' | t }}</span>
+            </button>
+            <a class="action-btn primary" [routerLink]="['/details', type(), id()]">
+              <span>{{ 'Back to details' | t }}</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- Retry Next Episode Overlay -->
+  @if (showRetryNextEpisode()) {
+    <div class="next-episode-overlay netflix-style error-overlay">
+      <div class="next-episode-card">
+        <div class="card-content">
+          <div class="end-content">
+            <div class="end-icon-container error">
+              <span class="end-icon">⚠️</span>
+            </div>
+            <h2 class="end-title">{{ 'Error loading next episode' | t }}</h2>
+            <p class="end-description">{{ nextEpisodeErrorMessage() }}</p>
+          </div>
+          
+          <div class="next-episode-actions">
+            <button class="action-btn secondary" (click)="closeRetryOverlay()">
+              <span>{{ 'Cancel' | t }}</span>
+            </button>
+            <button class="action-btn primary" (click)="retryNextEpisode()">
+              <span>{{ 'Retry' | t }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div class="hud" [class.hidden]="!showControls()">
     <a routerLink="/" class="btn">← <span class="translate-text">{{ 'Home' | t }}</span></a>
     <a [routerLink]="['/details', type(), id()]" class="btn"><span class="translate-text">{{ 'Details' | t }}</span></a>
     <button class="btn settings-btn" (click)="toggleSettings()" [title]="'Settings' | t">

@@ -318,3 +318,421 @@ body {
     transform: translateY(0);
   }
 }
+
+// ========================================
+// GLOBAL THEME SYSTEM
+// ========================================
+// This system uses CSS custom properties (variables) for consistent theming
+// across the entire application. All colors reference these variables.
+
+:root {
+  // Accent colors (set by ThemeService)
+  --accent-primary: #e5a00d;
+  --accent-primary-dark: #c8890a;
+  --accent-primary-light: #f5c518;
+  --accent-primary-rgb: 229, 160, 13;
+  // Short form aliases for convenience
+  --accent-dark: #c8890a;
+  --accent-light: #f5c518;
+  --accent-rgb: 229, 160, 13;
+  --accent-muted: rgba(229, 160, 13, 0.12);
+  
+  // Error color (constant)
+  --error: #ef5350;
+  --error-dark: #c62828;
+  
+  // Transitions
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+// ========================================
+// DARK THEME (Default)
+// ========================================
+html, html[data-theme="dark"] {
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --bg-card: #161616;
+  --bg-card-hover: #1e1e1e;
+  --bg-elevated: #1a1a1a;
+  --bg-subtle: rgba(255, 255, 255, 0.03);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  
+  // Background opacity variants for gradients
+  --bg-primary-95: rgba(10, 10, 10, 0.95);
+  --bg-primary-90: rgba(10, 10, 10, 0.9);
+  --bg-primary-80: rgba(10, 10, 10, 0.8);
+  --bg-primary-70: rgba(10, 10, 10, 0.7);
+  --bg-primary-60: rgba(10, 10, 10, 0.6);
+  --bg-primary-40: rgba(10, 10, 10, 0.4);
+  --bg-primary-30: rgba(10, 10, 10, 0.3);
+  --bg-primary-10: rgba(10, 10, 10, 0.1);
+  
+  --text-primary: #f5f5f5;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+  --text-muted: rgba(255, 255, 255, 0.4);
+  
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  // Aliases for convenience
+  --border-primary: rgba(255, 255, 255, 0.1);
+  --border-secondary: rgba(255, 255, 255, 0.15);
+  
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+  
+  color-scheme: dark;
+}
+
+// ========================================
+// LIGHT THEME
+// ========================================
+html[data-theme="light"] {
+  --bg-primary: #f8f8f8;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f0f0f0;
+  --bg-elevated: #ffffff;
+  --bg-subtle: rgba(0, 0, 0, 0.02);
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  
+  // Background opacity variants for gradients
+  --bg-primary-95: rgba(248, 248, 248, 0.95);
+  --bg-primary-90: rgba(248, 248, 248, 0.9);
+  --bg-primary-80: rgba(248, 248, 248, 0.8);
+  --bg-primary-70: rgba(248, 248, 248, 0.7);
+  --bg-primary-60: rgba(248, 248, 248, 0.6);
+  --bg-primary-40: rgba(248, 248, 248, 0.4);
+  --bg-primary-30: rgba(248, 248, 248, 0.3);
+  --bg-primary-10: rgba(248, 248, 248, 0.1);
+  
+  --text-primary: #1a1a1a;
+  --text-secondary: rgba(0, 0, 0, 0.7);
+  --text-tertiary: rgba(0, 0, 0, 0.55);
+  --text-muted: rgba(0, 0, 0, 0.4);
+  
+  --border-default: rgba(0, 0, 0, 0.1);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-hover: rgba(0, 0, 0, 0.18);
+  // Aliases for convenience
+  --border-primary: rgba(0, 0, 0, 0.12);
+  --border-secondary: rgba(0, 0, 0, 0.18);
+  
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.35);
+  
+  color-scheme: light;
+}
+
+// ========================================
+// HIGH CONTRAST MODE
+// ========================================
+html.high-contrast {
+  &, &[data-theme="dark"] {
+    --bg-primary: #000000;
+    --bg-secondary: #0a0a0a;
+    --bg-card: #0a0a0a;
+    --bg-card-hover: #151515;
+    --bg-elevated: #0f0f0f;
+    
+    // Background opacity variants for gradients
+    --bg-primary-95: rgba(0, 0, 0, 0.95);
+    --bg-primary-90: rgba(0, 0, 0, 0.9);
+    --bg-primary-80: rgba(0, 0, 0, 0.8);
+    --bg-primary-70: rgba(0, 0, 0, 0.7);
+    --bg-primary-60: rgba(0, 0, 0, 0.6);
+    --bg-primary-40: rgba(0, 0, 0, 0.4);
+    --bg-primary-30: rgba(0, 0, 0, 0.3);
+    --bg-primary-10: rgba(0, 0, 0, 0.1);
+    
+    --text-primary: #ffffff;
+    --text-secondary: rgba(255, 255, 255, 0.9);
+    --text-tertiary: rgba(255, 255, 255, 0.8);
+    --text-muted: rgba(255, 255, 255, 0.7);
+    
+    --border-default: rgba(255, 255, 255, 0.3);
+    --border-subtle: rgba(255, 255, 255, 0.2);
+    --border-hover: rgba(255, 255, 255, 0.5);
+    --border-primary: rgba(255, 255, 255, 0.35);
+    --border-secondary: rgba(255, 255, 255, 0.5);
+  }
+  
+  &[data-theme="light"] {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f5;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f0f0f0;
+    --bg-elevated: #ffffff;
+    
+    // Background opacity variants for gradients
+    --bg-primary-95: rgba(255, 255, 255, 0.95);
+    --bg-primary-90: rgba(255, 255, 255, 0.9);
+    --bg-primary-80: rgba(255, 255, 255, 0.8);
+    --bg-primary-70: rgba(255, 255, 255, 0.7);
+    --bg-primary-60: rgba(255, 255, 255, 0.6);
+    --bg-primary-40: rgba(255, 255, 255, 0.4);
+    --bg-primary-30: rgba(255, 255, 255, 0.3);
+    --bg-primary-10: rgba(255, 255, 255, 0.1);
+    
+    --text-primary: #000000;
+    --text-secondary: rgba(0, 0, 0, 0.9);
+    --text-tertiary: rgba(0, 0, 0, 0.8);
+    --text-muted: rgba(0, 0, 0, 0.7);
+    
+    --border-default: rgba(0, 0, 0, 0.3);
+    --border-subtle: rgba(0, 0, 0, 0.2);
+    --border-hover: rgba(0, 0, 0, 0.5);
+    --border-primary: rgba(0, 0, 0, 0.35);
+    --border-secondary: rgba(0, 0, 0, 0.5);
+  }
+}
+
+// High contrast focus enhancements
+html.high-contrast {
+  *:focus-visible {
+    outline: 3px solid var(--accent-primary, #e5a00d) !important;
+    outline-offset: 2px !important;
+  }
+  
+  button, 
+  a, 
+  input, 
+  select, 
+  textarea {
+    border-width: 2px !important;
+  }
+}
+
+// ========================================
+// TEXT SIZE SYSTEM
+// ========================================
+// Uses CSS custom properties for scalable text throughout the app
+
+html, html[data-text-size="medium"] {
+  --text-scale: 1;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+  --text-4xl: 48px;
+  font-size: 16px;
+}
+
+html[data-text-size="small"] {
+  --text-scale: 0.875;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 12px;
+  --text-md: 13px;
+  --text-lg: 16px;
+  --text-xl: 19px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+  --text-4xl: 42px;
+  font-size: 14px;
+}
+
+html[data-text-size="large"] {
+  --text-scale: 1.125;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-md: 17px;
+  --text-lg: 20px;
+  --text-xl: 25px;
+  --text-2xl: 32px;
+  --text-3xl: 40px;
+  --text-4xl: 54px;
+  font-size: 18px;
+}
+
+// Apply text size to common elements
+body {
+  font-size: var(--text-base);
+}
+
+h1 { font-size: var(--text-3xl); }
+h2 { font-size: var(--text-2xl); }
+h3 { font-size: var(--text-xl); }
+h4 { font-size: var(--text-lg); }
+h5, h6 { font-size: var(--text-md); }
+p, span, label { font-size: var(--text-base); }
+small { font-size: var(--text-sm); }
+
+// ========================================
+// REDUCE MOTION
+// ========================================
+html.reduce-motion,
+html.reduce-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+// ========================================
+// APPLY THEME VARIABLES TO BASE ELEMENTS
+// ========================================
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+// Scrollbar theming
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+::selection {
+  background: var(--accent-primary);
+  color: white;
+}
+
+// ========================================
+// HIGH CONTRAST ENHANCEMENTS
+// ========================================
+html.high-contrast {
+  // Enhanced focus states
+  *:focus-visible {
+    outline: 3px solid var(--accent-primary) !important;
+    outline-offset: 2px !important;
+  }
+  
+  // Stronger borders on cards
+  .settings-card,
+  .content-card,
+  .themed-card {
+    border-width: 2px !important;
+  }
+  
+  // Better button contrast
+  button, .btn {
+    font-weight: 600 !important;
+  }
+}
+
+// ========================================
+// GLOBAL COMPONENT THEMING
+// ========================================
+// These classes apply consistent theming across all pages
+
+// Cards & Containers
+.themed-card,
+.settings-card,
+.content-card,
+.section-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+  
+  &:hover {
+    border-color: var(--border-hover);
+  }
+}
+
+// Text elements
+.text-primary { color: var(--text-primary); }
+.text-secondary { color: var(--text-secondary); }
+.text-tertiary { color: var(--text-tertiary); }
+.text-muted { color: var(--text-muted); }
+.text-accent { color: var(--accent-primary); }
+
+// Buttons with accent
+.btn-accent,
+.btn-primary {
+  background: var(--accent-primary);
+  color: #000;
+  border: none;
+  
+  &:hover {
+    background: var(--accent-primary-dark);
+  }
+}
+
+// Accent borders/outlines for active states
+.accent-border {
+  border-color: var(--accent-primary) !important;
+}
+
+.accent-glow {
+  box-shadow: 0 0 0 2px rgba(var(--accent-primary-rgb), 0.3);
+}
+
+// Active/selected states
+.option-chip.active,
+.theme-option.active,
+.lang-btn.active,
+.color-option.active {
+  background: rgba(var(--accent-primary-rgb), 0.12);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary-light);
+}
+
+// Material slide toggle accent override
+.mat-mdc-slide-toggle {
+  --mdc-switch-selected-track-color: var(--accent-primary) !important;
+  --mdc-switch-selected-handle-color: #fff !important;
+  --mdc-switch-selected-hover-track-color: var(--accent-primary-dark) !important;
+  --mdc-switch-selected-focus-track-color: var(--accent-primary) !important;
+  --mdc-switch-selected-pressed-track-color: var(--accent-primary) !important;
+  
+  --mdc-switch-unselected-track-color: var(--border-hover) !important;
+  --mdc-switch-unselected-handle-color: var(--text-tertiary) !important;
+  --mdc-switch-unselected-hover-track-color: var(--border-default) !important;
+}
+
+// Snackbar theming
+.mat-mdc-snack-bar-container {
+  --mdc-snackbar-container-color: var(--bg-elevated);
+  --mdc-snackbar-supporting-text-color: var(--text-primary);
+  
+  .mdc-snackbar__surface {
+    background: var(--bg-elevated) !important;
+    border: 1px solid var(--border-default);
+    
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--accent-primary);
+      border-radius: 4px 0 0 4px;
+    }
+  }
+  
+  .mat-mdc-button.mat-mdc-snack-bar-action {
+    color: var(--accent-primary) !important;
+  }
+}

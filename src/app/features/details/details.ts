@@ -1,4 +1,4 @@
-import { Component, inject, signal, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, ElementRef } from '@angular/core';
 import { CommonModule, DOCUMENT, LowerCasePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -7,8 +7,11 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { TmdbService } from '../../core/services/tmdb';
+import { UserDataService } from '../../core/services/user-data.service';
+import { FirebaseAuthService } from '../../core/services/firebase-auth';
 import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
+import { TranslationService } from '../../shared/services/translation.service';
 import { LanguageService } from '../../shared/services/language.service';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -37,9 +40,12 @@ export class DetailsComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly tmdb = inject(TmdbService);
   private readonly router = inject(Router);
+  private readonly translation = inject(TranslationService);
   private readonly language = inject(LanguageService);
   private readonly document = inject(DOCUMENT);
   private readonly elementRef = inject(ElementRef);
+  private readonly userData = inject(UserDataService);
+  private readonly auth = inject(FirebaseAuthService);
   
   // Exponer para la vista
   isChangingLanguage = this.language.isChangingLanguage;
@@ -64,7 +70,16 @@ export class DetailsComponent {
   preferSubtitles = signal(this.loadPref('preferSubtitles'));
   preferYearInSearch = signal(this.loadPref('preferYearInSearch'));
   showInfo = signal(false);
-  inMyList = signal(false);
+  
+  // My List integration with Firestore
+  inMyList = computed(() => {
+    const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
+    const idStr = this.route.snapshot.paramMap.get('id');
+    const id = idStr ? Number(idStr) : NaN;
+    
+    if (!type || !Number.isFinite(id)) return false;
+    return this.userData.isInMyList(type, id);
+  });
 
   // Load preference from localStorage
   private loadPref(key: string, defaultValue = false): boolean {
@@ -127,9 +142,6 @@ export class DetailsComponent {
       this.credits.set(creditsData);
       this.videos.set(videosData?.results || []);
       this.initializeSeriesSelection(data);
-
-      // Check if item is in My List
-      this.inMyList.set(this.isInMyList());
     } catch (e: any) {
       this.error.set(e?.message ?? String(e));
     } finally {
@@ -267,30 +279,23 @@ export class DetailsComponent {
     if (!Number.isFinite(parsed)) return;
     if (this.selectedSeason() === parsed) return;
 
-    // Transición natural y simple
+    // Transición natural y simple con reset de episodio
     this.smoothSeasonChange(() => {
       this.selectedSeason.set(parsed);
       this.seasonEpisodes.set([]);
-      const count = this.getEpisodeCount(parsed);
-      const currentEpisode = this.selectedEpisode();
-      if (!Number.isFinite(count) || count <= 0) {
-        this.selectedEpisode.set(null);
-        return;
-      }
-
-      if (!currentEpisode || currentEpisode > count) {
-        this.selectedEpisode.set(1);
-      }
+      
+      // Cada temporada es independiente - resetear selección de episodio
+      this.selectedEpisode.set(null);
 
       this.loadSeasonEpisodes(parsed);
     });
   }
 
   /**
-   * Transición de temporada natural y sin saltos
-   * - Sin FLIP complejo, sin transforms exagerados
-   * - Solo un micro-fade casi imperceptible
-   * - Mantiene scroll estable
+   * Transición de temporada fluida y sin saltos
+   * - Fade suave sin movimiento vertical
+   * - Mantiene scroll 100% estable
+   * - Cambio instantáneo sin sensación de recarga
    */
   private smoothSeasonChange(changeCallback: () => void): void {
     // Respetar prefers-reduced-motion: swap instantáneo
@@ -299,49 +304,52 @@ export class DetailsComponent {
       return;
     }
 
-    const gridEl = this.elementRef.nativeElement.querySelector('.episode-grid') as HTMLElement;
+    const rowWrapper = this.elementRef.nativeElement.querySelector('.netflix-episode-row-wrapper') as HTMLElement;
+    const gridEl = this.elementRef.nativeElement.querySelector('.netflix-episode-row') as HTMLElement;
+    
     if (!gridEl) {
       changeCallback();
       return;
     }
 
-    // Capturar posición del grid antes del cambio
-    const gridRect = gridEl.getBoundingClientRect();
-    const gridTopBefore = gridRect.top;
-
     // Marcar como transitioning (bloquea interacciones)
     this.seasonTransitioning.set(true);
     
-    // Micro-fade out casi imperceptible (opacity 1 → 0.97)
-    gridEl.style.opacity = '0.97';
+    // Fijar altura del wrapper para evitar saltos de layout
+    if (rowWrapper) {
+      const currentHeight = rowWrapper.offsetHeight;
+      rowWrapper.style.minHeight = `${currentHeight}px`;
+    }
+    
+    // Fade out suave sin desplazamiento
+    gridEl.style.transition = 'opacity 200ms ease-out';
+    gridEl.style.opacity = '0';
     gridEl.style.pointerEvents = 'none';
 
-    // Ejecutar el cambio de datos
-    changeCallback();
+    // Ejecutar el cambio de datos después del fade out
+    setTimeout(() => {
+      changeCallback();
 
-    // Después del render, hacer el fade-in
-    requestAnimationFrame(() => {
+      // Después del render, hacer el fade-in
       requestAnimationFrame(() => {
-        // Ajustar scroll si el grid se movió
-        const gridTopAfter = gridEl.getBoundingClientRect().top;
-        const scrollDelta = gridTopAfter - gridTopBefore;
-        if (Math.abs(scrollDelta) > 2) {
-          window.scrollBy({ top: scrollDelta, behavior: 'instant' });
-        }
+        requestAnimationFrame(() => {
+          // Fade in suave
+          gridEl.style.transition = 'opacity 280ms ease-in';
+          gridEl.style.opacity = '1';
 
-        // Micro-fade in (0.97 → 1)
-        gridEl.style.transition = 'opacity 180ms ease-out';
-        gridEl.style.opacity = '1';
-
-        // Cleanup después de la transición
-        setTimeout(() => {
-          gridEl.style.transition = '';
-          gridEl.style.opacity = '';
-          gridEl.style.pointerEvents = '';
-          this.seasonTransitioning.set(false);
-        }, 200);
+          // Cleanup después de la transición
+          setTimeout(() => {
+            gridEl.style.transition = '';
+            gridEl.style.opacity = '';
+            gridEl.style.pointerEvents = '';
+            if (rowWrapper) {
+              rowWrapper.style.minHeight = '';
+            }
+            this.seasonTransitioning.set(false);
+          }, 300);
+        });
       });
-    });
+    }, 210);
   }
 
   setEpisode(value: string) {
@@ -372,13 +380,25 @@ export class DetailsComponent {
     this.play();
   }
 
-  formatSeasonLabel(season: any) {
+  // Retorna info de la temporada para mostrar en el template
+  getSeasonInfo(season: any): { customName: string; number: number; isSpecial: boolean } | null {
     const name = String(season?.name || '').trim();
-    if (name) return name;
     const number = Number(season?.season_number);
-    if (!Number.isFinite(number)) return 'Season';
-    if (number === 0) return 'Specials';
-    return `Season ${number}`;
+    
+    if (!Number.isFinite(number)) return null;
+    
+    // Si tiene nombre personalizado (no es "Season X", "Temporada X" o "Specials")
+    const isCustomName = name && 
+      !name.startsWith('Season') && 
+      !name.startsWith('Temporada') && 
+      name !== 'Specials' &&
+      name !== 'Especiales';
+    
+    return {
+      customName: isCustomName ? name : '',
+      number: number,
+      isSpecial: number === 0
+    };
   }
 
   formatEpisodeLabel(episode: any) {
@@ -584,64 +604,43 @@ export class DetailsComponent {
   }
 
   // My List functionality
-  toggleMyList() {
-    const type = this.route.snapshot.paramMap.get('type');
-    const id = this.route.snapshot.paramMap.get('id');
+  async toggleMyList() {
+    const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
+    const idStr = this.route.snapshot.paramMap.get('id');
+    const id = idStr ? Number(idStr) : NaN;
     const it = this.item();
 
-    if (!type || !id || !it) return;
-
-    const myList = this.getMyList();
-    const itemKey = `${type}_${id}`;
-
-    if (this.inMyList()) {
-      // Remove from list
-      delete myList[itemKey];
-      this.inMyList.set(false);
-    } else {
-      // Add to list
-      myList[itemKey] = {
-        id: Number(id),
-        type,
-        title: this.title(),
-        poster: it.poster_path,
-        backdrop: it.backdrop_path,
-        rating: it.vote_average,
-        year: this.year(),
-        addedAt: new Date().toISOString(),
-      };
-      this.inMyList.set(true);
+    if (!type || !Number.isFinite(id) || !it) return;
+    
+    // Check authentication
+    if (!this.auth.isAuthenticated()) {
+      console.log('User not authenticated, cannot modify list');
+      return;
     }
 
-    this.saveMyList(myList);
-  }
-
-  private isInMyList(): boolean {
-    const type = this.route.snapshot.paramMap.get('type');
-    const id = this.route.snapshot.paramMap.get('id');
-
-    if (!type || !id) return false;
-
-    const myList = this.getMyList();
-    return `${type}_${id}` in myList;
-  }
-
-  private getMyList(): Record<string, any> {
     try {
-      const data = localStorage.getItem('pirateflix_myList');
-      return data ? JSON.parse(data) : {};
-    } catch {
-      return {};
+      if (this.inMyList()) {
+        // Remove from list
+        const itemId = `${type}_${id}`;
+        await this.userData.removeFromMyList(itemId);
+      } else {
+        // Add to list
+        await this.userData.addToMyList({
+          mediaType: type,
+          tmdbId: id,
+          title: this.title(),
+          poster: it.poster_path,
+          backdrop: it.backdrop_path,
+          rating: it.vote_average,
+          year: this.year(),
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling My List:', error);
     }
   }
 
-  private saveMyList(list: Record<string, any>) {
-    try {
-      localStorage.setItem('pirateflix_myList', JSON.stringify(list));
-    } catch {
-      // Ignore storage errors
-    }
-  }
+  // My List methods removed - now using UserDataService with Firestore
 
   private formatDate(value: string | null | undefined) {
     if (!value) return '—';
