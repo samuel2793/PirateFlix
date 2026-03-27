@@ -1,4 +1,4 @@
-import { Component, inject, signal, ElementRef, ViewChild, OnDestroy, OnInit } from '@angular/core';
+import { Component, inject, signal, ElementRef, ViewChild, OnDestroy, OnInit, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule, ParamMap } from '@angular/router';
 import { AlertController } from '@ionic/angular/standalone';
@@ -25,6 +25,10 @@ const NO_COMPATIBLE_VIDEO_CODE = 'NO_COMPATIBLE_VIDEO';
 const NO_SEEKABLE_CODE = 'NO_SEEKABLE';
 const NO_MULTI_AUDIO_CODE = 'NO_MULTI_AUDIO';
 const NO_SUBTITLES_CODE = 'NO_SUBTITLES';
+const MIN_SUBTITLE_DELAY_MS = -120000;
+const MAX_SUBTITLE_DELAY_MS = 120000;
+const MIN_SUBTITLE_STEP_MS = 100;
+const MAX_SUBTITLE_STEP_MS = 5000;
 
 function buildNoCompatibleVideoError(): Error {
   const error = new Error(NO_COMPATIBLE_VIDEO_CODE);
@@ -62,6 +66,7 @@ interface SubtitleTrack {
   name: string;
   language: string;
   url: string;
+  originalUrl?: string;
   isEmbedded?: boolean;
   streamIndex?: number;
   provider?: 'torrent' | 'embedded' | 'opensubtitles';
@@ -180,10 +185,19 @@ export class PlayerComponent implements OnInit, OnDestroy {
   subtitleColor = signal<string>(this.loadSubtitlePref('color', '#ffffff'));
   subtitleBackground = signal<string>(this.loadSubtitlePref('background', 'rgba(0,0,0,0.7)'));
   subtitleFont = signal<string>(this.loadSubtitlePref('font', 'sans-serif'));
+  subtitleDelayMs = signal<number>(
+    this.clampSubtitleDelay(this.loadSubtitlePref('delayMs', 0))
+  );
+  subtitleDelayStepMs = signal<number>(
+    this.clampSubtitleDelayStep(this.loadSubtitlePref('delayStepMs', 500))
+  );
+  subtitleSyncApplying = signal<boolean>(false);
+  subtitleSyncError = signal<string>('');
   showSubtitleSettings = signal<boolean>(false);
   
   // Settings panel
   showSettings = signal<boolean>(false);
+  showSubtitleSyncWindow = signal<boolean>(false);
   settingsTab = signal<'audio' | 'subtitles' | 'appearance'>('audio');
   selectedSubtitleTrack = signal<number>(-1);
   
@@ -264,6 +278,9 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private audioSwitchPreviousSrc = '';
   private audioSwitchPreviousSelection: 'auto' | number = 'auto';
   private audioSwitchTargetSrc = '';
+  private subtitleDelayApplyToken = 0;
+  private subtitleShiftCache = new Map<string, string>();
+  private subtitleShiftInFlight = new Map<string, Promise<string | null>>();
   
   // Watch progress tracking
   private progressSaveInterval: any = null;
@@ -423,10 +440,10 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
     // Clear bound src so Angular does not re-attach the old stream.
     this.videoSrc.set('');
-    this.subtitleTracks.set([]);
+    this.clearSubtitleShiftCache();
+    this.setSubtitleTracks([]);
     this.audioTracks.set([]);
     this.selectedAudioTrack.set('auto');
-    this.selectedSubtitleTrack.set(-1);
     this.openSubtitlesResults.set([]);
     this.openSubtitlesError.set('');
     this.openSubtitlesLoading.set(false);
@@ -1389,10 +1406,10 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.loadingPhase.set('streaming');
     this.errorMessage.set('');
     this.showPlayer.set(true);
-    this.subtitleTracks.set([]);
+    this.clearSubtitleShiftCache();
+    this.setSubtitleTracks([]);
     this.audioTracks.set([]);
     this.selectedAudioTrack.set('auto');
-    this.selectedSubtitleTrack.set(-1);
     this.openSubtitlesResults.set([]);
     this.openSubtitlesError.set('');
     this.openSubtitlesLanguageOrder.set([]);
@@ -1613,17 +1630,17 @@ export class PlayerComponent implements OnInit, OnDestroy {
         if (subtitles.length === 0) {
           throw buildNoSubtitlesError();
         }
-        this.subtitleTracks.set(subtitles);
+        this.setSubtitleTracks(subtitles);
         this.pushLoadingLog(`Total de subtítulos disponibles: ${subtitles.length}`);
       } else {
-        this.subtitleTracks.set(subtitles);
+        this.setSubtitleTracks(subtitles);
         this.pushLoadingLog(`Total de subtítulos disponibles: ${subtitles.length}`);
         void fetchEmbeddedSubtitles().then((embeddedSubs) => {
           if (!this.isSessionActive(sessionId)) return;
           if (embeddedSubs.length === 0) return;
           const updated = this.subtitleTracks().slice();
           mergeEmbeddedSubtitles(embeddedSubs, updated);
-          this.subtitleTracks.set(updated);
+          this.setSubtitleTracks(updated);
           this.pushLoadingLog(`Subtítulos embebidos agregados: ${embeddedSubs.length}`);
         });
       }
@@ -2437,7 +2454,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
     const query = params.toString();
     const url = `${this.API_URL}/opensubtitles/subtitle/${result.fileId}${query ? `?${query}` : ''}`;
     const existing = this.subtitleTracks();
-    const existingIndex = existing.findIndex((track) => track.url === url);
+    const existingIndex = existing.findIndex((track) => (track.originalUrl || track.url) === url);
     if (existingIndex >= 0) {
       this.selectSubtitleTrack(existingIndex);
       return;
@@ -2452,6 +2469,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
       name: `OpenSubtitles - ${titleBits.join(' - ')}`,
       language,
       url,
+      originalUrl: url,
       isEmbedded: false,
       provider: 'opensubtitles',
       fileId: result.fileId,
@@ -2459,7 +2477,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
     const nextTracks = existing.concat(nextTrack);
     const newIndex = nextTracks.length - 1;
-    this.subtitleTracks.set(nextTracks);
+    this.setSubtitleTracks(nextTracks);
     this.openSubtitlesError.set('');
     setTimeout(() => this.selectSubtitleTrack(newIndex), 0);
   }
@@ -2997,6 +3015,16 @@ export class PlayerComponent implements OnInit, OnDestroy {
   }
 
   // Subtitle customization helpers
+  private clampSubtitleDelay(delayMs: number): number {
+    if (!Number.isFinite(delayMs)) return 0;
+    return Math.max(MIN_SUBTITLE_DELAY_MS, Math.min(MAX_SUBTITLE_DELAY_MS, Math.round(delayMs)));
+  }
+
+  private clampSubtitleDelayStep(stepMs: number): number {
+    if (!Number.isFinite(stepMs)) return 500;
+    return Math.max(MIN_SUBTITLE_STEP_MS, Math.min(MAX_SUBTITLE_STEP_MS, Math.round(stepMs)));
+  }
+
   private loadSubtitlePref<T>(key: string, defaultValue: T): T {
     try {
       const stored = localStorage.getItem(`pirateflix_subtitle_${key}`);
@@ -3012,6 +3040,226 @@ export class PlayerComponent implements OnInit, OnDestroy {
     try {
       localStorage.setItem(`pirateflix_subtitle_${key}`, String(value));
     } catch {}
+  }
+
+  private setSubtitleTracks(tracks: SubtitleTrack[]) {
+    const normalized = tracks.map((track, index) => ({
+      ...track,
+      index,
+      originalUrl: track.originalUrl || track.url,
+    }));
+    this.subtitleTracks.set(normalized);
+    this.subtitleSyncError.set('');
+
+    if (normalized.length === 0) {
+      this.subtitleDelayApplyToken += 1;
+      this.subtitleSyncApplying.set(false);
+      this.showSubtitleSyncWindow.set(false);
+      this.selectedSubtitleTrack.set(-1);
+      return;
+    }
+
+    if (this.selectedSubtitleTrack() >= normalized.length) {
+      this.selectedSubtitleTrack.set(-1);
+    }
+
+    void this.applySubtitleDelay();
+  }
+
+  setSubtitleDelayStep(stepMs: number) {
+    const clamped = this.clampSubtitleDelayStep(stepMs);
+    this.subtitleDelayStepMs.set(clamped);
+    this.saveSubtitlePref('delayStepMs', clamped);
+  }
+
+  setSubtitleDelay(delayMs: number) {
+    const clamped = this.clampSubtitleDelay(delayMs);
+    this.subtitleDelayMs.set(clamped);
+    this.saveSubtitlePref('delayMs', clamped);
+    this.subtitleSyncError.set('');
+    void this.applySubtitleDelay();
+  }
+
+  adjustSubtitleDelay(deltaMs: number) {
+    this.setSubtitleDelay(this.subtitleDelayMs() + deltaMs);
+  }
+
+  resetSubtitleDelay() {
+    this.setSubtitleDelay(0);
+  }
+
+  formatSubtitleDelay() {
+    const value = this.subtitleDelayMs();
+    const abs = Math.abs(value);
+    const seconds = abs / 1000;
+    const shown = Number.isInteger(seconds) ? `${seconds}` : seconds.toFixed(1);
+    const prefix = value > 0 ? '+' : value < 0 ? '-' : '';
+    return `${prefix}${shown}s`;
+  }
+
+  formatSubtitleStep(stepMs: number) {
+    const abs = Math.abs(stepMs);
+    if (abs % 1000 === 0) return `${abs / 1000}s`;
+    if (abs >= 1000) return `${(abs / 1000).toFixed(1)}s`;
+    return `${abs}ms`;
+  }
+
+  private async applySubtitleDelay() {
+    const tracks = this.subtitleTracks();
+    if (tracks.length === 0) return;
+
+    const delayMs = this.subtitleDelayMs();
+    const token = ++this.subtitleDelayApplyToken;
+    const normalized = tracks.map((track, index) => ({
+      ...track,
+      index,
+      originalUrl: track.originalUrl || track.url,
+    }));
+
+    if (delayMs === 0) {
+      const restored = normalized.map((track) => ({
+        ...track,
+        url: track.originalUrl!,
+      }));
+      this.subtitleTracks.set(restored);
+      this.subtitleSyncApplying.set(false);
+      this.subtitleSyncError.set('');
+      this.refreshSelectedSubtitleTrack();
+      return;
+    }
+
+    this.subtitleSyncApplying.set(true);
+    try {
+      const adjustedUrls = await Promise.all(
+        normalized.map((track) => this.getShiftedSubtitleUrl(track.originalUrl!, delayMs))
+      );
+      if (token !== this.subtitleDelayApplyToken) return;
+
+      const shifted = normalized.map((track, index) => ({
+        ...track,
+        url: adjustedUrls[index] || track.originalUrl!,
+      }));
+      this.subtitleTracks.set(shifted);
+      this.subtitleSyncError.set('');
+      this.refreshSelectedSubtitleTrack();
+    } catch (error) {
+      if (token !== this.subtitleDelayApplyToken) return;
+      console.error('Error aplicando desfase a subtítulos:', error);
+      this.subtitleSyncError.set(
+        'No se pudo ajustar la sincronía de subtítulos. Se mantiene la versión original.'
+      );
+    } finally {
+      if (token === this.subtitleDelayApplyToken) {
+        this.subtitleSyncApplying.set(false);
+      }
+    }
+  }
+
+  private async getShiftedSubtitleUrl(
+    originalUrl: string,
+    delayMs: number
+  ): Promise<string | null> {
+    const key = `${delayMs}|${originalUrl}`;
+    const cached = this.subtitleShiftCache.get(key);
+    if (cached) return cached;
+
+    const pending = this.subtitleShiftInFlight.get(key);
+    if (pending) return pending;
+
+    const task = (async () => {
+      try {
+        const response = await fetch(originalUrl, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const content = await response.text();
+        const shifted = this.shiftSubtitleContent(content, delayMs);
+        const objectUrl = URL.createObjectURL(
+          new Blob([shifted], { type: 'text/vtt; charset=utf-8' })
+        );
+        this.subtitleShiftCache.set(key, objectUrl);
+        return objectUrl;
+      } catch (error) {
+        console.warn('No se pudo procesar subtítulo para desfase:', originalUrl, error);
+        return null;
+      } finally {
+        this.subtitleShiftInFlight.delete(key);
+      }
+    })();
+
+    this.subtitleShiftInFlight.set(key, task);
+    return task;
+  }
+
+  private shiftSubtitleContent(content: string, delayMs: number): string {
+    const raw = String(content || '').replace(/^\uFEFF/, '');
+    const source = /^\s*WEBVTT\b/i.test(raw) ? raw : `WEBVTT\n\n${raw}`;
+    const timingLineRegex =
+      /(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[.,]\d{3})([^\r\n]*)/g;
+
+    return source.replace(timingLineRegex, (_full, start, end, settings = '') => {
+      const startMs = this.parseSubtitleTimestampMs(start);
+      const endMs = this.parseSubtitleTimestampMs(end);
+      if (startMs === null || endMs === null) return _full;
+
+      const cueDuration = Math.max(100, endMs - startMs);
+      const shiftedStart = Math.max(0, startMs + delayMs);
+      const shiftedEndRaw = endMs + delayMs;
+      const shiftedEnd =
+        shiftedEndRaw <= shiftedStart
+          ? shiftedStart + cueDuration
+          : Math.max(shiftedStart + 100, shiftedEndRaw);
+
+      return `${this.formatSubtitleTimestampMs(shiftedStart)} --> ${this.formatSubtitleTimestampMs(
+        shiftedEnd
+      )}${settings}`;
+    });
+  }
+
+  private parseSubtitleTimestampMs(value: string): number | null {
+    const match = /^(\d{2}):(\d{2}):(\d{2})[.,](\d{3})$/.exec(String(value || '').trim());
+    if (!match) return null;
+
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    const seconds = Number(match[3]);
+    const millis = Number(match[4]);
+    if (
+      !Number.isFinite(hours) ||
+      !Number.isFinite(minutes) ||
+      !Number.isFinite(seconds) ||
+      !Number.isFinite(millis)
+    ) {
+      return null;
+    }
+
+    return ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis;
+  }
+
+  private formatSubtitleTimestampMs(value: number): string {
+    const total = Math.max(0, Math.floor(value));
+    const hours = Math.floor(total / 3600000);
+    const minutes = Math.floor((total % 3600000) / 60000);
+    const seconds = Math.floor((total % 60000) / 1000);
+    const millis = total % 1000;
+    const hh = String(hours).padStart(2, '0');
+    const mm = String(minutes).padStart(2, '0');
+    const ss = String(seconds).padStart(2, '0');
+    const mmm = String(millis).padStart(3, '0');
+    return `${hh}:${mm}:${ss}.${mmm}`;
+  }
+
+  private refreshSelectedSubtitleTrack() {
+    const selected = this.selectedSubtitleTrack();
+    setTimeout(() => this.selectSubtitleTrack(selected), 0);
+  }
+
+  private clearSubtitleShiftCache() {
+    this.subtitleDelayApplyToken += 1;
+    this.subtitleSyncApplying.set(false);
+    this.subtitleShiftInFlight.clear();
+    for (const objectUrl of this.subtitleShiftCache.values()) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    this.subtitleShiftCache.clear();
   }
 
   setSubtitleSize(size: number) {
@@ -3058,6 +3306,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
         this.settingsTab.set('subtitles');
       }
     } else {
+      this.showSubtitleSyncWindow.set(false);
       // Si se cierra settings, reiniciar el temporizador
       this.resetControlsHideTimer();
     }
@@ -3065,6 +3314,18 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
   setSettingsTab(tab: 'audio' | 'subtitles' | 'appearance') {
     this.settingsTab.set(tab);
+    if (tab !== 'subtitles') {
+      this.showSubtitleSyncWindow.set(false);
+    }
+  }
+
+  openSubtitleSyncWindow() {
+    if (this.subtitleTracks().length === 0) return;
+    this.showSubtitleSyncWindow.set(true);
+  }
+
+  closeSubtitleSyncWindow() {
+    this.showSubtitleSyncWindow.set(false);
   }
 
   selectAudioTrack(track: 'auto' | number) {
@@ -3079,6 +3340,32 @@ export class PlayerComponent implements OnInit, OnDestroy {
     const tracks = video.textTracks;
     for (let i = 0; i < tracks.length; i++) {
       tracks[i].mode = (i === index) ? 'showing' : 'hidden';
+    }
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onGlobalKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName?.toLowerCase() || '';
+    const isTypingTarget =
+      tag === 'input' ||
+      tag === 'textarea' ||
+      tag === 'select' ||
+      Boolean(target?.isContentEditable);
+    if (isTypingTarget) return;
+
+    if (!event.shiftKey) return;
+    if (!this.subtitleTracks().length) return;
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      this.adjustSubtitleDelay(-this.subtitleDelayStepMs());
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      this.adjustSubtitleDelay(this.subtitleDelayStepMs());
+    } else if (event.key === '0') {
+      event.preventDefault();
+      this.resetSubtitleDelay();
     }
   }
 
@@ -3566,6 +3853,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.nextEpisodeProgress.set(0);
 
     // Limpiar estilos de subtítulos
+    this.clearSubtitleShiftCache();
     this.cleanupSubtitleStyles();
 
     // Parar el video completamente

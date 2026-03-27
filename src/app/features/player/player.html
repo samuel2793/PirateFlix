@@ -333,6 +333,25 @@
               </div>
             }
 
+            @if (subtitleTracks().length > 0) {
+              <div class="setting-group">
+                <label class="group-label translate-text">{{ 'Subtitle sync' | t }}</label>
+                <button class="subtitle-sync-launcher" (click)="openSubtitleSyncWindow()">
+                  <span class="launcher-title translate-text">{{ 'Open sync window' | t }}</span>
+                  <span class="launcher-offset" [class.positive]="subtitleDelayMs() > 0" [class.negative]="subtitleDelayMs() < 0">
+                    {{ formatSubtitleDelay() }}
+                  </span>
+                </button>
+                @if (subtitleSyncApplying()) {
+                  <p class="open-subtitle-status translate-text">{{ 'Applying subtitle sync...' | t }}</p>
+                }
+
+                @if (subtitleSyncError()) {
+                  <p class="open-subtitle-status error">{{ subtitleSyncError() }}</p>
+                }
+              </div>
+            }
+
             <div class="setting-group">
               <label class="group-label translate-text">{{ 'Download from OpenSubtitles' | t }}</label>
               @if (!canSearchOpenSubtitles()) {
@@ -474,6 +493,63 @@
           </div>
         }
       </div>
+
+      @if (showSubtitleSyncWindow()) {
+        <div class="settings-subwindow-backdrop" (click)="closeSubtitleSyncWindow()">
+          <div class="settings-subwindow subtitle-sync-window" (click)="$event.stopPropagation()">
+            <div class="subwindow-header">
+              <h3 class="subwindow-title translate-text">{{ 'Subtitle sync' | t }}</h3>
+              <button class="subwindow-close" (click)="closeSubtitleSyncWindow()" [title]="'Close' | t">✕</button>
+            </div>
+
+            <div class="subwindow-content">
+              <div class="subtitle-sync-value" [class.positive]="subtitleDelayMs() > 0" [class.negative]="subtitleDelayMs() < 0">
+                {{ formatSubtitleDelay() }}
+              </div>
+
+              <div class="subtitle-sync-presets">
+                <button class="sync-btn" (click)="adjustSubtitleDelay(-5000)">-5s</button>
+                <button class="sync-btn" (click)="adjustSubtitleDelay(-1000)">-1s</button>
+                <button class="sync-btn" (click)="adjustSubtitleDelay(1000)">+1s</button>
+                <button class="sync-btn" (click)="adjustSubtitleDelay(5000)">+5s</button>
+              </div>
+
+              <div class="subtitle-sync-actions">
+                <button class="sync-btn" (click)="adjustSubtitleDelay(-subtitleDelayStepMs())">
+                  -{{ formatSubtitleStep(subtitleDelayStepMs()) }}
+                </button>
+                <button class="sync-btn" (click)="adjustSubtitleDelay(subtitleDelayStepMs())">
+                  +{{ formatSubtitleStep(subtitleDelayStepMs()) }}
+                </button>
+                <button
+                  class="sync-btn reset translate-text"
+                  (click)="resetSubtitleDelay()"
+                  [disabled]="subtitleDelayMs() === 0">
+                  {{ 'Reset sync' | t }}
+                </button>
+              </div>
+
+              <label class="group-label translate-text">{{ 'Adjust step' | t }}</label>
+              <div class="subtitle-sync-steps">
+                <button class="step-btn" [class.active]="subtitleDelayStepMs() === 250" (click)="setSubtitleDelayStep(250)">250ms</button>
+                <button class="step-btn" [class.active]="subtitleDelayStepMs() === 500" (click)="setSubtitleDelayStep(500)">500ms</button>
+                <button class="step-btn" [class.active]="subtitleDelayStepMs() === 1000" (click)="setSubtitleDelayStep(1000)">1s</button>
+                <button class="step-btn" [class.active]="subtitleDelayStepMs() === 2000" (click)="setSubtitleDelayStep(2000)">2s</button>
+              </div>
+
+              @if (subtitleSyncApplying()) {
+                <p class="open-subtitle-status translate-text">{{ 'Applying subtitle sync...' | t }}</p>
+              } @else {
+                <p class="open-subtitle-status hint translate-text">{{ 'Tip: Shift + ← / → adjusts subtitles while watching' | t }}</p>
+              }
+
+              @if (subtitleSyncError()) {
+                <p class="open-subtitle-status error">{{ subtitleSyncError() }}</p>
+              }
+            </div>
+          </div>
+        </div>
+      }
     </div>
   }
 </div>
