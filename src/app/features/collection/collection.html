@@ -1,0 +1,215 @@
+<div class="collection-page">
+  <!-- Header -->
+  <header class="collection-header">
+    
+    <div class="header-content">
+      <div class="header-icon" *ngIf="collectionMeta()?.icon">
+        <mat-icon>{{ collectionMeta()?.icon }}</mat-icon>
+      </div>
+      <div class="header-text">
+        <h1 class="collection-title">{{ (collectionMeta()?.nameKey || '') | t }}</h1>
+        <p class="collection-copy">{{ getCollectionCopy() }}</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toolbar: Filters & Sort -->
+  <div class="toolbar">
+    <!-- Filter Presets (Quick Chips) -->
+    <div class="filter-presets">
+      <button 
+        class="preset-chip"
+        *ngFor="let preset of presets"
+        [class.active]="activeFilters().genre === preset.filter.genre || 
+                        activeFilters().language === preset.filter.language ||
+                        activeFilters().maxDuration === preset.filter.maxDuration"
+        (click)="applyPreset(preset)"
+      >
+        <mat-icon>{{ preset.icon }}</mat-icon>
+        <span>{{ preset.label | t }}</span>
+      </button>
+    </div>
+
+    <!-- Filter Dropdowns -->
+    <div class="filter-dropdowns">
+      <!-- Genre Filter -->
+      <button class="filter-btn" [matMenuTriggerFor]="genreMenu">
+        <mat-icon>category</mat-icon>
+        <span>{{ activeFilters().genre ? getActiveGenreName() : ('Género' | t) }}</span>
+        <mat-icon class="dropdown-icon">expand_more</mat-icon>
+      </button>
+      <mat-menu #genreMenu="matMenu">
+        <button mat-menu-item (click)="setGenreFilter(null)">
+          <span>{{ 'All' | t }}</span>
+        </button>
+        <button mat-menu-item *ngFor="let genre of genres" (click)="setGenreFilter(genre.id)">
+          <span>{{ genre.name }}</span>
+        </button>
+      </mat-menu>
+
+      <!-- Year Filter -->
+      <button class="filter-btn" [matMenuTriggerFor]="yearMenu">
+        <mat-icon>calendar_today</mat-icon>
+        <span>{{ activeFilters().year || ('Año' | t) }}</span>
+        <mat-icon class="dropdown-icon">expand_more</mat-icon>
+      </button>
+      <mat-menu #yearMenu="matMenu">
+        <button mat-menu-item (click)="setYearFilter(null)">
+          <span>{{ 'All' | t }}</span>
+        </button>
+        <button mat-menu-item *ngFor="let year of years.slice(0, 15)" (click)="setYearFilter(year)">
+          <span>{{ year }}</span>
+        </button>
+      </mat-menu>
+
+      <!-- Language Filter -->
+      <button class="filter-btn" [matMenuTriggerFor]="langMenu">
+        <mat-icon>language</mat-icon>
+        <span>{{ activeFilters().language || ('Idioma' | t) }}</span>
+        <mat-icon class="dropdown-icon">expand_more</mat-icon>
+      </button>
+      <mat-menu #langMenu="matMenu">
+        <button mat-menu-item (click)="setLanguageFilter(null)">
+          <span>{{ 'All' | t }}</span>
+        </button>
+        <button mat-menu-item *ngFor="let lang of languages" (click)="setLanguageFilter(lang.code)">
+          <span>{{ lang.name }}</span>
+        </button>
+      </mat-menu>
+
+      <!-- Clear Filters -->
+      <button 
+        class="clear-filters-btn" 
+        *ngIf="hasActiveFilters()"
+        (click)="clearFilters()"
+      >
+        <mat-icon>close</mat-icon>
+        <span>{{ 'Limpiar' | t }}</span>
+      </button>
+    </div>
+
+    <!-- Sort & View -->
+    <div class="toolbar-right">
+      <button class="sort-btn" [matMenuTriggerFor]="sortMenu">
+        <mat-icon>sort</mat-icon>
+        <span>{{ getSortLabel() | t }}</span>
+        <mat-icon class="dropdown-icon">expand_more</mat-icon>
+      </button>
+      <mat-menu #sortMenu="matMenu">
+        <button 
+          mat-menu-item 
+          *ngFor="let option of sortOptions" 
+          (click)="setSortBy(option.value)"
+          [class.active]="sortBy() === option.value"
+        >
+          <mat-icon *ngIf="sortBy() === option.value">check</mat-icon>
+          <span>{{ option.label | t }}</span>
+        </button>
+      </mat-menu>
+
+      <button class="view-toggle" (click)="toggleViewMode()">
+        <mat-icon>{{ viewMode() === 'grid' ? 'view_list' : 'grid_view' }}</mat-icon>
+      </button>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <main class="collection-content">
+    <!-- Loading State -->
+    <div 
+      class="content-grid" 
+      [class.view-list]="viewMode() === 'list'"
+      *ngIf="loading() && items().length === 0"
+    >
+      <div class="grid-card skeleton-card" *ngFor="let _ of skeletonItems">
+        <div class="card-poster skeleton-poster">
+          <div class="skeleton-shimmer"></div>
+        </div>
+        <div class="card-info">
+          <div class="skeleton-text skeleton-text-title"></div>
+          <div class="skeleton-text skeleton-text-year"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Items Grid/List -->
+    <div 
+      class="content-grid" 
+      [class.view-list]="viewMode() === 'list'"
+      *ngIf="items().length > 0"
+    >
+      <div 
+        class="grid-card" 
+        *ngFor="let item of items(); let i = index"
+        (click)="openDetails(item)"
+      >
+        <div class="card-poster">
+          <img 
+            [src]="getPoster(item)" 
+            [alt]="getTitle(item)"
+            [title]="getTitle(item)"
+            loading="lazy"
+          />
+          <div class="card-overlay">
+            <div class="overlay-top">
+              <span class="card-rank">#{{ i + 1 }}</span>
+              <span class="media-badge">
+                {{ item.media_type === 'movie' ? ('Movie' | t) : ('TV' | t) }}
+              </span>
+            </div>
+            <div class="overlay-bottom">
+              <button class="play-btn">
+                <mat-icon>play_arrow</mat-icon>
+              </button>
+            </div>
+          </div>
+          <div class="card-rating" *ngIf="item.vote_average">
+            <mat-icon>star</mat-icon>
+            {{ item.vote_average | number:'1.1-1' }}
+          </div>
+        </div>
+        <div class="card-info">
+          <div class="card-title">{{ getTitle(item) }}</div>
+          <div class="card-meta">
+            <span class="card-year">{{ getYear(item) }}</span>
+            <span class="card-rating-inline" *ngIf="item.vote_average && viewMode() === 'list'">
+              <mat-icon>star</mat-icon>
+              {{ item.vote_average | number:'1.1-1' }}
+            </span>
+          </div>
+          <p class="card-overview" *ngIf="viewMode() === 'list'">{{ item.overview }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading More Indicator -->
+    <div class="loading-more" *ngIf="loadingMore()">
+      <mat-spinner diameter="32"></mat-spinner>
+      <span>{{ 'Loading...' | t }}</span>
+    </div>
+
+    <!-- Error State -->
+    <div class="error-state" *ngIf="error()">
+      <mat-icon>error_outline</mat-icon>
+      <p>{{ error() }}</p>
+      <button class="retry-btn" (click)="resetAndLoad()">
+        <mat-icon>refresh</mat-icon>
+        <span>{{ 'Retry' | t }}</span>
+      </button>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" *ngIf="!loading() && items().length === 0 && !error()">
+      <mat-icon>movie_filter</mat-icon>
+      <p class="translate-text">{{ 'No content available' | t }}</p>
+      <button class="clear-btn" *ngIf="hasActiveFilters()" (click)="clearFilters()">
+        <span>{{ 'Limpiar filtros' | t }}</span>
+      </button>
+    </div>
+
+    <!-- End of List -->
+    <div class="end-of-list" *ngIf="!loading() && !hasMore() && items().length > 0">
+      <span>{{ 'Has llegado al final' | t }}</span>
+    </div>
+  </main>
+</div>

@@ -231,8 +231,7 @@
           <button
             class="tab-btn"
             [class.active]="settingsTab() === 'audio'"
-            (click)="setSettingsTab('audio')"
-            [disabled]="audioTracks().length <= 1">
+            (click)="setSettingsTab('audio')">
             🔊 <span class="translate-text">{{ 'Audio' | t }}</span>
           </button>
           <button
@@ -257,6 +256,20 @@
         <!-- Audio Tab -->
         @if (settingsTab() === 'audio') {
           <div class="tab-content">
+            <!-- Preferred audio language selector -->
+            <div class="setting-group">
+              <label class="group-label translate-text">{{ 'Preferred language' | t }}</label>
+              <div class="audio-list preferred-lang">
+                @for (lang of ['Español', 'Latino', 'English', 'Français', 'Deutsch', 'Italiano', 'Português', '日本語']; track lang) {
+                  <button
+                    class="audio-option compact"
+                    [class.active]="preferredAudioLanguage() === lang"
+                    (click)="setPreferredAudioLanguage(lang)">
+                    <span class="audio-name">{{ lang }}</span>
+                  </button>
+                }
+              </div>
+            </div>
             @if (audioTracks().length > 1) {
               <div class="setting-group">
                 <label class="group-label translate-text">{{ 'Audio track' | t }}</label>

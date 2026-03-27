@@ -445,6 +445,21 @@ $accent-primary: #e5a00d;
   gap: 6px;
 }
 
+.audio-list.preferred-lang {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+
+  .audio-option.compact {
+    width: auto;
+    padding: 6px 14px;
+    font-size: 12px;
+    gap: 0;
+    justify-content: center;
+    border-radius: 20px;
+  }
+}
+
 .audio-option,
 .subtitle-option {
   display: flex;

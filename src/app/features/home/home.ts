@@ -4,10 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 
 import { TmdbService } from '../../core/services/tmdb';
+import { CollectionsService, Collection, MediaItem } from '../../core/services/collections.service';
 import { LanguageService, SupportedLang } from '../../shared/services/language.service';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { FirebaseAuthService } from '../../core/services/firebase-auth';
 import { UserDataService } from '../../core/services/user-data.service';
+import { CollectionRowComponent } from '../../shared/components/collection-row/collection-row';
 
 import { MatToolbarModule } from '@angular/material/toolbar';
 import { MatSidenavModule } from '@angular/material/sidenav';
@@ -35,6 +37,7 @@ type SearchFilter = 'all' | 'movie' | 'tv' | 'person';
     CommonModule,
     FormsModule,
     TranslatePipe,
+    CollectionRowComponent,
 
     MatToolbarModule,
     MatSidenavModule,
@@ -58,13 +61,52 @@ type SearchFilter = 'all' | 'movie' | 'tv' | 'person';
 })
 export class HomeComponent implements OnDestroy {
   private readonly tmdb = inject(TmdbService);
-  private readonly router = inject(Router);
+  private readonly collectionsService = inject(CollectionsService);
+  readonly router = inject(Router);
   private readonly scroller = inject(ViewportScroller);
   private readonly language = inject(LanguageService);
   private readonly document = inject(DOCUMENT);
   private readonly elementRef = inject(ElementRef);
   private readonly auth = inject(FirebaseAuthService);
   private readonly userData = inject(UserDataService);
+
+  // Collections
+  collections = this.collectionsService.collections;
+  collectionsLoading = this.collectionsService.loading;
+  collectionsError = this.collectionsService.error;
+
+  // Hero carousel state
+  heroIndex = signal(0);
+  private heroTimer: any = null;
+  private readonly HERO_INTERVAL = 8000; // 8 seconds between slides
+  private readonly HERO_MAX_ITEMS = 8; // show up to 8 items
+
+  /** Top items across all collections, sorted by popularity/vote */
+  heroItems = computed(() => {
+    const cols = this.collections();
+    if (!cols.length) return [];
+    // Gather all items from all collections
+    const allItems: MediaItem[] = [];
+    const seen = new Set<string>();
+    for (const col of cols) {
+      for (const item of (col.items || [])) {
+        const key = `${item.media_type}-${item.id}`;
+        if (!seen.has(key) && item.backdrop_path) {
+          seen.add(key);
+          allItems.push(item);
+        }
+      }
+    }
+    // Sort by popularity descending
+    allItems.sort((a, b) => (b.popularity ?? b.vote_average ?? 0) - (a.popularity ?? a.vote_average ?? 0));
+    return allItems.slice(0, this.HERO_MAX_ITEMS);
+  });
+
+  currentHeroItem = computed(() => {
+    const items = this.heroItems();
+    if (!items.length) return null;
+    return items[this.heroIndex() % items.length] ?? null;
+  });
 
   authAvailable = this.auth.available;
   isAuthenticated = this.auth.isAuthenticated;
@@ -179,8 +221,8 @@ export class HomeComponent implements OnDestroy {
 
   tabIndex = 0;
 
-  // Active tab: 'movies' | 'tv' | 'search'
-  activeTab = signal<'movies' | 'tv' | 'search'>('movies');
+  // Active tab: 'home' | 'movies' | 'tv' | 'search'
+  activeTab = signal<'home' | 'movies' | 'tv' | 'search'>('home');
 
   // Grid size (content density): 1 = small, 2 = medium, 3 = large
   gridSize = signal<number>(this.loadGridSize());
@@ -311,6 +353,8 @@ export class HomeComponent implements OnDestroy {
 
   constructor() {
     this.refreshTrending();
+    this.loadCollections();
+    this.startHeroRotation();
     
     // Restore state if returning from details/person page
     const state = this.router.getCurrentNavigation()?.extras?.state || window.history.state;
@@ -330,8 +374,82 @@ export class HomeComponent implements OnDestroy {
     }
   }
 
+  async loadCollections() {
+    await this.collectionsService.loadAllCollections();
+  }
+
+  // Get collections filtered by type for each tab
+  movieCollections = computed(() => {
+    return this.collections().filter(c => 
+      c.mediaType === 'movie' || c.mediaType === 'mixed'
+    );
+  });
+
+  tvCollections = computed(() => {
+    return this.collections().filter(c => 
+      c.mediaType === 'tv' || c.mediaType === 'mixed'
+    );
+  });
+
+  onCollectionItemClick(item: MediaItem | undefined) {
+    if (!item) return;
+    this.router.navigate(['/details', item.media_type, item.id]);
+  }
+
   ngOnDestroy() {
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.stopHeroRotation();
+  }
+
+  // --- Hero carousel ---
+  startHeroRotation() {
+    this.stopHeroRotation();
+    this.heroTimer = setInterval(() => {
+      if (this.activeTab() !== 'home') return; // only rotate on home tab
+      const items = this.heroItems();
+      if (items.length > 1) {
+        this.heroIndex.update(i => (i + 1) % items.length);
+      }
+    }, this.HERO_INTERVAL);
+  }
+
+  stopHeroRotation() {
+    if (this.heroTimer) {
+      clearInterval(this.heroTimer);
+      this.heroTimer = null;
+    }
+  }
+
+  goToHeroSlide(index: number) {
+    this.heroIndex.set(index);
+    // Reset timer so it doesn't jump immediately after manual nav
+    this.startHeroRotation();
+  }
+
+  heroNext() {
+    const items = this.heroItems();
+    if (items.length > 1) {
+      this.heroIndex.update(i => (i + 1) % items.length);
+      this.startHeroRotation();
+    }
+  }
+
+  heroPrev() {
+    const items = this.heroItems();
+    if (items.length > 1) {
+      this.heroIndex.update(i => (i - 1 + items.length) % items.length);
+      this.startHeroRotation();
+    }
+  }
+
+  playHeroItem(item: MediaItem | null | undefined) {
+    if (!item) return;
+    this.router.navigate(['/play', item.media_type, item.id]);
+  }
+
+  infoHeroItem(item: MediaItem | null | undefined) {
+    if (!item) return;
+    this.router.navigate(['/details', item.media_type, item.id]);
   }
 
   async refreshTrending() {
@@ -406,6 +524,15 @@ export class HomeComponent implements OnDestroy {
   getHeroBackdrop() {
     const item = this.getHeroItem();
     return item ? this.tmdb.backdropUrl(item.backdrop_path) : '';
+  }
+
+  getCollectionHeroBackdrop() {
+    const item = this.currentHeroItem();
+    if (item?.backdrop_path) {
+      return this.tmdb.backdropUrl(item.backdrop_path);
+    }
+    // Fallback to first trending movie backdrop
+    return this.getMovieHeroBackdrop();
   }
 
   poster(path: string | null | undefined) {
