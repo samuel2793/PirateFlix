@@ -5,6 +5,9 @@
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
+    "android:prepare-node": "./scripts/prepare_android_node_project.sh",
+    "android:apk": "npm run android:prepare-node && npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "android:apk:wireless": "./scripts/android_build_and_wireless_install.sh",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
@@ -36,6 +39,7 @@
     "@capacitor/android": "^8.0.0",
     "@capacitor/cli": "^8.0.0",
     "@capacitor/core": "^8.0.0",
+    "@choreruiz/capacitor-node-js": "^1.0.2",
     "@ionic/angular": "^8.7.16",
     "axios": "^1.13.2",
     "firebase": "^10.14.1",

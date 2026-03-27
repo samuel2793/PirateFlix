@@ -104,8 +104,12 @@
           </button>
         </div>
 
+        <p class="overview" *ngIf="nativeStandaloneMode">
+          <span class="translate-text">Standalone APK mode: Play opens the official trailer without backend.</span>
+        </p>
+
         <!-- Playback Options -->
-        <div class="playback-options">
+        <div class="playback-options" *ngIf="!nativeStandaloneMode">
           <label class="option-toggle">
             <input type="checkbox" [checked]="preferMultiAudio()" (change)="toggleMultiAudio($any($event.target).checked)" />
             <span class="toggle-track"></span>

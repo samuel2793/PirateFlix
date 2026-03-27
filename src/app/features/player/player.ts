@@ -3,6 +3,10 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule, ParamMap } from '@angular/router';
 import { AlertController } from '@ionic/angular/standalone';
 import { HttpClient } from '@angular/common/http';
+import { Capacitor } from '@capacitor/core';
+import { NodeJS } from '@choreruiz/capacitor-node-js';
+import { APP_CONFIG } from '../../core/config/app-config-public';
+import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
 import { TmdbService } from '../../core/services/tmdb';
 import { UserDataService } from '../../core/services/user-data.service';
 import { FirebaseAuthService } from '../../core/services/firebase-auth';
@@ -134,7 +138,7 @@ interface LoadingLogEntry {
 @Component({
   selector: 'app-player',
   standalone: true,
-  imports: [CommonModule, RouterModule, TranslatePipe],
+  imports: [CommonModule, RouterModule, TranslatePipe, SafeUrlPipe],
   templateUrl: './player.html',
   styleUrl: './player.scss',
 })
@@ -168,6 +172,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
   loadingLogs = signal<LoadingLogEntry[]>([]);
   errorMessage = signal<string>('');
   videoSrc = signal<string>('');
+  trailerSrc = signal<string>('');
   subtitleTracks = signal<SubtitleTrack[]>([]);
   audioTracks = signal<AudioTrack[]>([]);
   selectedAudioTrack = signal<'auto' | number>('auto');
@@ -247,11 +252,26 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
   // Route subscription for handling navigation to next episodes
   private readonly destroy$ = new Subject<void>();
+  private readonly nativeStandaloneMode =
+    Capacitor.isNativePlatform() && Boolean(APP_CONFIG.playback.nativeStandaloneTrailerMode);
 
   private readonly API_URL = (() => {
+    if (Capacitor.isNativePlatform()) {
+      return 'http://127.0.0.1:3001/api';
+    }
+
     const hostname = window.location.hostname;
     const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
     return isLocalhost ? 'http://localhost:3001/api' : `http://${hostname}:3001/api`;
+  })();
+  private readonly BACKEND_BASE_URL = this.API_URL.replace(/\/api$/, '');
+  private readonly BACKEND_HEALTH_BASE_URLS = (() => {
+    const baseUrls = new Set<string>([this.BACKEND_BASE_URL]);
+    if (Capacitor.isNativePlatform()) {
+      baseUrls.add('http://127.0.0.1:3001');
+      baseUrls.add('http://localhost:3001');
+    }
+    return Array.from(baseUrls);
   })();
   private readonly maxLoadingLogEntries = 8;
   private currentTorrentHash: string | null = null;
@@ -281,6 +301,8 @@ export class PlayerComponent implements OnInit, OnDestroy {
   private subtitleDelayApplyToken = 0;
   private subtitleShiftCache = new Map<string, string>();
   private subtitleShiftInFlight = new Map<string, Promise<string | null>>();
+  private embeddedBackendBootstrapped = false;
+  private embeddedBackendStartRequested = false;
   
   // Watch progress tracking
   private progressSaveInterval: any = null;
@@ -404,7 +426,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
       this.id() !== (idStr ? Number(idStr) : 0);
 
     // Stop current playback if loading new content
-    if (isNewContent && this.videoSrc()) {
+    if (isNewContent && (this.videoSrc() || this.trailerSrc())) {
       this.stopPlaybackAndPolling();
     }
 
@@ -422,7 +444,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.forceYearInSearch.set(forceYearParam === '1' || forceYearParam === 'true');
 
     // Only start new playback if this is new content or initial load
-    if (isNewContent || !this.videoSrc()) {
+    if (isNewContent || (!this.videoSrc() && !this.trailerSrc())) {
       // Reset next episode state
       this.cancelNextEpisodeCountdown();
       this.showEndOverlay.set(false);
@@ -440,6 +462,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
     // Clear bound src so Angular does not re-attach the old stream.
     this.videoSrc.set('');
+    this.trailerSrc.set('');
     this.clearSubtitleShiftCache();
     this.setSubtitleTracks([]);
     this.audioTracks.set([]);
@@ -604,7 +627,13 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.errorMessage.set('');
     this.showPlayer.set(true);
     this.resetLoadingLogs();
-    this.pushLoadingLog('Preparando servidor para la reproducción...');
+    this.showSettings.set(false);
+
+    if (this.nativeStandaloneMode) {
+      this.pushLoadingLog('Modo standalone activo: reproduciendo tráiler oficial.');
+    } else {
+      this.pushLoadingLog('Preparando servidor para la reproducción...');
+    }
 
     const type = this.type();
     const id = this.id();
@@ -613,7 +642,21 @@ export class PlayerComponent implements OnInit, OnDestroy {
     const preferSubtitles = this.preferSubtitles();
     const forceYearInSearch = this.forceYearInSearch();
 
+    if (this.nativeStandaloneMode) {
+      await this.startStandaloneTrailerPlayback(sessionId, type, id);
+      return;
+    }
+
     try {
+      if (Capacitor.isNativePlatform()) {
+        await this.ensureEmbeddedBackendStarted();
+      }
+      this.pushLoadingLog('Comprobando backend local...');
+      const backendReady = await this.waitForBackendReady(30000);
+      if (!backendReady) {
+        throw new Error('BACKEND_UNAVAILABLE');
+      }
+
       // 1. Quick-switch: limpiar streams/ffmpeg anteriores (muy rápido, ~50ms)
       await this.callQuickSwitch(1500);
       if (!this.isSessionActive(sessionId)) return;
@@ -1261,6 +1304,12 @@ export class PlayerComponent implements OnInit, OnDestroy {
       let errorMsg = 'No se pudo encontrar el torrent automáticamente';
       if (error.message?.includes('No se encontraron torrents')) {
         errorMsg = 'No se encontraron torrents disponibles';
+      } else if (error.message === 'BACKEND_START_FAILED') {
+        errorMsg =
+          'No se pudo arrancar el backend embebido en Android. Cierra y abre la app de nuevo.';
+      } else if (error.message === 'BACKEND_UNAVAILABLE') {
+        errorMsg =
+          'No se pudo iniciar el backend local dentro de la app. Reinicia la app y vuelve a intentar.';
       } else if (error.message?.includes('timeout')) {
         errorMsg = 'La búsqueda tardó demasiado (timeout)';
       } else if (error?.code === NO_MULTI_AUDIO_CODE) {
@@ -1279,6 +1328,10 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
       this.errorMessage.set(errorMsg);
       this.loading.set(false);
+
+      if (error?.message === 'BACKEND_UNAVAILABLE' || error?.message === 'BACKEND_START_FAILED') {
+        return;
+      }
 
       // Fallback: preguntar por magnet link manual
       console.log('🔄 Cambiando a entrada manual de magnet link');
@@ -1329,6 +1382,141 @@ export class PlayerComponent implements OnInit, OnDestroy {
     });
 
     await alert.present();
+  }
+
+  private selectMainTrailer(videos: any[]) {
+    if (!Array.isArray(videos) || videos.length === 0) return null;
+
+    const priorities = ['Official Trailer', 'Trailer', 'Teaser', 'Clip'];
+    for (const type of priorities) {
+      const found = videos.find(
+        (video: any) => video?.site === 'YouTube' && video?.type === type && video?.key
+      );
+      if (found) return found;
+    }
+
+    return videos.find((video: any) => video?.site === 'YouTube' && video?.key) || null;
+  }
+
+  private async startStandaloneTrailerPlayback(
+    sessionId: number,
+    type: MediaType,
+    id: number
+  ): Promise<void> {
+    try {
+      this.loadingPhase.set('searching');
+      this.pushLoadingLog('Obteniendo información del título...');
+
+      const [movieData, videosData] = await Promise.all([
+        firstValueFrom(this.tmdb.details(type, id)),
+        firstValueFrom(this.tmdb.videos(type, id)),
+      ]);
+      if (!this.isSessionActive(sessionId)) return;
+
+      this.currentMediaData = movieData;
+      const title = movieData?.title || movieData?.name || 'Este título';
+      const year = (movieData?.release_date || movieData?.first_air_date || '').substring(0, 4);
+      this.currentTitle = title;
+      this.currentYear = year || null;
+
+      const trailer = this.selectMainTrailer(videosData?.results || []);
+      if (!trailer?.key) {
+        this.errorMessage.set('No hay tráiler oficial disponible para este título.');
+        this.loading.set(false);
+        this.loadingPhase.set('idle');
+        return;
+      }
+
+      this.videoSrc.set('');
+      this.trailerSrc.set(
+        `https://www.youtube.com/embed/${trailer.key}?autoplay=1&rel=0&playsinline=1`
+      );
+      this.errorMessage.set('');
+      this.loading.set(false);
+      this.loadingPhase.set('idle');
+      this.pushLoadingLog(`Reproduciendo tráiler de ${title}.`);
+      this.resetControlsHideTimer();
+    } catch (error: any) {
+      if (!this.isSessionActive(sessionId)) return;
+      console.error('Error en modo standalone:', error);
+      this.errorMessage.set(error?.message || 'No se pudo iniciar la reproducción standalone.');
+      this.loading.set(false);
+      this.loadingPhase.set('idle');
+    }
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    timeoutMs: number,
+    init?: Omit<RequestInit, 'signal'>
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, {
+        ...init,
+        signal: controller.signal,
+      });
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  }
+
+  private async waitForBackendReady(timeoutMs = 12000): Promise<boolean> {
+    const startedAt = Date.now();
+    let lastErrorMessage = '';
+
+    while (Date.now() - startedAt < timeoutMs) {
+      for (const baseUrl of this.BACKEND_HEALTH_BASE_URLS) {
+        try {
+          const response = await this.fetchWithTimeout(
+            `${baseUrl}/health`,
+            1500,
+            { cache: 'no-store' }
+          );
+
+          if (response.ok) {
+            this.embeddedBackendBootstrapped = true;
+            return true;
+          }
+        } catch (error: any) {
+          lastErrorMessage = String(error?.message || error || '');
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+
+    console.error('waitForBackendReady timeout', {
+      timeoutMs,
+      urls: this.BACKEND_HEALTH_BASE_URLS,
+      lastErrorMessage,
+    });
+    return false;
+  }
+
+  private async ensureEmbeddedBackendStarted(): Promise<void> {
+    if (this.embeddedBackendBootstrapped) return;
+    if (this.embeddedBackendStartRequested) return;
+    this.embeddedBackendStartRequested = true;
+
+    try {
+      // En Android, este plugin puede dejar start() pendiente mientras Node sigue vivo.
+      // Disparamos el arranque sin bloquear y validamos disponibilidad via /health.
+      const startPromise = NodeJS.start({ nodeDir: 'nodejs-project' });
+      await Promise.race([
+        startPromise,
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]);
+    } catch (error: any) {
+      const message = String(error?.message || '');
+      if (!message.includes('already been started')) {
+        console.error('No se pudo iniciar NodeJS embebido:', error);
+        this.embeddedBackendStartRequested = false;
+        throw new Error('BACKEND_START_FAILED');
+      }
+    }
   }
 
   // Quick-switch: endpoint LIGERO para cambiar de película rápido
@@ -3291,6 +3479,8 @@ export class PlayerComponent implements OnInit, OnDestroy {
   }
 
   toggleSettings() {
+    if (this.trailerSrc()) return;
+
     const newValue = !this.showSettings();
     this.showSettings.set(newValue);
     
@@ -3432,7 +3622,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
     
     this.controlsHideTimer = setTimeout(() => {
       // Solo ocultar si no hay errores y el video está cargado
-      if (!this.errorMessage() && this.videoSrc() && !this.showSettings()) {
+      if (!this.errorMessage() && (this.videoSrc() || this.trailerSrc()) && !this.showSettings()) {
         this.showControls.set(false);
       }
     }, this.CONTROLS_HIDE_DELAY);
@@ -3866,12 +4056,14 @@ export class PlayerComponent implements OnInit, OnDestroy {
       this.searchAbortController = null;
     }
 
-    // Quick-switch para limpiar recursos en el backend (no esperar)
-    fetch(`${this.API_URL}/quick-switch`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: this.playbackSession }),
-    })
-      .catch(() => {}); // Ignorar errores, el usuario ya se fue
+    if (!this.nativeStandaloneMode) {
+      // Quick-switch para limpiar recursos en el backend (no esperar)
+      fetch(`${this.API_URL}/quick-switch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: this.playbackSession }),
+      })
+        .catch(() => {}); // Ignorar errores, el usuario ya se fue
+    }
   }
 }

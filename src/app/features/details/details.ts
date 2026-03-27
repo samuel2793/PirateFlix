@@ -6,6 +6,8 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { Capacitor } from '@capacitor/core';
+import { APP_CONFIG } from '../../core/config/app-config-public';
 import { TmdbService } from '../../core/services/tmdb';
 import { UserDataService } from '../../core/services/user-data.service';
 import { FirebaseAuthService } from '../../core/services/firebase-auth';
@@ -46,6 +48,8 @@ export class DetailsComponent {
   private readonly elementRef = inject(ElementRef);
   private readonly userData = inject(UserDataService);
   private readonly auth = inject(FirebaseAuthService);
+  readonly nativeStandaloneMode =
+    Capacitor.isNativePlatform() && Boolean(APP_CONFIG.playback.nativeStandaloneTrailerMode);
   
   // Exponer para la vista
   isChangingLanguage = this.language.isChangingLanguage;

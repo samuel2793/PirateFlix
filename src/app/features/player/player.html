@@ -89,7 +89,19 @@
       </div>
     }
 
-    @if (videoSrc()) {
+    @if (trailerSrc()) {
+      <div class="trailer-shell">
+        <div class="trailer-badge">Standalone mode</div>
+        <iframe
+          class="trailer-frame"
+          [title]="'Official trailer' | t"
+          [src]="trailerSrc() | safeUrl"
+          frameborder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowfullscreen>
+        </iframe>
+      </div>
+    } @else if (videoSrc()) {
       <video #videoPlayer class="video" controls playsinline autoplay [src]="videoSrc()" crossorigin="anonymous"
         (loadedmetadata)="onVideoLoadedMetadata()"
         (error)="onVideoError()"
@@ -218,13 +230,15 @@
   <div class="hud" [class.hidden]="!showControls()">
     <a routerLink="/" class="btn">← <span class="translate-text">{{ 'Home' | t }}</span></a>
     <a [routerLink]="['/details', type(), id()]" class="btn"><span class="translate-text">{{ 'Details' | t }}</span></a>
-    <button class="btn settings-btn" (click)="toggleSettings()" [title]="'Settings' | t">
-      ⚙️ <span class="translate-text">{{ 'Settings' | t }}</span>
-    </button>
+    @if (!trailerSrc()) {
+      <button class="btn settings-btn" (click)="toggleSettings()" [title]="'Settings' | t">
+        ⚙️ <span class="translate-text">{{ 'Settings' | t }}</span>
+      </button>
+    }
   </div>
 
   <!-- Settings Panel -->
-  @if (showSettings()) {
+  @if (showSettings() && !trailerSrc()) {
     <div class="settings-panel">
       <div class="settings-header">
         <div class="settings-tabs">

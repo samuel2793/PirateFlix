@@ -60,6 +60,7 @@ Thumbs.db
 /android/gradlew.bat
 /android/gradle/
 android/app/src/main/assets/public/
+public/nodejs-project/
 
 # iOS
 /ios/App/Pods/
@@ -101,3 +102,4 @@ src/app/core/config/app-config-private.ts
 dump_project.sh
 
 .sfdx
+scripts

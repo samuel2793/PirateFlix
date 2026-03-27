@@ -109,5 +109,9 @@ export const APP_CONFIG = {
   },
   firebase: {
     enabled: true,
-  }
+  },
+  playback: {
+    // Emergency fallback mode: if true, native app uses trailer playback without local backend.
+    nativeStandaloneTrailerMode: false,
+  },
 } as const;

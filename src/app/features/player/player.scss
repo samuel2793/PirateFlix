@@ -28,6 +28,36 @@ $accent-primary: #e5a00d;
   z-index: 1;
 }
 
+.trailer-shell {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 68px 16px 16px;
+  z-index: 1;
+}
+
+.trailer-badge {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(229, 9, 20, 0.85);
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.trailer-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 14px;
+  background: #000;
+}
+
 .hud {
   position: absolute;
   top: 12px;

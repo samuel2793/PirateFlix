@@ -16,6 +16,8 @@ import { fileURLToPath } from 'url';
 
 const app = express();
 const PORT = 3001;
+const IS_EMBEDDED_RUNTIME = Boolean(process.env.DATADIR);
+const HOST = process.env.PIRATEFLIX_BIND_HOST || (IS_EMBEDDED_RUNTIME ? '127.0.0.1' : '0.0.0.0');
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(SERVER_DIR, '..');
 
@@ -209,6 +211,12 @@ function loadAppConfigFromFile() {
     const configPath =
       process.env.PIRATEFLIX_APP_CONFIG_PATH ||
       path.resolve(APP_ROOT, 'src/app/core/config/app-config-public.ts');
+    if (!fs.existsSync(configPath)) {
+      if (!IS_EMBEDDED_RUNTIME) {
+        console.warn(`No existe app-config-public.ts en ${configPath}`);
+      }
+      return null;
+    }
     const source = fs.readFileSync(configPath, 'utf-8');
     const match = source.match(/export const APP_CONFIG\s*=\s*([\s\S]*?)\s*as const\s*;/);
     if (!match) return null;
@@ -4237,9 +4245,9 @@ app.post('/api/reset-state', async (req, res) => {
 });
 
 // Iniciar servidor
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor de torrents escuchando en http://0.0.0.0:${PORT}`);
-  console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
+app.listen(PORT, HOST, () => {
+  console.log(`🚀 Servidor de torrents escuchando en http://${HOST}:${PORT}`);
+  console.log(`📊 Health check: http://${HOST}:${PORT}/health`);
 
   (async () => {
     try {
