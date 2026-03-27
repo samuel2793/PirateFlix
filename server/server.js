@@ -10,13 +10,14 @@ import https from 'https';
 import http from 'http';
 import axios from 'axios';
 import fs from 'fs';
-import os from 'os';
 import dns from 'dns';
 import * as zlib from 'zlib';
 import { fileURLToPath } from 'url';
 
 const app = express();
 const PORT = 3001;
+const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const APP_ROOT = path.resolve(SERVER_DIR, '..');
 
 // =====================
 // DNS / IPv4 first (reduce weird long stalls on some hosts)
@@ -205,11 +206,9 @@ function stripJsComments(source) {
 
 function loadAppConfigFromFile() {
   try {
-    const serverDir = path.dirname(fileURLToPath(import.meta.url));
-    const appRoot = path.resolve(serverDir, '..');
     const configPath =
       process.env.PIRATEFLIX_APP_CONFIG_PATH ||
-      path.resolve(appRoot, 'src/app/core/config/app-config-public.ts');
+      path.resolve(APP_ROOT, 'src/app/core/config/app-config-public.ts');
     const source = fs.readFileSync(configPath, 'utf-8');
     const match = source.match(/export const APP_CONFIG\s*=\s*([\s\S]*?)\s*as const\s*;/);
     if (!match) return null;
@@ -228,9 +227,30 @@ const appConfig = loadAppConfigFromFile();
 // =====================
 const OPENSUBTITLES_BASE_URL = 'https://api.opensubtitles.com/api/v1';
 const appConfigTimeout = Number(appConfig?.openSubtitles?.timeoutMs);
-const OPENSUBTITLES_TIMEOUT_MS = Number.isFinite(appConfigTimeout)
-  ? appConfigTimeout
-  : parseInt(process.env.OPEN_SUBTITLES_TIMEOUT_MS || '15000', 10);
+const envOpenSubtitlesTimeout = Number(process.env.OPEN_SUBTITLES_TIMEOUT_MS);
+const OPENSUBTITLES_TIMEOUT_MS =
+  Number.isFinite(envOpenSubtitlesTimeout) && envOpenSubtitlesTimeout > 0
+    ? Math.floor(envOpenSubtitlesTimeout)
+    : Number.isFinite(appConfigTimeout) && appConfigTimeout > 0
+      ? Math.floor(appConfigTimeout)
+      : 15000;
+const OPENSUBTITLES_SEARCH_TIMEOUT_MS = (() => {
+  const raw = Number(process.env.OPEN_SUBTITLES_SEARCH_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  return Math.max(10000, Math.min(OPENSUBTITLES_TIMEOUT_MS, 20000));
+})();
+const OPEN_SUBTITLES_RETRY_COUNT = (() => {
+  const raw = Number(process.env.OPEN_SUBTITLES_RETRY_COUNT || '1');
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 1;
+})();
+const OPEN_SUBTITLES_RETRY_DELAY_MS = (() => {
+  const raw = Number(process.env.OPEN_SUBTITLES_RETRY_DELAY_MS || '600');
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 600;
+})();
+const OPEN_SUBTITLES_MAX_CONFIGS_PER_REQUEST = (() => {
+  const raw = Number(process.env.OPEN_SUBTITLES_MAX_CONFIGS_PER_REQUEST || '4');
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 4;
+})();
 const OPEN_SUBTITLES_TOKEN_TTL_MS = parseInt(
   process.env.OPEN_SUBTITLES_TOKEN_TTL_MS || '43200000',
   10
@@ -321,12 +341,41 @@ function getOpenSubtitlesConfigCandidates() {
   for (let i = 0; i < total; i += 1) {
     indices.push((start + i) % total);
   }
-  return indices;
+  const limit = Math.max(1, Math.min(indices.length, OPEN_SUBTITLES_MAX_CONFIGS_PER_REQUEST));
+  return indices.slice(0, limit);
+}
+
+const OPEN_SUBTITLES_RETRIABLE_CODES = new Set([
+  'ECONNABORTED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'ECONNREFUSED',
+]);
+
+function isRetriableOpenSubtitlesError(error) {
+  const status = error?.response?.status;
+  if (status === 408 || status === 425 || status === 429) return true;
+  if (status >= 500) return true;
+  const code = String(error?.code || '').toUpperCase();
+  if (OPEN_SUBTITLES_RETRIABLE_CODES.has(code)) return true;
+  const msg = String(error?.message || '').toLowerCase();
+  if (msg.includes('timeout')) return true;
+  if (msg.includes('socket hang up')) return true;
+  return false;
+}
+
+function shouldRetryOpenSubtitlesError(error) {
+  return isRetriableOpenSubtitlesError(error);
 }
 
 function shouldRotateOpenSubtitlesConfig(error) {
   const status = error?.response?.status;
-  return status === 401 || status === 403 || status === 406 || status === 429;
+  if (status === 401 || status === 403 || status === 406 || status === 429) return true;
+  return isRetriableOpenSubtitlesError(error);
 }
 
 function rotateOpenSubtitlesConfig(index) {
@@ -337,6 +386,11 @@ function rotateOpenSubtitlesConfig(index) {
   return nextIndex;
 }
 
+function delayMs(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function withOpenSubtitlesConfig(action, context) {
   const candidates = getOpenSubtitlesConfigCandidates();
   if (candidates.length === 0) {
@@ -345,7 +399,34 @@ async function withOpenSubtitlesConfig(action, context) {
   let lastError = null;
   for (const index of candidates) {
     try {
-      const result = await action(index);
+      let result = null;
+      for (let attempt = 0; attempt <= OPEN_SUBTITLES_RETRY_COUNT; attempt += 1) {
+        try {
+          result = await action(index, attempt);
+          break;
+        } catch (innerError) {
+          lastError = innerError;
+          const isRetriable = shouldRetryOpenSubtitlesError(innerError);
+          const hasMoreAttempts = attempt < OPEN_SUBTITLES_RETRY_COUNT;
+          if (!isRetriable || !hasMoreAttempts) {
+            throw innerError;
+          }
+          const wait = OPEN_SUBTITLES_RETRY_DELAY_MS * (attempt + 1);
+          console.warn('[OpenSubtitles] retry request:', {
+            context,
+            config: index + 1,
+            attempt: attempt + 1,
+            waitMs: wait,
+            code: innerError?.code || null,
+            status: innerError?.response?.status || null,
+            message: innerError?.message || String(innerError),
+          });
+          await delayMs(wait);
+        }
+      }
+      if (result === null) {
+        throw lastError || new Error('OpenSubtitles request failed');
+      }
       openSubtitlesActiveIndex = index;
       return result;
     } catch (error) {
@@ -618,15 +699,42 @@ const activeTorrents = new Map();
 const embeddedSubtitlesCache = new Map();
 const embeddedAudioTracksCache = new Map();
 
-const STORAGE_ROOT = process.env.PIRATEFLIX_STORAGE_DIR || path.join(process.cwd(), 'storage');
+const STORAGE_ROOT = process.env.PIRATEFLIX_STORAGE_DIR || path.join(SERVER_DIR, 'storage');
 const TORRENT_DIR = process.env.PIRATEFLIX_TORRENT_DIR || path.join(STORAGE_ROOT, 'webtorrent');
 const CACHE_DIR =
   process.env.PIRATEFLIX_TRANSCODE_DIR || path.join(STORAGE_ROOT, 'transcoded');
+const STORAGE_MAX_BYTES = (() => {
+  const bytes = Number(process.env.PIRATEFLIX_STORAGE_MAX_BYTES);
+  if (Number.isFinite(bytes) && bytes > 0) return Math.floor(bytes);
+  const gb = Number(process.env.PIRATEFLIX_STORAGE_MAX_GB || '20');
+  if (Number.isFinite(gb) && gb > 0) return Math.floor(gb * 1024 * 1024 * 1024);
+  return 0;
+})();
+const STORAGE_RETENTION_MS = (() => {
+  const value = Number(process.env.PIRATEFLIX_STORAGE_RETENTION_MS || String(7 * 24 * 60 * 60 * 1000));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+})();
+const STORAGE_PARTIAL_RETENTION_MS = (() => {
+  const value = Number(process.env.PIRATEFLIX_STORAGE_PARTIAL_RETENTION_MS || String(2 * 60 * 60 * 1000));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+})();
+const STORAGE_SWEEP_INTERVAL_MS = (() => {
+  const value = Number(process.env.PIRATEFLIX_STORAGE_SWEEP_INTERVAL_MS || String(10 * 60 * 1000));
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+})();
+const STORAGE_PRUNE_ON_START =
+  String(process.env.PIRATEFLIX_STORAGE_PRUNE_ON_START || 'true').toLowerCase() !== 'false';
+const STORAGE_DELETE_ON_TORRENT_DESTROY =
+  String(process.env.PIRATEFLIX_STORAGE_DELETE_ON_TORRENT_DESTROY || 'true').toLowerCase() !==
+  'false';
 const transcodedCache = new Map();
 
 const activeFFmpegProcesses = new Map();
 const transcodeJobs = new Map();
 const transcodeStatusByKey = new Map();
+let storagePruneInProgress = false;
+let storageSweepTimer = null;
+let lastStoragePruneReport = null;
 
 const MP4_LIKE_EXT_RE = /\.(mp4|mov|m4v)$/i;
 const INCOMPATIBLE_VIDEO_HINT_RE = /\b(hevc|x265|h265|av1)\b/i;
@@ -681,6 +789,283 @@ function clearEmbeddedCacheForInfoHash(infoHash) {
   }
 }
 
+function isPathInside(basePath, targetPath) {
+  const base = path.resolve(basePath);
+  const target = path.resolve(targetPath);
+  const rel = path.relative(base, target);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+function isStorageManagedPath(targetPath) {
+  return (
+    isPathInside(STORAGE_ROOT, targetPath) ||
+    isPathInside(TORRENT_DIR, targetPath) ||
+    isPathInside(CACHE_DIR, targetPath)
+  );
+}
+
+function getDirectorySizeBytes(targetPath) {
+  let total = 0;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(targetPath, { withFileTypes: true });
+  } catch (_) {
+    return 0;
+  }
+
+  for (const entry of entries) {
+    const fullPath = path.join(targetPath, entry.name);
+    try {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        total += getDirectorySizeBytes(fullPath);
+      } else {
+        total += Number(fs.statSync(fullPath).size || 0);
+      }
+    } catch (_) {}
+  }
+  return total;
+}
+
+function listManagedStorageEntries(baseDir, category) {
+  let names = [];
+  try {
+    names = fs.readdirSync(baseDir);
+  } catch (_) {
+    return [];
+  }
+
+  const entries = [];
+  for (const name of names) {
+    const fullPath = path.join(baseDir, name);
+    try {
+      const stat = fs.lstatSync(fullPath);
+      if (stat.isSymbolicLink()) continue;
+      entries.push({
+        category,
+        name,
+        fullPath,
+        mtimeMs: Number(stat.mtimeMs) || 0,
+        sizeBytes: stat.isDirectory() ? getDirectorySizeBytes(fullPath) : Number(stat.size || 0),
+      });
+    } catch (_) {}
+  }
+  return entries;
+}
+
+function removePathSafe(targetPath) {
+  if (!targetPath || !isStorageManagedPath(targetPath)) return false;
+  try {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+    return true;
+  } catch (err) {
+    console.warn('No se pudo eliminar ruta de almacenamiento:', targetPath, err?.message || err);
+    return false;
+  }
+}
+
+function removeEmptyDirs(baseDir, keepRoot = true) {
+  if (!fs.existsSync(baseDir)) return 0;
+  let removed = 0;
+
+  const walk = (dirPath, isRoot) => {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      walk(path.join(dirPath, entry.name), false);
+    }
+
+    if (isRoot && keepRoot) return;
+    try {
+      if (fs.readdirSync(dirPath).length === 0) {
+        fs.rmdirSync(dirPath);
+        removed += 1;
+      }
+    } catch (_) {}
+  };
+
+  walk(baseDir, true);
+  return removed;
+}
+
+function getTorrentDataPaths(torrent) {
+  const targets = new Set();
+  if (!torrent || !torrent.path || !Array.isArray(torrent.files)) return [];
+  const torrentBase = path.resolve(torrent.path);
+
+  for (const file of torrent.files) {
+    const relRaw = String(file?.path || '').trim();
+    if (!relRaw) continue;
+    const rel = relRaw.replace(/\\/g, '/');
+    const parts = rel.split('/').filter(Boolean);
+    if (parts.length === 0) continue;
+    const targetRel = parts.length > 1 ? parts[0] : rel;
+    const candidate = path.resolve(torrentBase, targetRel);
+    if (isPathInside(torrentBase, candidate) && isStorageManagedPath(candidate)) {
+      targets.add(candidate);
+    }
+  }
+
+  return Array.from(targets);
+}
+
+function collectStorageSummary() {
+  const torrentEntries = listManagedStorageEntries(TORRENT_DIR, 'torrent');
+  const transcodeEntries = listManagedStorageEntries(CACHE_DIR, 'transcoded');
+  const allEntries = [...torrentEntries, ...transcodeEntries];
+  const totalBytes = allEntries.reduce((acc, item) => acc + Number(item.sizeBytes || 0), 0);
+  return {
+    roots: {
+      storage: STORAGE_ROOT,
+      torrents: TORRENT_DIR,
+      transcoded: CACHE_DIR,
+    },
+    policy: {
+      maxBytes: STORAGE_MAX_BYTES,
+      retentionMs: STORAGE_RETENTION_MS,
+      partialRetentionMs: STORAGE_PARTIAL_RETENTION_MS,
+      sweepIntervalMs: STORAGE_SWEEP_INTERVAL_MS,
+      pruneOnStart: STORAGE_PRUNE_ON_START,
+      deleteOnTorrentDestroy: STORAGE_DELETE_ON_TORRENT_DESTROY,
+    },
+    usage: {
+      totalBytes,
+      torrentsBytes: torrentEntries.reduce((acc, item) => acc + Number(item.sizeBytes || 0), 0),
+      transcodedBytes: transcodeEntries.reduce((acc, item) => acc + Number(item.sizeBytes || 0), 0),
+      torrentItems: torrentEntries.length,
+      transcodedItems: transcodeEntries.length,
+    },
+    entries: allEntries,
+  };
+}
+
+function pruneStorage(reason = 'manual') {
+  if (storagePruneInProgress) {
+    return {
+      success: false,
+      skipped: true,
+      reason,
+      message: 'prune-in-progress',
+      ts: Date.now(),
+    };
+  }
+
+  storagePruneInProgress = true;
+  const startedAt = Date.now();
+  const removed = [];
+
+  try {
+    const before = collectStorageSummary();
+    let candidates = [...before.entries];
+    const now = Date.now();
+    const staleCutoff = STORAGE_RETENTION_MS > 0 ? now - STORAGE_RETENTION_MS : 0;
+    const partialCutoff =
+      STORAGE_PARTIAL_RETENTION_MS > 0 ? now - STORAGE_PARTIAL_RETENTION_MS : 0;
+
+    const deleteCandidate = (entry, why) => {
+      if (!entry) return false;
+      if (!fs.existsSync(entry.fullPath)) return false;
+      if (!removePathSafe(entry.fullPath)) return false;
+      removed.push({
+        path: entry.fullPath,
+        category: entry.category,
+        sizeBytes: Number(entry.sizeBytes || 0),
+        mtimeMs: Number(entry.mtimeMs || 0),
+        reason: why,
+      });
+      return true;
+    };
+
+    if (partialCutoff > 0) {
+      const partials = candidates
+        .filter(
+          (entry) =>
+            entry.category === 'transcoded' &&
+            String(entry.name || '').endsWith('.partial') &&
+            Number(entry.mtimeMs || 0) > 0 &&
+            Number(entry.mtimeMs || 0) < partialCutoff
+        )
+        .sort((a, b) => Number(a.mtimeMs || 0) - Number(b.mtimeMs || 0));
+
+      for (const entry of partials) {
+        deleteCandidate(entry, 'stale-partial');
+      }
+    }
+
+    if (staleCutoff > 0) {
+      candidates = [
+        ...listManagedStorageEntries(TORRENT_DIR, 'torrent'),
+        ...listManagedStorageEntries(CACHE_DIR, 'transcoded'),
+      ];
+
+      const stale = candidates
+        .filter(
+          (entry) =>
+            Number(entry.mtimeMs || 0) > 0 &&
+            Number(entry.mtimeMs || 0) < staleCutoff &&
+            !String(entry.name || '').endsWith('.partial')
+        )
+        .sort((a, b) => Number(a.mtimeMs || 0) - Number(b.mtimeMs || 0));
+
+      for (const entry of stale) {
+        deleteCandidate(entry, 'retention');
+      }
+    }
+
+    candidates = [
+      ...listManagedStorageEntries(TORRENT_DIR, 'torrent'),
+      ...listManagedStorageEntries(CACHE_DIR, 'transcoded'),
+    ];
+    let totalBytes = candidates.reduce((acc, item) => acc + Number(item.sizeBytes || 0), 0);
+
+    if (STORAGE_MAX_BYTES > 0 && totalBytes > STORAGE_MAX_BYTES) {
+      const quotaCandidates = candidates
+        .slice()
+        .sort((a, b) => Number(a.mtimeMs || 0) - Number(b.mtimeMs || 0));
+
+      for (const entry of quotaCandidates) {
+        if (totalBytes <= STORAGE_MAX_BYTES) break;
+        if (deleteCandidate(entry, 'quota')) {
+          totalBytes -= Number(entry.sizeBytes || 0);
+        }
+      }
+    }
+
+    const emptyTorrentDirs = removeEmptyDirs(TORRENT_DIR, true);
+    const emptyTranscodedDirs = removeEmptyDirs(CACHE_DIR, true);
+    const after = collectStorageSummary();
+    const report = {
+      success: true,
+      skipped: false,
+      reason,
+      startedAt,
+      finishedAt: Date.now(),
+      durationMs: Date.now() - startedAt,
+      policy: after.policy,
+      removedCount: removed.length,
+      removedBytes: removed.reduce((acc, item) => acc + Number(item.sizeBytes || 0), 0),
+      removed,
+      emptyDirsRemoved: {
+        torrents: emptyTorrentDirs,
+        transcoded: emptyTranscodedDirs,
+      },
+      before: before.usage,
+      after: after.usage,
+    };
+
+    lastStoragePruneReport = report;
+    return report;
+  } finally {
+    storagePruneInProgress = false;
+  }
+}
+
 function selectOnlyFile(torrent, fileIndex) {
   if (!torrent || !Array.isArray(torrent.files)) return;
   torrent.files.forEach((f, idx) => {
@@ -697,12 +1082,19 @@ function selectOnlyFile(torrent, fileIndex) {
 function destroyTorrentNow(infoHash) {
   const torrent = client?.get(infoHash);
   if (!torrent) return false;
+  const torrentDataPaths = getTorrentDataPaths(torrent);
 
   try {
     torrent.destroy(() => {
       activeTorrents.delete(infoHash);
       clearEmbeddedCacheForInfoHash(infoHash);
       pendingDestroy.delete(infoHash);
+      if (STORAGE_DELETE_ON_TORRENT_DESTROY && torrentDataPaths.length > 0) {
+        for (const targetPath of torrentDataPaths) {
+          removePathSafe(targetPath);
+        }
+        removeEmptyDirs(TORRENT_DIR, true);
+      }
       console.log('Torrent eliminado:', infoHash);
     });
     return true;
@@ -768,6 +1160,55 @@ const ensureDir = (dirPath, label) => {
 
 ensureDir(TORRENT_DIR, 'de torrents');
 ensureDir(CACHE_DIR, 'de transcodificacion');
+console.log(
+  '🗄️ Storage policy:',
+  JSON.stringify(
+    {
+      root: STORAGE_ROOT,
+      torrentDir: TORRENT_DIR,
+      transcodeDir: CACHE_DIR,
+      maxBytes: STORAGE_MAX_BYTES,
+      retentionMs: STORAGE_RETENTION_MS,
+      partialRetentionMs: STORAGE_PARTIAL_RETENTION_MS,
+      sweepIntervalMs: STORAGE_SWEEP_INTERVAL_MS,
+      pruneOnStart: STORAGE_PRUNE_ON_START,
+      deleteOnTorrentDestroy: STORAGE_DELETE_ON_TORRENT_DESTROY,
+    },
+    null,
+    2
+  )
+);
+if (STORAGE_PRUNE_ON_START) {
+  setTimeout(() => {
+    try {
+      const report = pruneStorage('startup');
+      if (!report?.skipped) {
+        console.log(
+          `🧹 Storage prune startup: removed=${report.removedCount}, freed=${report.removedBytes} bytes`
+        );
+      }
+    } catch (err) {
+      console.warn('Storage prune startup falló:', err?.message || err);
+    }
+  }, 500);
+}
+if (STORAGE_SWEEP_INTERVAL_MS > 0) {
+  storageSweepTimer = setInterval(() => {
+    try {
+      const report = pruneStorage('scheduled');
+      if (!report?.skipped && report?.removedCount > 0) {
+        console.log(
+          `🧹 Storage prune scheduled: removed=${report.removedCount}, freed=${report.removedBytes} bytes`
+        );
+      }
+    } catch (err) {
+      console.warn('Storage prune scheduled falló:', err?.message || err);
+    }
+  }, STORAGE_SWEEP_INTERVAL_MS);
+  if (storageSweepTimer && typeof storageSweepTimer.unref === 'function') {
+    storageSweepTimer.unref();
+  }
+}
 
 // Helper: esperar hasta que el archivo exista en disco y tenga al menos `minBytes` bytes
 async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15000) {
@@ -2529,6 +2970,18 @@ app.get('/api/opensubtitles/search', async (req, res) => {
     params.type = 'movie';
   }
 
+  const searchParamVariants = [params];
+  if (params.query && params.tmdb_id) {
+    searchParamVariants.push({
+      ...params,
+      query: undefined,
+    });
+    searchParamVariants.push({
+      ...params,
+      tmdb_id: undefined,
+    });
+  }
+
   try {
     console.log('[OpenSubtitles] search params:', {
       query: params.query,
@@ -2538,17 +2991,45 @@ app.get('/api/opensubtitles/search', async (req, res) => {
       episode_number: params.episode_number,
       languages: params.languages,
     });
-    const response = await withOpenSubtitlesConfig(
-      (configIndex) =>
-        axios.get(`${OPENSUBTITLES_BASE_URL}/subtitles`, {
-          params,
-          headers: buildOpenSubtitlesHeaders(configIndex, false),
-          timeout: OPENSUBTITLES_TIMEOUT_MS,
-          httpAgent: httpAgentGlobal,
-          httpsAgent: httpsAgentGlobal,
-        }),
-      'search'
-    );
+    let response = null;
+    let lastSearchError = null;
+    for (let variantIndex = 0; variantIndex < searchParamVariants.length; variantIndex += 1) {
+      const variant = searchParamVariants[variantIndex];
+      try {
+        response = await withOpenSubtitlesConfig(
+          (configIndex) =>
+            axios.get(`${OPENSUBTITLES_BASE_URL}/subtitles`, {
+              params: variant,
+              headers: buildOpenSubtitlesHeaders(configIndex, false),
+              timeout: OPENSUBTITLES_SEARCH_TIMEOUT_MS,
+              httpAgent: httpAgentGlobal,
+              httpsAgent: httpsAgentGlobal,
+            }),
+          `search#${variantIndex + 1}`
+        );
+        if (variantIndex > 0) {
+          console.warn('[OpenSubtitles] search fallback OK:', {
+            variant: variantIndex + 1,
+            usedQuery: Boolean(variant.query),
+            usedTmdb: Boolean(variant.tmdb_id),
+            usedLanguages: Boolean(variant.languages),
+          });
+        }
+        break;
+      } catch (searchErr) {
+        lastSearchError = searchErr;
+        if (!isRetriableOpenSubtitlesError(searchErr) || variantIndex >= searchParamVariants.length - 1) {
+          throw searchErr;
+        }
+        console.warn('[OpenSubtitles] search fallback trigger:', {
+          variant: variantIndex + 1,
+          code: searchErr?.code || null,
+          status: searchErr?.response?.status || null,
+          message: searchErr?.message || String(searchErr),
+        });
+      }
+    }
+    if (!response) throw lastSearchError || new Error('OpenSubtitles search failed');
 
     const items = Array.isArray(response?.data?.data) ? response.data.data : [];
     const results = [];
@@ -3449,6 +3930,7 @@ app.delete('/api/torrent/:infoHash', (req, res) => {
 
 // Health
 app.get('/health', (req, res) => {
+  const storageSummary = collectStorageSummary();
   res.json({
     status: 'ok',
     torrents: client?.torrents?.length ?? 0,
@@ -3456,7 +3938,40 @@ app.get('/health', (req, res) => {
     downloadSpeed: client?.downloadSpeed ?? 0,
     activeStreamsTracked: activeStreamsByInfoHash.size,
     pendingDestroy: pendingDestroy.size,
+    storage: {
+      totalBytes: storageSummary.usage.totalBytes,
+      torrentsBytes: storageSummary.usage.torrentsBytes,
+      transcodedBytes: storageSummary.usage.transcodedBytes,
+      maxBytes: storageSummary.policy.maxBytes,
+      lastPruneAt: lastStoragePruneReport?.finishedAt || null,
+    },
   });
+});
+
+app.get('/api/storage/stats', (req, res) => {
+  try {
+    const summary = collectStorageSummary();
+    res.json({
+      ...summary,
+      pruneInProgress: storagePruneInProgress,
+      lastPrune: lastStoragePruneReport,
+    });
+  } catch (err) {
+    console.error('Error obteniendo storage stats:', err);
+    res.status(500).json({ error: 'failed to get storage stats' });
+  }
+});
+
+app.post('/api/storage/prune', (req, res) => {
+  try {
+    const reasonRaw = String(req?.body?.reason || '').trim();
+    const reason = reasonRaw ? `manual:${reasonRaw}` : 'manual';
+    const report = pruneStorage(reason);
+    res.json(report);
+  } catch (err) {
+    console.error('Error en storage prune:', err);
+    res.status(500).json({ error: 'failed to prune storage' });
+  }
 });
 
 // TheIntroDB Proxy - Get skip times for credits/intros
@@ -3592,9 +4107,17 @@ app.post('/api/quick-switch', async (req, res) => {
     for (const t of torrentsToDestroy) {
       try {
         const ih = t.infoHash;
+        const torrentDataPaths = getTorrentDataPaths(t);
         activeTorrents.delete(ih);
         clearEmbeddedCacheForInfoHash(ih);
-        t.destroy(() => {});
+        t.destroy(() => {
+          if (STORAGE_DELETE_ON_TORRENT_DESTROY && torrentDataPaths.length > 0) {
+            for (const targetPath of torrentDataPaths) {
+              removePathSafe(targetPath);
+            }
+            removeEmptyDirs(TORRENT_DIR, true);
+          }
+        });
       } catch (_) {}
     }
 
@@ -3602,6 +4125,11 @@ app.post('/api/quick-switch', async (req, res) => {
     embeddedSubtitlesCache.clear();
     embeddedAudioTracksCache.clear();
     pendingDestroy.clear();
+    setTimeout(() => {
+      try {
+        pruneStorage('quick-switch');
+      } catch (_) {}
+    }, 0);
 
     console.log(`⚡ Quick-switch completado en ${Date.now() - startTime}ms`);
     res.json({ success: true, time: Date.now() - startTime });
@@ -3665,6 +4193,10 @@ app.post('/api/reset-state', async (req, res) => {
     pendingDestroy.clear();
 
     // 4. Destruir cliente WebTorrent y recrearlo
+    const allTorrentDataPaths = new Set();
+    for (const t of client?.torrents?.slice() || []) {
+      for (const p of getTorrentDataPaths(t)) allTorrentDataPaths.add(p);
+    }
     if (client) {
       try {
         await new Promise((resolve) => {
@@ -3676,6 +4208,12 @@ app.post('/api/reset-state', async (req, res) => {
         });
       } catch (_) {}
     }
+    if (STORAGE_DELETE_ON_TORRENT_DESTROY) {
+      for (const targetPath of Array.from(allTorrentDataPaths)) {
+        removePathSafe(targetPath);
+      }
+      removeEmptyDirs(TORRENT_DIR, true);
+    }
 
     client = createWebTorrentClient();
 
@@ -3684,6 +4222,7 @@ app.post('/api/reset-state', async (req, res) => {
     embeddedSubtitlesCache.clear();
     embeddedAudioTracksCache.clear();
     transcodedCache.clear();
+    pruneStorage('reset-state');
 
     console.log(`✅ Reset completo en ${Date.now() - startTime}ms`);
     res.json({ success: true, time: Date.now() - startTime });
@@ -3714,6 +4253,12 @@ app.listen(PORT, '0.0.0.0', () => {
 // Limpiar al cerrar
 process.on('SIGINT', () => {
   console.log('\n🛑 Cerrando servidor...');
+  if (storageSweepTimer) {
+    try {
+      clearInterval(storageSweepTimer);
+    } catch (_) {}
+    storageSweepTimer = null;
+  }
   const c = client;
   if (!c) return process.exit(0);
 
