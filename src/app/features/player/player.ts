@@ -6,6 +6,12 @@ import { HttpClient } from '@angular/common/http';
 import { Capacitor } from '@capacitor/core';
 import { NodeJS } from '@choreruiz/capacitor-node-js';
 import { APP_CONFIG } from '../../core/config/app-config-public';
+import {
+  DEFAULT_TORRENT_PROVIDER,
+  TorrentProviderId,
+  normalizeTorrentProvider,
+  resolveTorrentProviderForPlayback,
+} from '../../core/config/torrent-providers';
 import { SafeUrlPipe } from '../../core/pipes/safe-url.pipe';
 import { TmdbService } from '../../core/services/tmdb';
 import { UserDataService } from '../../core/services/user-data.service';
@@ -395,6 +401,24 @@ export class PlayerComponent implements OnInit, OnDestroy {
     }
   }
 
+  private getTorrentProviderContext(): {
+    configuredProvider: TorrentProviderId;
+    effectiveProvider: TorrentProviderId;
+    isAuthenticated: boolean;
+  } {
+    const configuredProvider = normalizeTorrentProvider(
+      this.loadSettingsPref('torrentProvider', DEFAULT_TORRENT_PROVIDER)
+    );
+    const isAuthenticated = this.auth.isAuthenticated();
+    const effectiveProvider = resolveTorrentProviderForPlayback(configuredProvider, isAuthenticated);
+
+    return {
+      configuredProvider,
+      effectiveProvider,
+      isAuthenticated,
+    };
+  }
+
   async ngOnInit() {
     // Subscribe to route params to handle navigation to next episodes
     combineLatest([
@@ -641,6 +665,8 @@ export class PlayerComponent implements OnInit, OnDestroy {
     const preferSeekable = this.preferSeekable();
     const preferSubtitles = this.preferSubtitles();
     const forceYearInSearch = this.forceYearInSearch();
+    const torrentProviderContext = this.getTorrentProviderContext();
+    const torrentProvider = torrentProviderContext.effectiveProvider;
 
     if (this.nativeStandaloneMode) {
       await this.startStandaloneTrailerPlayback(sessionId, type, id);
@@ -682,6 +708,16 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
       console.log(`Buscando torrent para: ${title} (${year})`);
       this.pushLoadingLog(`Buscando torrent para: ${title} (${year})`);
+      this.pushLoadingLog(`Provider de torrents: ${torrentProvider}`);
+      if (
+        !torrentProviderContext.isAuthenticated &&
+        torrentProviderContext.configuredProvider !== DEFAULT_TORRENT_PROVIDER
+      ) {
+        this.pushLoadingLog(
+          `Sesión de invitado: usando ${DEFAULT_TORRENT_PROVIDER} por defecto.`,
+          'warn'
+        );
+      }
 
       // 3. Mostrar fase de búsqueda inmediatamente
       this.loadingPhase.set('searching');
@@ -779,7 +815,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
         let timedOut = false;
         let didSearch = false;
         const episodeCacheKey = hasEpisodeTarget ? `:s${seasonValue}:e${episodeValue}` : '';
-        const cacheKey = `${type}:${id}${episodeCacheKey}:${category}:${forceYearInSearch ? 'year' : 'any'}`;
+        const cacheKey = `${type}:${id}${episodeCacheKey}:${category}:${torrentProvider}:${forceYearInSearch ? 'year' : 'any'}`;
         const cachedSearch = PlayerComponent.searchCache.get(cacheKey);
         const cacheFresh =
           cachedSearch && Date.now() - cachedSearch.ts < PlayerComponent.SEARCH_CACHE_TTL_MS;
@@ -832,7 +868,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
           try {
             didSearch = true;
             const searchResponse = await fetch(
-              `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=${category}`,
+              `${this.API_URL}/search-torrent?query=${encodeURIComponent(searchQuery)}&category=${category}&provider=${encodeURIComponent(torrentProvider)}`,
               { signal: searchSignal }
             );
 

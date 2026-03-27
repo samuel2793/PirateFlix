@@ -56,15 +56,43 @@ const FAST_PARALLEL_MIRRORS = parseInt(process.env.PIRATEFLIX_FAST_PARALLEL_MIRR
 const MIRROR_RETRY_COUNT = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_COUNT || '0', 10);
 const MIRROR_RETRY_DELAY_MS = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_DELAY_MS || '500', 10);
 
-// Mirrors usados en varias rutinas (centralizado)
-const MIRRORS = [
-  'https://thepibay.site',
-  'https://tpb.party',
-  'https://thepiratebay.org',
-  'https://thpibay.xyz',
-  'https://thpibay.site',
-  'https://thepibay.online',
-];
+// Torrent providers registry.
+// Add new providers here and wire their search URL strategy.
+const TORRENT_PROVIDERS = Object.freeze({
+  piratebay: Object.freeze({
+    id: 'piratebay',
+    label: 'The Pirate Bay',
+    mirrors: Object.freeze([
+      'https://thepibay.site',
+      'https://tpb.party',
+      'https://thepiratebay.org',
+      'https://thpibay.xyz',
+      'https://thpibay.site',
+      'https://thepibay.online',
+    ]),
+    enableYtsFallback: true,
+    buildSearchUrl(base, cleanQuery, category) {
+      return `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
+    },
+  }),
+});
+
+const TORRENT_PROVIDER_IDS = Object.freeze(Object.keys(TORRENT_PROVIDERS));
+const DEFAULT_TORRENT_PROVIDER =
+  TORRENT_PROVIDERS[
+    String(process.env.PIRATEFLIX_DEFAULT_TORRENT_PROVIDER || '').trim().toLowerCase()
+  ]?.id || 'piratebay';
+
+function getTorrentProviderDefinition(providerLike) {
+  const normalized = String(providerLike || '')
+    .trim()
+    .toLowerCase();
+  return (
+    TORRENT_PROVIDERS[normalized] ||
+    TORRENT_PROVIDERS[DEFAULT_TORRENT_PROVIDER] ||
+    TORRENT_PROVIDERS.piratebay
+  );
+}
 
 // Warmup tracking
 let lastWarmupAt = 0;
@@ -2015,7 +2043,8 @@ async function streamSeekFromTime({
 async function warmupMirrors(timeoutPer = 3000) {
   try {
     console.log('🔧 Ejecutando warmup de mirrors...');
-    const tasks = MIRRORS.map(async (base) => {
+    const mirrors = getTorrentProviderDefinition(DEFAULT_TORRENT_PROVIDER).mirrors || [];
+    const tasks = mirrors.map(async (base) => {
       try {
         try {
           const resp = await axios.head(base, {
@@ -2051,9 +2080,22 @@ async function warmupMirrors(timeoutPer = 3000) {
 // =====================
 // Endpoint para buscar torrents
 // =====================
+app.get('/api/torrent/providers', (_req, res) => {
+  const providers = TORRENT_PROVIDER_IDS.map((id) => ({
+    id,
+    label: TORRENT_PROVIDERS[id].label,
+  }));
+  res.json({
+    defaultProvider: DEFAULT_TORRENT_PROVIDER,
+    providers,
+  });
+});
+
 app.get('/api/search-torrent', async (req, res) => {
-  const { query, category = '207' } = req.query; // 207 = HD Movies
+  const { query, category = '207', provider: requestedProvider = '' } = req.query; // 207 = HD Movies
   if (!query) return res.status(400).json({ error: 'query es requerido' });
+  const providerDefinition = getTorrentProviderDefinition(requestedProvider);
+  const provider = providerDefinition.id;
 
   const decodeHtmlEntities = (value) =>
     String(value)
@@ -2130,12 +2172,15 @@ app.get('/api/search-torrent', async (req, res) => {
       .replace(/\s+/g, ' ')
       .trim();
 
-    console.log(`Buscando torrent: ${query}`);
+    console.log(`Buscando torrent [provider=${provider}]: ${query}`);
     if (cleanQuery !== query) console.log(`Query limpio: ${cleanQuery}`);
 
     const httpAgent = httpAgentGlobal;
     const httpsAgentShared = httpsAgentGlobal;
-    const mirrors = MIRRORS.slice();
+    const mirrors = (providerDefinition.mirrors || []).slice();
+    if (mirrors.length === 0) {
+      throw new Error(`Provider ${provider} has no mirrors configured`);
+    }
 
     const searchStart = Date.now();
     console.log(`Intentando mirrors: ${mirrors.join(', ')}`);
@@ -2186,7 +2231,7 @@ app.get('/api/search-torrent', async (req, res) => {
         );
       };
 
-      const cacheKey = `${cleanQuery}::${category}`;
+      const cacheKey = `${provider}::${cleanQuery}::${category}`;
       const cacheTtl = parseInt(process.env.PIRATEFLIX_SEARCH_CACHE_MS || '30000', 10);
       if (!global.__pirateflix_search_cache) global.__pirateflix_search_cache = new Map();
       const searchCache = global.__pirateflix_search_cache;
@@ -2250,7 +2295,10 @@ app.get('/api/search-torrent', async (req, res) => {
       };
 
       const tryYtsFallback = async (q) => {
-        if (String(process.env.PIRATEFLIX_USE_EXTERNAL_API || 'true').toLowerCase() !== 'true')
+        if (
+          !providerDefinition.enableYtsFallback ||
+          String(process.env.PIRATEFLIX_USE_EXTERNAL_API || 'true').toLowerCase() !== 'true'
+        )
           return null;
         ensureNotAborted();
         let controller = null;
@@ -2342,7 +2390,7 @@ app.get('/api/search-torrent', async (req, res) => {
         );
 
       const makeRequestFor = (base, timeoutMs, signalController) => {
-        const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
+        const url = providerDefinition.buildSearchUrl(base, cleanQuery, category);
         const controller = signalController || new AbortController();
         trackController(controller);
 
@@ -2523,7 +2571,7 @@ app.get('/api/search-torrent', async (req, res) => {
             if (!result) console.log('Intentando reintentos secuenciales con timeout extendido...');
             for (const base of mirrors) {
               ensureNotAborted();
-              const url = `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
+              const url = providerDefinition.buildSearchUrl(base, cleanQuery, category);
               console.log(
                 `Intentando secuencial a: ${url} (timeout ${EXTENDED_MIRROR_TIMEOUT_MS}ms)`
               );
@@ -2914,9 +2962,18 @@ app.get('/api/search-torrent', async (req, res) => {
       console.log('No se pudieron parsear torrents del HTML');
     }
 
-    res.json({ query, results: torrents, count: torrents.length });
+    res.json({
+      query,
+      provider,
+      requestedProvider: String(requestedProvider || '').trim().toLowerCase() || provider,
+      results: torrents,
+      count: torrents.length,
+    });
   } catch (error) {
-    console.error('Error al buscar torrent:', error && error.message ? error.message : error);
+    console.error(
+      `Error al buscar torrent [provider=${provider}]:`,
+      error && error.message ? error.message : error
+    );
 
     const msg = error && error.message ? String(error.message).toLowerCase() : '';
     if (

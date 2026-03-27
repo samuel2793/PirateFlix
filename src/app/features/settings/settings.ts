@@ -5,6 +5,13 @@ import { FormsModule } from '@angular/forms';
 
 import { LanguageService, SupportedLang } from '../../shared/services/language.service';
 import { ThemeService, Theme, TextSize, AccentColor } from '../../core/services/theme.service';
+import { FirebaseAuthService } from '../../core/services/firebase-auth';
+import {
+  DEFAULT_TORRENT_PROVIDER,
+  TORRENT_PROVIDER_OPTIONS,
+  TorrentProviderId,
+  normalizeTorrentProvider,
+} from '../../core/config/torrent-providers';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 import { GlobalNavComponent } from '../../shared/components/global-nav/global-nav';
 
@@ -35,6 +42,7 @@ export class SettingsComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly language = inject(LanguageService);
   private readonly themeService = inject(ThemeService);
+  private readonly auth = inject(FirebaseAuthService);
   private readonly snackBar = inject(MatSnackBar);
   
   private readonly STORAGE_KEY = 'pirateflix_settings';
@@ -64,9 +72,12 @@ export class SettingsComponent implements OnInit {
   preferredSubtitleLang = signal('none');
   showSubtitles = signal(false);
   subtitleSize = signal<TextSize>('medium');
+  torrentProvider = signal<TorrentProviderId>(DEFAULT_TORRENT_PROVIDER);
 
   // Accent color options
   accentColorOptions = this.themeService.getAccentColorOptions();
+  torrentProviderOptions = TORRENT_PROVIDER_OPTIONS;
+  isAuthenticated = this.auth.isAuthenticated;
 
   videoQualityOptions: { value: VideoQuality; label: string }[] = [
     { value: 'auto', label: 'Auto' },
@@ -126,6 +137,9 @@ export class SettingsComponent implements OnInit {
         if (settings.preferredSubtitleLang) this.preferredSubtitleLang.set(settings.preferredSubtitleLang);
         if (settings.showSubtitles !== undefined) this.showSubtitles.set(settings.showSubtitles);
         if (settings.subtitleSize) this.subtitleSize.set(settings.subtitleSize);
+        this.torrentProvider.set(
+          normalizeTorrentProvider(settings.torrentProvider, DEFAULT_TORRENT_PROVIDER)
+        );
       }
     } catch (e) {
       console.error('Error loading settings:', e);
@@ -191,6 +205,17 @@ export class SettingsComponent implements OnInit {
     this.saveSettings();
   }
 
+  setTorrentProvider(provider: TorrentProviderId) {
+    if (!this.isAuthenticated()) return;
+    this.torrentProvider.set(normalizeTorrentProvider(provider, DEFAULT_TORRENT_PROVIDER));
+    this.saveSettings();
+  }
+
+  isTorrentProviderActive(provider: TorrentProviderId): boolean {
+    if (!this.isAuthenticated()) return provider === DEFAULT_TORRENT_PROVIDER;
+    return this.torrentProvider() === provider;
+  }
+
   // Save playback/audio settings to localStorage
   private saveSettings() {
     const settings = {
@@ -199,6 +224,7 @@ export class SettingsComponent implements OnInit {
       preferredSubtitleLang: this.preferredSubtitleLang(),
       showSubtitles: this.showSubtitles(),
       subtitleSize: this.subtitleSize(),
+      torrentProvider: this.torrentProvider(),
     };
     
     try {
@@ -221,6 +247,7 @@ export class SettingsComponent implements OnInit {
     this.preferredSubtitleLang.set('none');
     this.showSubtitles.set(false);
     this.subtitleSize.set('medium');
+    this.torrentProvider.set(DEFAULT_TORRENT_PROVIDER);
     
     // Clear localStorage
     localStorage.removeItem(this.STORAGE_KEY);

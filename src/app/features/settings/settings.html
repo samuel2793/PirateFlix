@@ -29,6 +29,27 @@
             color="primary">
           </mat-slide-toggle>
         </div>
+
+        <!-- Torrent Provider -->
+        <div class="setting-item vertical">
+          <div class="setting-info">
+            <span class="setting-label translate-text">{{ 'Torrent provider' | t }}</span>
+            <span class="setting-description translate-text">{{ 'Select the source used to search torrents' | t }}</span>
+          </div>
+          <div class="option-chips">
+            <button
+              *ngFor="let provider of torrentProviderOptions"
+              class="option-chip"
+              [class.active]="isTorrentProviderActive(provider.value)"
+              [disabled]="!isAuthenticated()"
+              (click)="setTorrentProvider(provider.value)">
+              {{ provider.label }}
+            </button>
+          </div>
+          <span class="setting-helper translate-text" *ngIf="!isAuthenticated()">
+            {{ 'Sign in to choose a torrent provider. Guests use The Pirate Bay by default.' | t }}
+          </span>
+        </div>
       </div>
     </section>
 

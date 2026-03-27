@@ -267,6 +267,13 @@ $transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   max-width: 400px;
 }
 
+.setting-helper {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xs, 12px);
+  color: var(--text-tertiary, $text-tertiary);
+}
+
 // ========================================
 // Option Chips - Elegant Selection
 // ========================================
@@ -308,6 +315,14 @@ $transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     background: var(--bg-hover, $bg-hover);
     border-color: var(--border-hover, $border-hover);
     color: var(--text-primary, $text-primary);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    background: var(--bg-subtle, $bg-subtle);
+    color: var(--text-tertiary, $text-tertiary);
+    border-color: var(--border-default, $border-default);
   }
 
   &.active {
