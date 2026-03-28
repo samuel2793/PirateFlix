@@ -68,6 +68,12 @@
           (click)="toggleProfileMenu()"
           [title]="isAuthenticated() ? userDisplayName() : ('Sign in' | t)"
         >
+          <img
+            class="provider-avatar"
+            [src]="currentTorrentProviderLogo()"
+            [alt]="currentTorrentProviderLabel() + ' logo'"
+            [title]="currentTorrentProviderLabel()"
+          />
           <img *ngIf="userPhotoUrl()" [src]="userPhotoUrl()" alt="Profile" class="avatar-img" />
           <div *ngIf="!userPhotoUrl()" class="avatar-initials">{{ userInitials() }}</div>
           <mat-icon class="dropdown-caret" [class.open]="profileMenuOpen()">expand_more</mat-icon>

@@ -8,6 +8,13 @@ import { TranslatePipe } from '../../pipes/translate.pipe';
 import { FirebaseAuthService } from '../../../core/services/firebase-auth';
 import { UserDataService } from '../../../core/services/user-data.service';
 import { LanguageService, SupportedLang } from '../../services/language.service';
+import {
+  DEFAULT_TORRENT_PROVIDER,
+  TORRENT_PROVIDER_OPTIONS,
+  TorrentProviderId,
+  normalizeTorrentProvider,
+  resolveTorrentProviderForPlayback,
+} from '../../../core/config/torrent-providers';
 
 @Component({
   selector: 'app-global-nav',
@@ -22,6 +29,7 @@ export class GlobalNavComponent {
   private readonly auth = inject(FirebaseAuthService);
   private readonly userData = inject(UserDataService);
   private readonly language = inject(LanguageService);
+  private readonly SETTINGS_STORAGE_KEY = 'pirateflix_settings';
 
   authAvailable = this.auth.available;
   isAuthenticated = this.auth.isAuthenticated;
@@ -36,6 +44,31 @@ export class GlobalNavComponent {
     const profile = this.userData.profile();
     if (profile?.photoURL) return profile.photoURL;
     return this.auth.photoUrl();
+  });
+  private readonly providerTick = signal(0);
+
+  currentTorrentProvider = computed(() => {
+    this.providerTick();
+    const configured = this.getConfiguredTorrentProvider();
+    return resolveTorrentProviderForPlayback(configured, this.isAuthenticated());
+  });
+
+  currentTorrentProviderLogo = computed(() => {
+    const provider = this.currentTorrentProvider();
+    return (
+      TORRENT_PROVIDER_OPTIONS.find((option) => option.value === provider)?.logoPath ||
+      TORRENT_PROVIDER_OPTIONS.find((option) => option.value === DEFAULT_TORRENT_PROVIDER)
+        ?.logoPath ||
+      'assets/providers/piratebay.svg'
+    );
+  });
+
+  currentTorrentProviderLabel = computed(() => {
+    const provider = this.currentTorrentProvider();
+    return (
+      TORRENT_PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ||
+      'Torrent provider'
+    );
   });
 
   // User initials for default avatar
@@ -83,6 +116,7 @@ export class GlobalNavComponent {
   canGoBack = computed(() => !this.isHome());
 
   toggleProfileMenu() {
+    this.refreshProviderBadge();
     this.profileMenuOpen.update(v => !v);
     if (!this.profileMenuOpen()) {
       this.languageSubmenuOpen.set(false);
@@ -101,6 +135,23 @@ export class GlobalNavComponent {
     if (!profileMenu && this.profileMenuOpen()) {
       this.closeProfileMenu();
     }
+  }
+
+  @HostListener('window:focus')
+  onWindowFocus() {
+    this.refreshProviderBadge();
+  }
+
+  @HostListener('window:storage', ['$event'])
+  onStorageChange(event: StorageEvent) {
+    if (event.key === this.SETTINGS_STORAGE_KEY) {
+      this.refreshProviderBadge();
+    }
+  }
+
+  @HostListener('window:pirateflix-settings-updated')
+  onSettingsUpdated() {
+    this.refreshProviderBadge();
   }
 
   toggleLanguageSubmenu() {
@@ -153,5 +204,20 @@ export class GlobalNavComponent {
 
   logout() {
     void this.auth.signOut();
+  }
+
+  private refreshProviderBadge() {
+    this.providerTick.update((value) => value + 1);
+  }
+
+  private getConfiguredTorrentProvider(): TorrentProviderId {
+    try {
+      const raw = localStorage.getItem(this.SETTINGS_STORAGE_KEY);
+      if (!raw) return DEFAULT_TORRENT_PROVIDER;
+      const parsed = JSON.parse(raw);
+      return normalizeTorrentProvider(parsed?.torrentProvider, DEFAULT_TORRENT_PROVIDER);
+    } catch {
+      return DEFAULT_TORRENT_PROVIDER;
+    }
   }
 }

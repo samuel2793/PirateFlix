@@ -46,6 +46,7 @@ export class SettingsComponent implements OnInit {
   private readonly snackBar = inject(MatSnackBar);
   
   private readonly STORAGE_KEY = 'pirateflix_settings';
+  private readonly SETTINGS_UPDATED_EVENT = 'pirateflix-settings-updated';
 
   // Language
   currentLang = this.language.currentLang;
@@ -230,6 +231,7 @@ export class SettingsComponent implements OnInit {
     
     try {
       localStorage.setItem(this.STORAGE_KEY, JSON.stringify(settings));
+      this.notifySettingsUpdated();
       this.showNotification('Settings saved');
     } catch (e) {
       console.error('Error saving settings:', e);
@@ -252,8 +254,15 @@ export class SettingsComponent implements OnInit {
     
     // Clear localStorage
     localStorage.removeItem(this.STORAGE_KEY);
+    this.notifySettingsUpdated();
     
     this.showNotification('Settings reset to defaults');
+  }
+
+  private notifySettingsUpdated() {
+    try {
+      window.dispatchEvent(new CustomEvent(this.SETTINGS_UPDATED_EVENT));
+    } catch {}
   }
 
   private showNotification(message: string) {
