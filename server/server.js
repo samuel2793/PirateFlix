@@ -111,15 +111,6 @@ const TORRENT_PROVIDERS = Object.freeze({
       return `${base}/search/${encodeURIComponent(cleanQuery)}/`;
     },
   }),
-  grantorrent: Object.freeze({
-    id: 'grantorrent',
-    label: 'GranTorrent',
-    mirrors: Object.freeze(['https://www3.grantorrent.lol']),
-    enableYtsFallback: false,
-    buildSearchUrl(base, cleanQuery) {
-      return `${base}/?s=${encodeURIComponent(cleanQuery)}&filtro=`;
-    },
-  }),
   '1337x': Object.freeze({
     id: '1337x',
     label: '1337x',
@@ -2658,10 +2649,6 @@ app.get('/api/search-torrent', async (req, res) => {
           lower.includes('detlink') ||
           lower.includes('detname') ||
           lower.includes('cellmainlink') ||
-          lower.includes('class="grantorrent"') ||
-          lower.includes('busqueda:') ||
-          lower.includes('movie-list') ||
-          lower.includes('linktorrent') ||
           lower.includes('torrentname') ||
           lower.includes('frontpagewidget') ||
           lower.includes('no hits') ||
@@ -3293,180 +3280,6 @@ app.get('/api/search-torrent', async (req, res) => {
       return urls;
     };
 
-    const resolveAbsoluteUrl = (href, base) => {
-      const raw = String(href || '').trim();
-      if (!raw || raw.startsWith('#') || raw.startsWith('javascript:')) return null;
-      try {
-        if (/^https?:\/\//i.test(raw)) return raw;
-        if (raw.startsWith('//')) return `https:${raw}`;
-        if (!base) return null;
-        return new URL(raw, `${base}/`).toString();
-      } catch (_) {
-        return null;
-      }
-    };
-
-    const extractGrantorrentDetailEntries = (searchHtml, base) => {
-      const entries = [];
-      const seen = new Set();
-      const anchorRegex = /<a[^>]+href=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi;
-      let match;
-      while ((match = anchorRegex.exec(searchHtml)) !== null) {
-        const resolved = resolveAbsoluteUrl(match[1], base);
-        if (!resolved) continue;
-        let parsed = null;
-        try {
-          parsed = new URL(resolved);
-        } catch (_) {
-          continue;
-        }
-        const host = String(parsed.hostname || '').toLowerCase();
-        if (!host.includes('grantorrent')) continue;
-        const pathName = String(parsed.pathname || '');
-        if (!/^\/[^/?#]+\/?$/.test(pathName)) continue;
-        if (
-          pathName === '/' ||
-          /^\/(peliculas|series_p|contacto|ayuda|categoria|search|tag|author)\//i.test(pathName)
-        ) {
-          continue;
-        }
-
-        const inner = decodeHtmlEntities(match[2] || '');
-        const altMatch = inner.match(/\balt=['"]([^'"]+)['"]/i);
-        const pMatch = inner.match(/<p[^>]*>([^<]+)<\/p>/i);
-        const rawName = altMatch?.[1] || pMatch?.[1] || '';
-        const name = decodeHtmlEntities(String(rawName || ''))
-          .replace(/\s+/g, ' ')
-          .trim();
-        const key = resolved.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        entries.push({ url: resolved, name: name || 'Unknown' });
-      }
-      return entries;
-    };
-
-    const decodeGrantorrentDataSrc = (value) => {
-      const raw = decodeHtmlEntities(String(value || '')).trim();
-      if (!raw) return null;
-      try {
-        const decoded = Buffer.from(raw, 'base64').toString('utf8').trim();
-        if (!decoded) return null;
-        if (/^(https?:\/\/|magnet:\?)/i.test(decoded)) return decoded;
-      } catch (_) {}
-      return null;
-    };
-
-    const scoreGrantorrentName = (name) => {
-      const normalizedName = decodeHtmlEntities(String(name || ''))
-        .toLowerCase()
-        .replace(/['`´]/g, '')
-        .replace(/[^\w\s-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const normalizedQuery = String(cleanQuery || '')
-        .toLowerCase()
-        .replace(/['`´]/g, '')
-        .replace(/[^\w\s-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const queryTokens = normalizedQuery
-        .split(' ')
-        .map((t) => t.trim())
-        .filter(
-          (t) =>
-            t.length >= 3 &&
-            !/^(720p|1080p|2160p|4k|hdrip|bdrip|bluray|webrip|web|dl|dual|audio)$/.test(t)
-        );
-
-      let score = 0;
-      if (!normalizedName) return score;
-      if (normalizedName === normalizedQuery) score += 300;
-      if (normalizedName.startsWith(normalizedQuery) && normalizedQuery) score += 220;
-      if (normalizedQuery && normalizedName.includes(normalizedQuery)) score += 120;
-      if (queryTokens.length > 0) {
-        const matched = queryTokens.filter((token) => normalizedName.includes(token)).length;
-        score += matched * 40;
-        if (matched === queryTokens.length) score += 100;
-      }
-      const yearMatch = normalizedQuery.match(/\b(19|20)\d{2}\b/);
-      if (yearMatch && normalizedName.includes(yearMatch[0])) score += 60;
-      if (/\b(microhd|bdremux|1080p|720p|hdrip)\b/.test(normalizedName)) score += 8;
-      return score;
-    };
-
-    const fetchGrantorrentTorrentsFromDetails = async (entries) => {
-      const results = [];
-      const seen = new Set();
-      const limit = Math.min(entries.length, 12);
-      for (let i = 0; i < limit; i += 1) {
-        if (requestAbortSignal && requestAbortSignal.aborted) break;
-        const entry = entries[i];
-        if (!entry?.url) continue;
-        try {
-          const resp = await axios.get(entry.url, {
-            headers,
-            timeout: Math.min(15000, perMirrorTimeoutMs),
-            maxRedirects: 5,
-            responseType: 'text',
-            httpsAgent: httpsAgentShared,
-            httpAgent,
-            signal: requestAbortSignal,
-          });
-          if (!resp?.data) continue;
-          const detailHtml = String(resp.data);
-          const linkRegexes = [
-            /<a[^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*data-src=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi,
-            /<a[^>]*data-src=['"]([^'"]+)['"][^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*>([\s\S]*?)<\/a>/gi,
-          ];
-
-          for (const regex of linkRegexes) {
-            let match;
-            while ((match = regex.exec(detailHtml)) !== null) {
-              const torrentUrl = decodeGrantorrentDataSrc(match[1]);
-              if (!torrentUrl || seen.has(torrentUrl)) continue;
-              seen.add(torrentUrl);
-
-              const anchorInner = decodeHtmlEntities(String(match[2] || ''))
-                .replace(/<[^>]+>/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
-              const qualityText = anchorInner
-                .replace(/^(descargar|download)\s*/i, '')
-                .trim();
-              const fallbackNameRaw = decodeURIComponent(
-                String(torrentUrl.split('/').pop() || '')
-              ).replace(/\.torrent$/i, '');
-              const fallbackName = fallbackNameRaw.replace(/[_+.]+/g, ' ').trim();
-              const entryName = String(entry.name || '').trim();
-              const composedName =
-                entryName && qualityText && !entryName.toLowerCase().includes(qualityText.toLowerCase())
-                  ? `${entryName} - ${qualityText}`
-                  : entryName &&
-                      fallbackName &&
-                      !entryName.toLowerCase().includes(fallbackName.toLowerCase())
-                    ? `${entryName} - ${fallbackName}`
-                    : entryName || qualityText || fallbackName || 'Unknown';
-
-              const score = scoreGrantorrentName(composedName);
-              results.push({
-                name: composedName,
-                magnetLink: torrentUrl,
-                size: 'Unknown',
-                seeders: 0,
-                leechers: 0,
-                score,
-              });
-            }
-          }
-        } catch (err) {
-          const msg = err && err.message ? err.message : err;
-          console.warn('Detalle Grantorrent falló:', entry.url, msg);
-        }
-      }
-      return results;
-    };
-
     const fetchMagnetsFromDetails = async (entries) => {
       const results = [];
       const seen = new Set();
@@ -3529,47 +3342,6 @@ app.get('/api/search-torrent', async (req, res) => {
     const seenMagnets = new Set();
     const pendingDetailRows = [];
     const seenPendingDetailUrls = new Set();
-
-    if (provider === 'grantorrent') {
-      const directLinkRegexes = [
-        /<a[^>]*data-src=['"]([^'"]+)['"][^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*>/gi,
-        /<a[^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*data-src=['"]([^'"]+)['"][^>]*>/gi,
-      ];
-      for (const directLinkRegex of directLinkRegexes) {
-        let directMatch;
-        while ((directMatch = directLinkRegex.exec(html)) !== null) {
-          const torrentUrl = decodeGrantorrentDataSrc(directMatch[1]);
-          if (!torrentUrl || seenMagnets.has(torrentUrl)) continue;
-          const fallbackName = decodeURIComponent(String(torrentUrl.split('/').pop() || ''))
-            .replace(/\.torrent$/i, '')
-            .replace(/[_+.]+/g, ' ')
-            .trim();
-          const displayName = fallbackName || 'Grantorrent result';
-          seenMagnets.add(torrentUrl);
-          torrents.push({
-            name: displayName,
-            magnetLink: torrentUrl,
-            size: 'Unknown',
-            seeders: 0,
-            leechers: 0,
-            score: scoreGrantorrentName(displayName),
-          });
-        }
-      }
-
-      const detailEntries = extractGrantorrentDetailEntries(html, htmlBase || mirrors[0]);
-      if (detailEntries.length > 0) {
-        console.log(`Grantorrent: resolviendo detalles (${detailEntries.length})...`);
-        const detailTorrents = await fetchGrantorrentTorrentsFromDetails(detailEntries);
-        for (const torrent of detailTorrents) {
-          if (torrents.length >= 25) break;
-          if (seenMagnets.has(torrent.magnetLink)) continue;
-          seenMagnets.add(torrent.magnetLink);
-          torrents.push(torrent);
-        }
-      }
-      torrents.sort((a, b) => b.score - a.score);
-    }
 
     const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     let rowMatch;
@@ -3657,10 +3429,7 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     const shouldResolveDetails =
-      provider !== 'grantorrent' &&
-      htmlBase &&
-      torrents.length < 10 &&
-      (pendingDetailRows.length > 0 || torrents.length === 0);
+      htmlBase && torrents.length < 10 && (pendingDetailRows.length > 0 || torrents.length === 0);
 
     if (shouldResolveDetails) {
       const detailEntries =

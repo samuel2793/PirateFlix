@@ -1,4 +1,4 @@
-export type TorrentProviderId = 'piratebay' | 'kikass' | 'grantorrent' | '1337x';
+export type TorrentProviderId = 'piratebay' | 'kikass' | '1337x';
 
 export interface TorrentProviderOption {
   value: TorrentProviderId;
@@ -28,12 +28,6 @@ export const TORRENT_PROVIDER_OPTIONS: ReadonlyArray<TorrentProviderOption> = Ob
     label: 'Kikass',
     description: 'Proveedor alternativo basado en el buscador de kikass.to.',
     logoPath: 'assets/providers/kikass.svg',
-  },
-  {
-    value: 'grantorrent',
-    label: 'GranTorrent',
-    description: 'Proveedor en español con enlaces directos .torrent.',
-    logoPath: 'assets/providers/grantorrent.svg',
   },
 ]);
 
