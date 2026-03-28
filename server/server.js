@@ -57,15 +57,6 @@ const FAST_PARALLEL_MIRRORS = parseInt(process.env.PIRATEFLIX_FAST_PARALLEL_MIRR
 const MIRROR_RETRY_COUNT = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_COUNT || '0', 10);
 const MIRROR_RETRY_DELAY_MS = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_DELAY_MS || '500', 10);
 
-// 1337x mirrors (excelente para contenido en español/latino y dual audio)
-const MIRRORS_1337X = Object.freeze([
-  'https://1337x.to',
-  'https://1337x.st',
-  'https://1337x.ws',
-  'https://1337x.is',
-  'https://1337x.gd',
-]);
-
 // Torrent providers registry.
 // Add new providers here and wire their search URL strategy.
 function resolveKikassCategory(categoryLike) {
@@ -109,15 +100,6 @@ const TORRENT_PROVIDERS = Object.freeze({
         return `${base}/search/${encodeURIComponent(cleanQuery)}/category/${slug}/`;
       }
       return `${base}/search/${encodeURIComponent(cleanQuery)}/`;
-    },
-  }),
-  '1337x': Object.freeze({
-    id: '1337x',
-    label: '1337x',
-    mirrors: MIRRORS_1337X,
-    enableYtsFallback: false,
-    buildSearchUrl(base, cleanQuery) {
-      return `${base}/search/${encodeURIComponent(cleanQuery)}/1/`;
     },
   }),
 });
@@ -2306,184 +2288,6 @@ async function warmupMirrors(timeoutPer = 3000) {
 }
 
 // =====================
-// 1337x search provider (gran cobertura de contenido en español, latino, dual audio)
-// =====================
-async function search1337x(query, parentSignal) {
-  const USE_1337X = String(process.env.PIRATEFLIX_USE_1337X || 'true').toLowerCase() === 'true';
-  if (!USE_1337X) return [];
-
-  const timeout1337x = parseInt(process.env.PIRATEFLIX_1337X_TIMEOUT_MS || '10000', 10);
-  const headers = {
-    'User-Agent':
-      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-    Accept:
-      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-    Referer: 'https://www.google.com/',
-  };
-
-  const decodeHtml = (value) =>
-    String(value)
-      .replace(/&amp;/g, '&')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
-      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
-
-  // Step 1: Search listing page
-  for (const base of MIRRORS_1337X) {
-    if (parentSignal && parentSignal.aborted) break;
-    const searchUrl = `${base}/search/${encodeURIComponent(query)}/1/`;
-    let controller = null;
-    try {
-      controller = new AbortController();
-      if (parentSignal) {
-        parentSignal.addEventListener('abort', () => { try { controller.abort(); } catch (_) {} }, { once: true });
-      }
-
-      console.log(`🔍 1337x buscando: ${searchUrl} (timeout ${timeout1337x}ms)`);
-      const resp = await axios.get(searchUrl, {
-        headers,
-        timeout: timeout1337x,
-        maxRedirects: 5,
-        responseType: 'text',
-        httpsAgent: httpsAgentGlobal,
-        httpAgent: httpAgentGlobal,
-        signal: controller.signal,
-      });
-
-      if (!resp?.data || resp.data.length < 200) continue;
-
-      // Parse search results to extract detail page URLs and basic info
-      const html = resp.data;
-      const rowRegex = /<td\s+class="coll-1 name"[^>]*>[\s\S]*?<\/td>/gi;
-      const seedRegex = /<td\s+class="coll-2 seeds"[^>]*>\s*(\d+)\s*<\/td>/gi;
-      const leechRegex = /<td\s+class="coll-3 leeches"[^>]*>\s*(\d+)\s*<\/td>/gi;
-      const sizeRegex = /<td\s+class="coll-4 size[^"]*"[^>]*>([\s\S]*?)<\/td>/gi;
-
-      // Extract all rows more reliably
-      const tableRowRegex = /<tr>[\s\S]*?<\/tr>/gi;
-      const rows = [];
-      let rowMatch;
-      while ((rowMatch = tableRowRegex.exec(html)) !== null) {
-        const row = rowMatch[0];
-        // Only rows that have the torrent link pattern
-        if (row.includes('coll-1 name') || row.includes('/torrent/')) {
-          rows.push(row);
-        }
-      }
-
-      if (rows.length === 0) {
-        console.log(`1337x: no rows found from ${base}`);
-        continue;
-      }
-
-      // Extract detail links + metadata from rows
-      const results = [];
-      for (const row of rows.slice(0, 10)) {
-        // Extract link to detail page
-        const linkMatch = row.match(/<a\s+href="(\/torrent\/[^"]+)"[^>]*>([^<]+)<\/a>/i);
-        if (!linkMatch) continue;
-        const detailPath = linkMatch[1];
-        const name = decodeHtml(linkMatch[2]).trim();
-
-        // Extract seeders
-        const seedMatch = row.match(/<td\s+class="coll-2 seeds"[^>]*>\s*(\d+)\s*<\/td>/i);
-        const seeders = seedMatch ? parseInt(seedMatch[1], 10) : 0;
-
-        // Extract leechers
-        const leechMatch = row.match(/<td\s+class="coll-3 leeches"[^>]*>\s*(\d+)\s*<\/td>/i);
-        const leechers = leechMatch ? parseInt(leechMatch[1], 10) : 0;
-
-        // Extract size
-        const sizeMatch = row.match(/<td\s+class="coll-4 size[^"]*"[^>]*>([\s\S]*?)<span/i);
-        const size = sizeMatch ? decodeHtml(sizeMatch[1]).trim() : 'Unknown';
-
-        results.push({ name, detailPath, seeders, leechers, size, base });
-      }
-
-      if (results.length === 0) continue;
-
-      console.log(`🔍 1337x: ${results.length} resultados de ${base}`);
-
-      // Step 2: Fetch detail pages in parallel (limit 5) to get magnet links
-      const detailLimit = Math.min(results.length, 5);
-      const detailPromises = results.slice(0, detailLimit).map(async (item) => {
-        if (parentSignal && parentSignal.aborted) return null;
-        const detailUrl = `${item.base}${item.detailPath}`;
-        let ctrl = null;
-        try {
-          ctrl = new AbortController();
-          if (parentSignal) {
-            parentSignal.addEventListener('abort', () => { try { ctrl.abort(); } catch (_) {} }, { once: true });
-          }
-          const detailResp = await axios.get(detailUrl, {
-            headers,
-            timeout: timeout1337x,
-            maxRedirects: 5,
-            responseType: 'text',
-            httpsAgent: httpsAgentGlobal,
-            httpAgent: httpAgentGlobal,
-            signal: ctrl.signal,
-          });
-          if (!detailResp?.data) return null;
-          const detailHtml = detailResp.data;
-          const magnetMatch = detailHtml.match(/magnet:\?xt=urn:btih:[^'"\s<>]+/i);
-          if (!magnetMatch) {
-            // Try to build from info hash
-            const hashMatch = detailHtml.match(/infohash[^a-z0-9]{0,10}([a-f0-9]{40})/i)
-              || detailHtml.match(/btih[:=]([a-f0-9]{40})/i);
-            if (hashMatch) {
-              const dn = item.name ? `&dn=${encodeURIComponent(item.name)}` : '';
-              const trackers = DEFAULT_TRACKERS.map((t) => `&tr=${encodeURIComponent(t)}`).join('');
-              return {
-                name: item.name,
-                magnetLink: `magnet:?xt=urn:btih:${hashMatch[1]}${dn}${trackers}`,
-                size: item.size,
-                seeders: item.seeders,
-                leechers: item.leechers,
-                score: item.seeders * 2 + item.leechers,
-                source: '1337x',
-              };
-            }
-            return null;
-          }
-          return {
-            name: item.name,
-            magnetLink: magnetMatch[0],
-            size: item.size,
-            seeders: item.seeders,
-            leechers: item.leechers,
-            score: item.seeders * 2 + item.leechers,
-            source: '1337x',
-          };
-        } catch (err) {
-          if (err?.code === 'ERR_CANCELED' || err?.name === 'AbortError') return null;
-          console.warn(`1337x detail falló (${detailUrl}):`, err?.message || err);
-          return null;
-        }
-      });
-
-      const detailResults = (await Promise.allSettled(detailPromises))
-        .filter((r) => r.status === 'fulfilled' && r.value)
-        .map((r) => r.value);
-
-      if (detailResults.length > 0) {
-        console.log(`✅ 1337x: ${detailResults.length} torrents con magnet obtenidos`);
-        return detailResults;
-      }
-    } catch (err) {
-      if (err?.code === 'ERR_CANCELED' || err?.name === 'AbortError') break;
-      console.warn(`1337x mirror falló (${base}):`, err?.message || err);
-    }
-  }
-  return [];
-}
-
-// =====================
 // Endpoint para buscar torrents
 // =====================
 app.get('/api/torrent/providers', (_req, res) => {
@@ -2500,8 +2304,10 @@ app.get('/api/torrent/providers', (_req, res) => {
 app.get('/api/search-torrent', async (req, res) => {
   const { query, category = '207', provider: requestedProvider = '' } = req.query; // 207 = HD Movies
   if (!query) return res.status(400).json({ error: 'query es requerido' });
-  const providerDefinition = getTorrentProviderDefinition(requestedProvider);
-  const provider = providerDefinition.id;
+  let providerDefinition = getTorrentProviderDefinition(requestedProvider);
+  let provider = providerDefinition.id;
+  const requestedProviderNormalized =
+    String(requestedProvider || '').trim().toLowerCase() || provider;
 
   const decodeHtmlEntities = (value) =>
     String(value)
@@ -2580,23 +2386,6 @@ app.get('/api/search-torrent', async (req, res) => {
 
     console.log(`Buscando torrent [provider=${provider}]: ${query}`);
     if (cleanQuery !== query) console.log(`Query limpio: ${cleanQuery}`);
-
-    if (provider === '1337x') {
-      const results1337x = await search1337x(cleanQuery, requestAbortSignal);
-      results1337x.sort(
-        (a, b) =>
-          (Number(b?.seeders) || 0) - (Number(a?.seeders) || 0) ||
-          (Number(b?.leechers) || 0) - (Number(a?.leechers) || 0)
-      );
-      console.log(`1337x provider: torrents parseados=${results1337x.length}`);
-      return res.json({
-        query,
-        provider,
-        requestedProvider: String(requestedProvider || '').trim().toLowerCase() || provider,
-        results: results1337x,
-        count: results1337x.length,
-      });
-    }
 
     const httpAgent = httpAgentGlobal;
     const httpsAgentShared = httpsAgentGlobal;
@@ -3097,9 +2886,6 @@ app.get('/api/search-torrent', async (req, res) => {
     let html = null;
     let htmlBase = null;
 
-    // 1337x ahora es provider dedicado; no mezclar resultados con otros providers
-    const promise1337x = Promise.resolve([]);
-
     try {
       const searchResult = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
       html = searchResult?.html || searchResult;
@@ -3450,33 +3236,6 @@ app.get('/api/search-torrent', async (req, res) => {
       console.log(`Magnet links encontrados (TPB): ${torrents.length}`);
     }
 
-    // Merge resultados de 1337x (corrió en paralelo)
-    try {
-      const results1337x = await promise1337x;
-      if (results1337x && results1337x.length > 0) {
-        const extractHash = (magnet) => {
-          const m = String(magnet || '').match(/btih:([a-f0-9]{40})/i);
-          return m ? m[1].toLowerCase() : null;
-        };
-        const existingHashes = new Set(
-          torrents.map((t) => extractHash(t.magnetLink)).filter(Boolean)
-        );
-        let added = 0;
-        for (const t of results1337x) {
-          const hash = extractHash(t.magnetLink);
-          if (hash && existingHashes.has(hash)) continue;
-          if (seenMagnets.has(t.magnetLink)) continue;
-          seenMagnets.add(t.magnetLink);
-          if (hash) existingHashes.add(hash);
-          torrents.push(t);
-          added++;
-        }
-        if (added > 0) console.log(`✅ 1337x aportó ${added} torrents adicionales`);
-      }
-    } catch (mergeErr) {
-      console.warn('Error merging 1337x:', mergeErr?.message || mergeErr);
-    }
-
     torrents.sort((a, b) => b.score - a.score);
 
     console.log(`Torrents parseados: ${torrents.length}`);
@@ -3491,7 +3250,7 @@ app.get('/api/search-torrent', async (req, res) => {
     res.json({
       query,
       provider,
-      requestedProvider: String(requestedProvider || '').trim().toLowerCase() || provider,
+      requestedProvider: requestedProviderNormalized,
       results: torrents,
       count: torrents.length,
     });

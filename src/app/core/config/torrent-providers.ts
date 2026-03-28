@@ -1,4 +1,4 @@
-export type TorrentProviderId = 'piratebay' | 'kikass' | '1337x';
+export type TorrentProviderId = 'piratebay' | 'kikass';
 
 export interface TorrentProviderOption {
   value: TorrentProviderId;
@@ -16,12 +16,6 @@ export const TORRENT_PROVIDER_OPTIONS: ReadonlyArray<TorrentProviderOption> = Ob
     label: 'The Pirate Bay',
     description: 'Proveedor recomendado y compatible por defecto con la app.',
     logoPath: 'assets/providers/piratebay.svg',
-  },
-  {
-    value: '1337x',
-    label: '1337x',
-    description: 'Proveedor dedicado para mirrors 1337x.',
-    logoPath: 'assets/providers/1337x.svg',
   },
   {
     value: 'kikass',
