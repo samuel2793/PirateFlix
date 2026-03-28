@@ -1155,15 +1155,51 @@ export class PlayerComponent implements OnInit, OnDestroy {
               )
             : [];
 
+        const episodeCompatible = hasEpisodeTarget
+          ? sortBySeeders(
+              candidateTorrents.filter((t: any) => {
+                const name = String(t?.name || '');
+                const flags = this.getEpisodeMatchFlags(name, seasonValue, episodeValue);
+                return (
+                  flags.episode &&
+                  hasSeekableHint(name) &&
+                  !incompatibleCodec(name) &&
+                  !lowQuality(name)
+                );
+              })
+            )
+          : [];
+
+        const seasonPackCompatible = hasEpisodeTarget
+          ? sortBySeeders(
+              candidateTorrents.filter((t: any) => {
+                const name = String(t?.name || '');
+                const flags = this.getEpisodeMatchFlags(name, seasonValue, episodeValue);
+                return (
+                  flags.season &&
+                  !flags.episode &&
+                  !flags.explicitEpisodeFound &&
+                  hasSeekableHint(name) &&
+                  !incompatibleCodec(name) &&
+                  !lowQuality(name)
+                );
+              })
+            )
+          : [];
+
+        const shouldPreferSeasonPack = hasEpisodeTarget && seasonPackCompatible.length > 0;
+
         const bestTorrent =
           preferSubtitles && subtitlesHinted.length > 0
             ? subtitlesHinted[0]
-            : preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0
+          : preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0
             ? multiAudioSeekableHinted[0]
-            : preferSeekable && seekableHinted.length > 0
+          : preferSeekable && seekableHinted.length > 0
             ? seekableHinted[0]
-            : preferMultiAudio && multiAudioHinted.length > 0
+          : preferMultiAudio && multiAudioHinted.length > 0
             ? multiAudioHinted[0]
+          : shouldPreferSeasonPack
+            ? seasonPackCompatible[0]
             : ytsTorrents.length > 0
             ? ytsTorrents[0]
             : h264QualityGoodAudio.length > 0
@@ -1176,6 +1212,14 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
         if (ytsTorrents.length > 0) {
           console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);
+        } else if (shouldPreferSeasonPack && seasonPackCompatible[0] === bestTorrent) {
+          console.log(
+            `✅ Seleccionado pack de temporada compatible para localizar episodio dentro del torrent`
+          );
+          this.pushLoadingLog(
+            'Usando pack de temporada (más estable) para localizar el episodio',
+            'warn'
+          );
         } else if (h264QualityGoodAudio.length > 0 && h264QualityGoodAudio[0] === bestTorrent) {
           console.log(`✅ Seleccionado H.264 de calidad con audio compatible`);
         } else if (h264Quality.length > 0 && h264Quality[0] === bestTorrent) {
@@ -1212,6 +1256,9 @@ export class PlayerComponent implements OnInit, OnDestroy {
         }
         if (preferMultiAudio && preferSeekable) {
           pushUnique(multiAudioSeekableHinted);
+        }
+        if (shouldPreferSeasonPack) {
+          pushUnique(seasonPackCompatible);
         }
         if (preferSeekable) {
           pushUnique(seekableHinted);

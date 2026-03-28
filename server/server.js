@@ -800,7 +800,7 @@ let lastStoragePruneReport = null;
 
 const MP4_LIKE_EXT_RE = /\.(mp4|mov|m4v)$/i;
 const INCOMPATIBLE_VIDEO_HINT_RE = /\b(hevc|x265|h265|av1)\b/i;
-const H264_HINT_RE = /\b(x264|h\.?264|avc)\b/i;
+const H264_HINT_RE = /\b(x264|h\.?264|avc|web[-\s]?dl|web[-\s]?rip|hdtv)\b/i;
 const INCOMPATIBLE_AUDIO_HINT_RE =
   /\b(atmos|truehd|ddp|dd\+|eac3|ac-?3|dts|dd5\.?1|dd5\+1|dd\s*5\.?1|dolby)\b/i;
 const COMPATIBLE_AUDIO_HINT_RE = /\b(aac|mp3)\b/i;
