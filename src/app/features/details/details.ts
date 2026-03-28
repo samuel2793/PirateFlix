@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed, ElementRef } from '@angular/core';
+import { Component, inject, signal, computed, ElementRef, HostListener } from '@angular/core';
 import { CommonModule, DOCUMENT, LowerCasePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -67,6 +67,7 @@ export class DetailsComponent {
 
   private seasonEpisodesCache = new Map<number, any[]>();
   private seasonEpisodesRequestId = 0;
+  private detailsRequestId = 0;
 
   // Preferences with localStorage persistence
   preferMultiAudio = signal(this.loadPref('preferMultiAudio'));
@@ -127,6 +128,16 @@ export class DetailsComponent {
   }
 
   async ngOnInit() {
+    await this.loadCurrentDetailsData();
+  }
+
+  @HostListener('window:pirateflix-language-updated')
+  onLanguageUpdated() {
+    void this.loadCurrentDetailsData();
+  }
+
+  private async loadCurrentDetailsData() {
+    const requestId = ++this.detailsRequestId;
     try {
       const type = this.route.snapshot.paramMap.get('type') as MediaType | null;
       const idStr = this.route.snapshot.paramMap.get('id');
@@ -137,19 +148,38 @@ export class DetailsComponent {
         return;
       }
 
+      this.loading.set(true);
+      this.error.set(null);
+      const selectedSeasonBeforeReload = this.selectedSeason();
+      const selectedEpisodeBeforeReload = this.selectedEpisode();
+
       const [data, creditsData, videosData] = await Promise.all([
         firstValueFrom(this.tmdb.details(type, id)),
         firstValueFrom(this.tmdb.credits(type, id)),
         firstValueFrom(this.tmdb.videos(type, id)),
       ]);
+      if (requestId !== this.detailsRequestId) return;
+
       this.item.set(data);
       this.credits.set(creditsData);
       this.videos.set(videosData?.results || []);
-      this.initializeSeriesSelection(data);
+      this.seasonEpisodesCache.clear();
+      this.seasonEpisodes.set([]);
+      this.seasonEpisodesRequestId += 1;
+
+      if (type === 'tv') {
+        this.initializeSeriesSelection(data, selectedSeasonBeforeReload, selectedEpisodeBeforeReload);
+      } else {
+        this.selectedSeason.set(null);
+        this.selectedEpisode.set(null);
+      }
     } catch (e: any) {
+      if (requestId !== this.detailsRequestId) return;
       this.error.set(e?.message ?? String(e));
     } finally {
-      this.loading.set(false);
+      if (requestId === this.detailsRequestId) {
+        this.loading.set(false);
+      }
     }
   }
 
@@ -666,7 +696,11 @@ export class DetailsComponent {
     }).format(value);
   }
 
-  private initializeSeriesSelection(data: any) {
+  private initializeSeriesSelection(
+    data: any,
+    preferredSeason?: number | null,
+    preferredEpisode?: number | null
+  ) {
     if (!this.isTv()) return;
     const seasons = Array.isArray(data?.seasons) ? data.seasons : [];
     if (!seasons.length) return;
@@ -675,16 +709,24 @@ export class DetailsComponent {
       .filter((season: any) => Number.isFinite(season?.season_number))
       .slice()
       .sort((a: any, b: any) => (a.season_number ?? 0) - (b.season_number ?? 0));
-    const primary = sorted.find((season: any) => season.season_number > 0) ?? sorted[0];
+    const preferred =
+      Number.isFinite(Number(preferredSeason))
+        ? sorted.find((season: any) => season.season_number === Number(preferredSeason))
+        : null;
+    const primary = preferred ?? sorted.find((season: any) => season.season_number > 0) ?? sorted[0];
     const seasonNumber = Number(primary?.season_number);
     if (!Number.isFinite(seasonNumber)) return;
 
     this.selectedSeason.set(seasonNumber);
-    const episodeCount = Number(primary?.episode_count);
-    if (Number.isFinite(episodeCount) && episodeCount > 0) {
-      this.selectedEpisode.set(1);
+    if (Number.isFinite(Number(preferredEpisode)) && Number(preferredEpisode) > 0) {
+      this.selectedEpisode.set(Number(preferredEpisode));
     } else {
-      this.selectedEpisode.set(null);
+      const episodeCount = Number(primary?.episode_count);
+      if (Number.isFinite(episodeCount) && episodeCount > 0) {
+        this.selectedEpisode.set(1);
+      } else {
+        this.selectedEpisode.set(null);
+      }
     }
 
     this.loadSeasonEpisodes(seasonNumber);

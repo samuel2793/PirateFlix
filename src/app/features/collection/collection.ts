@@ -181,6 +181,11 @@ export class CollectionComponent implements OnInit, OnDestroy {
     }
   }
 
+  @HostListener('window:pirateflix-language-updated')
+  onLanguageUpdated() {
+    this.resetAndLoad();
+  }
+
   // Filter actions
   setGenreFilter(genreId: number | null) {
     this.activeFilters.update(f => ({

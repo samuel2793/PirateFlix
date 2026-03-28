@@ -1,23 +1,39 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { APP_CONFIG } from '../config/app-config-public';
+import { LanguageService } from '../../shared/services/language.service';
 
 type MediaType = 'movie' | 'tv';
 
 @Injectable({ providedIn: 'root' })
 export class TmdbService {
   private readonly http = inject(HttpClient);
+  private readonly languageService = inject(LanguageService);
   private readonly baseUrl = APP_CONFIG.tmdb.baseUrl;
   private readonly key = APP_CONFIG.tmdb.apiKey;
-  private readonly lang = APP_CONFIG.tmdb.language;
-  private readonly region = APP_CONFIG.tmdb.region;
+  private readonly defaultLang = APP_CONFIG.tmdb.language;
+  private readonly defaultRegion = APP_CONFIG.tmdb.region;
+
+  private requestLang() {
+    const lang = this.languageService.currentLang();
+    if (lang === 'es') return 'es-ES';
+    if (lang === 'en') return 'en-US';
+    return this.defaultLang;
+  }
+
+  private requestRegion() {
+    const lang = this.languageService.currentLang();
+    if (lang === 'es') return 'ES';
+    if (lang === 'en') return 'US';
+    return this.defaultRegion;
+  }
 
   trending(type: MediaType, timeWindow: 'day' | 'week' = 'day') {
     return this.http.get<any>(`${this.baseUrl}/trending/${type}/${timeWindow}`, {
       params: {
         api_key: this.key,
-        language: this.lang,
-        region: this.region,
+        language: this.requestLang(),
+        region: this.requestRegion(),
       },
     });
   }
@@ -27,8 +43,8 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/${type}/popular`, {
       params: {
         api_key: this.key,
-        language: this.lang,
-        region: this.region,
+        language: this.requestLang(),
+        region: this.requestRegion(),
         page: String(page),
       },
     });
@@ -39,8 +55,8 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/${type}/top_rated`, {
       params: {
         api_key: this.key,
-        language: this.lang,
-        region: this.region,
+        language: this.requestLang(),
+        region: this.requestRegion(),
         page: String(page),
       },
     });
@@ -51,8 +67,8 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/movie/now_playing`, {
       params: {
         api_key: this.key,
-        language: this.lang,
-        region: this.region,
+        language: this.requestLang(),
+        region: this.requestRegion(),
         page: String(page),
       },
     });
@@ -63,8 +79,8 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/movie/upcoming`, {
       params: {
         api_key: this.key,
-        language: this.lang,
-        region: this.region,
+        language: this.requestLang(),
+        region: this.requestRegion(),
         page: String(page),
       },
     });
@@ -75,7 +91,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/tv/on_the_air`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
         page: String(page),
       },
     });
@@ -86,7 +102,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/tv/airing_today`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
         page: String(page),
       },
     });
@@ -97,8 +113,8 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/discover/${type}`, {
       params: {
         api_key: this.key,
-        language: this.lang,
-        region: this.region,
+        language: this.requestLang(),
+        region: this.requestRegion(),
         page: String(page),
         with_genres: String(genreId),
         sort_by: 'popularity.desc',
@@ -117,7 +133,7 @@ export class TmdbService {
   } = {}) {
     const params: any = {
       api_key: this.key,
-      language: this.lang,
+      language: this.requestLang(),
       page: String(options.page || 1),
       sort_by: options.sortBy || 'popularity.desc',
     };
@@ -141,7 +157,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/genre/${type}/list`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }
@@ -150,7 +166,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/${type}/${id}`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }
@@ -159,7 +175,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/${type}/${id}/credits`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }
@@ -168,7 +184,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/${type}/${id}/videos`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }
@@ -177,7 +193,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/tv/${id}/season/${season}`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }
@@ -186,11 +202,11 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/search/multi`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
         query,
         page,
         include_adult: 'false',
-        region: this.region,
+        region: this.requestRegion(),
       },
     });
   }
@@ -200,7 +216,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/person/${id}`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }
@@ -209,7 +225,7 @@ export class TmdbService {
     return this.http.get<any>(`${this.baseUrl}/person/${id}/combined_credits`, {
       params: {
         api_key: this.key,
-        language: this.lang,
+        language: this.requestLang(),
       },
     });
   }

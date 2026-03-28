@@ -1,4 +1,4 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import { Component, inject, signal, computed, HostListener } from '@angular/core';
 import { CommonModule, LowerCasePipe } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
@@ -48,6 +48,15 @@ export class PersonComponent {
   showFullBio = signal(false);
 
   async ngOnInit() {
+    await this.loadPersonData();
+  }
+
+  @HostListener('window:pirateflix-language-updated')
+  onLanguageUpdated() {
+    void this.loadPersonData();
+  }
+
+  private async loadPersonData() {
     try {
       const idStr = this.route.snapshot.paramMap.get('id');
       const id = idStr ? Number(idStr) : NaN;
@@ -57,6 +66,8 @@ export class PersonComponent {
         return;
       }
 
+      this.loading.set(true);
+      this.error.set(null);
       const [personData, creditsData] = await Promise.all([
         firstValueFrom(this.tmdb.personDetails(id)),
         firstValueFrom(this.tmdb.personCredits(id)),

@@ -77,6 +77,7 @@ export class HomeComponent implements OnDestroy {
   private readonly auth = inject(FirebaseAuthService);
   private readonly userData = inject(UserDataService);
   private readonly SETTINGS_STORAGE_KEY = 'pirateflix_settings';
+  private languageContentRefreshInFlight = false;
 
   // Collections
   collections = this.collectionsService.collections;
@@ -215,6 +216,11 @@ export class HomeComponent implements OnDestroy {
     this.refreshProviderBadge();
   }
 
+  @HostListener('window:pirateflix-language-updated')
+  onLanguageUpdated() {
+    void this.reloadLocalizedContent();
+  }
+
   toggleLanguageSubmenu() {
     this.languageSubmenuOpen.update(v => !v);
   }
@@ -251,6 +257,19 @@ export class HomeComponent implements OnDestroy {
       return normalizeTorrentProvider(parsed?.torrentProvider, DEFAULT_TORRENT_PROVIDER);
     } catch {
       return DEFAULT_TORRENT_PROVIDER;
+    }
+  }
+
+  private async reloadLocalizedContent() {
+    if (this.languageContentRefreshInFlight) return;
+    this.languageContentRefreshInFlight = true;
+    try {
+      await Promise.all([this.refreshTrending(), this.loadCollections()]);
+      if (this.query().trim()) {
+        await this.doSearch();
+      }
+    } finally {
+      this.languageContentRefreshInFlight = false;
     }
   }
 

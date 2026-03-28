@@ -118,6 +118,13 @@ export class TranslationService {
       this.unfreezeTranslatableDimensions();
       this.state.update(s => ({ ...s, isLoading: false }));
 
+      // Notificar al resto de la app (TMDB/content) que el idioma cambió.
+      try {
+        this.document.defaultView?.dispatchEvent(
+          new CustomEvent('pirateflix-language-updated', { detail: { lang } })
+        );
+      } catch {}
+
       // Restaurar estado del usuario
       requestAnimationFrame(() => {
         window.scrollTo(scrollX, scrollY);
