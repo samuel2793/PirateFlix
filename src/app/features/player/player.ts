@@ -190,6 +190,7 @@ export class PlayerComponent implements OnInit, OnDestroy {
   preferSeekable = signal<boolean>(false);
   preferSubtitles = signal<boolean>(false);
   forceYearInSearch = signal<boolean>(false);
+  preferredAudioLanguage = signal<string>(this.loadPreferredAudioLanguage());
   
   // Subtitle customization
   subtitleSize = signal<number>(this.loadSubtitlePref('size', 100));
@@ -758,6 +759,31 @@ export class PlayerComponent implements OnInit, OnDestroy {
       if (hasEpisodeTarget) {
         const seasonTag = String(seasonValue).padStart(2, '0');
         const episodeTag = String(episodeValue).padStart(2, '0');
+
+        // Si el idioma preferido NO es inglés, buscar primero en ese idioma (TV)
+        const userPreferredLangTV = this.preferredAudioLanguage().toLowerCase();
+        if (userPreferredLangTV !== 'english' && userPreferredLangTV !== 'en' && userPreferredLangTV !== 'eng') {
+          const tvLangName = userPreferredLangTV === 'español' ? 'spanish'
+            : userPreferredLangTV === 'latino' ? 'latino'
+            : userPreferredLangTV === 'français' ? 'french'
+            : userPreferredLangTV === 'deutsch' ? 'german'
+            : userPreferredLangTV === 'italiano' ? 'italian'
+            : userPreferredLangTV === 'português' ? 'portuguese'
+            : userPreferredLangTV === '日本語' ? 'japanese'
+            : userPreferredLangTV;
+          // Queries del idioma preferido PRIMERO
+          pushQuery(queryTitle, `S${seasonTag}E${episodeTag}`, tvLangName);
+          pushQuery(queryTitle, `S${seasonTag}E${episodeTag}`, 'dual audio');
+          if (userPreferredLangTV === 'español') {
+            pushQuery(queryTitle, `S${seasonTag}E${episodeTag}`, 'castellano');
+          } else if (userPreferredLangTV === 'latino') {
+            pushQuery(queryTitle, `S${seasonTag}E${episodeTag}`, 'latin');
+          }
+          pushQuery(queryTitle, `S${seasonTag}E${episodeTag}`, 'multi');
+          pushQuery(queryTitle, `S${seasonTag}`, 'dual audio');
+        }
+
+        // Queries genéricas después
         const episodeTags = [
           `S${seasonTag}E${episodeTag}`,
           `S${seasonValue}E${episodeValue}`,
@@ -789,6 +815,33 @@ export class PlayerComponent implements OnInit, OnDestroy {
           pushQuery(queryTitle);
         }
       } else {
+        const userPreferredLang = this.preferredAudioLanguage().toLowerCase();
+        const isNonEnglish = userPreferredLang !== 'english' && userPreferredLang !== 'en' && userPreferredLang !== 'eng';
+
+        // Si el idioma preferido NO es inglés, buscar primero en ese idioma
+        if (isNonEnglish) {
+          const movieLangName = userPreferredLang === 'español' ? 'spanish'
+            : userPreferredLang === 'latino' ? 'latino'
+            : userPreferredLang === 'français' ? 'french'
+            : userPreferredLang === 'deutsch' ? 'german'
+            : userPreferredLang === 'italiano' ? 'italian'
+            : userPreferredLang === 'português' ? 'portuguese'
+            : userPreferredLang === '日本語' ? 'japanese'
+            : userPreferredLang;
+          // Queries del idioma preferido PRIMERO para que se ejecuten antes del timeout  
+          pushQuery(queryTitle, year, movieLangName);
+          pushQuery(queryTitle, year, 'dual audio');
+          if (userPreferredLang === 'español') {
+            pushQuery(queryTitle, year, 'castellano');
+          } else if (userPreferredLang === 'latino') {
+            pushQuery(queryTitle, year, 'latin');
+          }
+          pushQuery(queryTitle, year, 'multi audio');
+          pushQuery(queryTitle, 'dual audio');
+          pushQuery(queryTitle, year, 'multi');
+        }
+
+        // Queries genéricas (por resolución y sin filtro de idioma)
         const baseQueries = [
           normalizeQuery(`${queryTitle} ${year} 1080p`),
           normalizeQuery(`${queryTitle} ${year} 720p`),
@@ -802,14 +855,49 @@ export class PlayerComponent implements OnInit, OnDestroy {
 
       const getSeeders = (torrent: any) => Number(torrent?.seeders) || 0;
       const multiAudioHintRegex =
-        /\b(dual\s*audio|dual-audio|dualaudio|multi\s*audio|multi-audio|multiaudio|multi\s*lang|multi-lang|multilang)\b/i;
+        /\b(dual\s*audio|dual-audio|dualaudio|dual|multi\s*audio|multi-audio|multiaudio|multi\s*lang|multi-lang|multilang)\b/i;
       const hasMultiAudioHint = (name: string) => multiAudioHintRegex.test(name);
       const seekableHintRegex =
         /\b(mp4|x264|h\.?264|web[-\s]?dl|webrip)\b/i;
       const hasSeekableHint = (name: string) => seekableHintRegex.test(name);
       const subtitlesHintRegex =
-        /\b(subs?|subtitles?|subtitulado|castellano|spa(nish)?|lat(ino)?|esp|espa[ñn]ol)\b/i;
+        /\b(subs?|subtitles?|subtitulado|castellano|cast|spa(nish)?|lat(ino)?|esp|espa[ñn]ol)\b/i;
       const hasSubtitlesHint = (name: string) => subtitlesHintRegex.test(name);
+
+      // Build regex to detect preferred language in torrent names
+      const langSearchAliases: Record<string, string[]> = {
+        'español': ['spanish', 'espa[ñn]ol', 'castellano', 'cast'],
+        'latino': ['latino?', 'lat', 'latin'],
+        'english': ['english', 'eng'],
+        'français': ['french', 'fran[cç]ais', 'fra'],
+        'deutsch': ['german', 'deutsch', 'ger'],
+        'italiano': ['italian', 'italiano', 'ita'],
+        'português': ['portuguese', 'portugu[eê]s', 'por'],
+        '日本語': ['japanese', 'jpn'],
+      };
+      // Exclusion regex: español excludes latino, latino excludes castellano
+      const langExclusionAliases: Record<string, string[]> = {
+        'español': ['latino?', 'lat(?!e)', 'latin(?!o)'],
+        'latino': ['castellano', 'cast(?!\\w)'],
+      };
+      const prefLang = this.preferredAudioLanguage().toLowerCase();
+      let prefLangAliases: string[] = [];
+      let prefLangExclusion: RegExp | null = null;
+      for (const [key, aliases] of Object.entries(langSearchAliases)) {
+        if (key.toLowerCase() === prefLang || aliases.some(a => a.replace(/\[.*?\]/g, '').toLowerCase() === prefLang)) {
+          prefLangAliases = aliases;
+          const excl = langExclusionAliases[key.toLowerCase()];
+          if (excl) {
+            prefLangExclusion = new RegExp(`\\b(${excl.join('|')})\\b`, 'i');
+          }
+          break;
+        }
+      }
+      const prefLangRegex = prefLangAliases.length > 0
+        ? new RegExp(`\\b(${prefLangAliases.join('|')})\\b`, 'i')
+        : null;
+      const hasPreferredLangHint = (name: string) => prefLangRegex ? prefLangRegex.test(name) : false;
+      const hasExcludedLangHint = (name: string) => prefLangExclusion ? prefLangExclusion.test(name) : false;
 
       const categoriesToTry = type === 'tv' ? [208, 205, 0] : [207, 200, 0];
       let anyTimedOut = false;
@@ -1154,7 +1242,6 @@ export class PlayerComponent implements OnInit, OnDestroy {
                 )
               )
             : [];
-
         const episodeCompatible = hasEpisodeTarget
           ? sortBySeeders(
               candidateTorrents.filter((t: any) => {
@@ -1187,49 +1274,161 @@ export class PlayerComponent implements OnInit, OnDestroy {
             )
           : [];
 
-        const shouldPreferSeasonPack = hasEpisodeTarget && seasonPackCompatible.length > 0;
+        const shouldPreferSeasonPack =
+          hasEpisodeTarget && episodeCompatible.length === 0 && seasonPackCompatible.length > 0;
 
-        const bestTorrent =
-          preferSubtitles && subtitlesHinted.length > 0
-            ? subtitlesHinted[0]
-          : preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0
-            ? multiAudioSeekableHinted[0]
-          : preferSeekable && seekableHinted.length > 0
-            ? seekableHinted[0]
-          : preferMultiAudio && multiAudioHinted.length > 0
-            ? multiAudioHinted[0]
-          : shouldPreferSeasonPack
-            ? seasonPackCompatible[0]
-            : ytsTorrents.length > 0
-            ? ytsTorrents[0]
-            : h264QualityGoodAudio.length > 0
-            ? h264QualityGoodAudio[0]
-            : h264QualitySorted.length > 0
-            ? h264QualitySorted[0]
-            : h264Any.length > 0
-            ? h264Any[0]
-            : candidateTorrents[0];
+        // Torrents con el idioma preferido exacto (ej: "spanish", "castellano", "latino")
+        // Excluye el idioma opuesto (español excluye latino, latino excluye castellano)
+        // Prioriza H.264, pero permite H.265 (será transcodificado por el servidor)
+        const exactLangH264 = prefLangRegex
+          ? sortBySeeders(
+              candidateTorrents.filter((t: any) => {
+                const name = String(t?.name || '');
+                return (
+                  hasPreferredLangHint(name) &&
+                  !hasExcludedLangHint(name) &&
+                  !incompatibleCodec(name) &&
+                  !lowQuality(name)
+                );
+              })
+            )
+          : [];
+        const exactLangH265 = prefLangRegex
+          ? sortBySeeders(
+              candidateTorrents.filter((t: any) => {
+                const name = String(t?.name || '');
+                return (
+                  hasPreferredLangHint(name) &&
+                  !hasExcludedLangHint(name) &&
+                  incompatibleCodec(name) &&
+                  !lowQuality(name)
+                );
+              })
+            )
+          : [];
+        const exactLangTorrents = [...exactLangH264, ...exactLangH265];
 
-        if (ytsTorrents.length > 0) {
-          console.log(`✅ Seleccionado torrent YTS (H.264 + AAC - Calidad excelente)`);
-        } else if (shouldPreferSeasonPack && seasonPackCompatible[0] === bestTorrent) {
-          console.log(
-            `✅ Seleccionado pack de temporada compatible para localizar episodio dentro del torrent`
-          );
-          this.pushLoadingLog(
-            'Usando pack de temporada (más estable) para localizar el episodio',
-            'warn'
-          );
-        } else if (h264QualityGoodAudio.length > 0 && h264QualityGoodAudio[0] === bestTorrent) {
-          console.log(`✅ Seleccionado H.264 de calidad con audio compatible`);
-        } else if (h264Quality.length > 0 && h264Quality[0] === bestTorrent) {
-          console.log(`⚠️ H.264 de calidad pero con audio avanzado (video OK, audio puede fallar)`);
-        } else if (h264Any.length > 0 && h264Any[0] === bestTorrent) {
-          console.log(`⚠️ H.264 pero BAJA CALIDAD (TS/CAM)`);
-        } else {
-          console.log(`❌ ADVERTENCIA: Video HEVC/x265 - NO compatible con navegadores`);
-          console.log(`   El video NO se verá. Busca manualmente un torrent con H.264 o x264`);
+        // Torrents multi-audio / dual audio (contienen el idioma preferido implícitamente)
+        // Para español (castellano): solo aceptar dual/multi si el nombre tiene hint de castellano,
+        // porque "Dual" sin más casi siempre es English+Latino
+        const multiAudioCompatible = sortBySeeders(
+          candidateTorrents.filter((t: any) => {
+            const name = String(t?.name || '');
+            if (!hasMultiAudioHint(name) || lowQuality(name)) return false;
+            if (prefLang === 'español') {
+              return /\b(cast(ellano)?|spa(nish)?|espa[ñn]ol)\b/i.test(name);
+            }
+            if (prefLang === 'latino') {
+              return /\b(latino?|lat(in)?)\b/i.test(name);
+            }
+            return true;
+          })
+        );
+
+        // Combinados: idioma exacto + multi-audio (para el fallback chain)
+        const preferredLangTorrents = prefLangRegex
+          ? sortBySeeders(
+              exactLangTorrents.concat(
+                multiAudioCompatible.filter((t: any) => !exactLangTorrents.includes(t))
+              )
+            )
+          : [];
+
+        const isNonEnglishPreferred =
+          prefLang !== 'english' && prefLang !== 'en' && prefLang !== 'eng';
+
+        // Logging de diagnóstico de selección por idioma
+        console.log(
+          `🔍 Idioma preferido: "${prefLang}" (${isNonEnglishPreferred ? 'NO inglés' : 'inglés'})`
+        );
+        console.log(`🔍 prefLangRegex: ${prefLangRegex}`);
+        console.log(`🔍 Candidatos totales: ${candidateTorrents.length}`);
+        console.log(
+          `🔍 Con idioma exacto H.264 (${prefLang}): ${exactLangH264.length}${
+            exactLangH264.length > 0
+              ? ' → ' + exactLangH264.map((t: any) => t.name).join(', ')
+              : ''
+          }`
+        );
+        console.log(
+          `🔍 Con idioma exacto H.265 (${prefLang}): ${exactLangH265.length}${
+            exactLangH265.length > 0
+              ? ' → ' + exactLangH265.map((t: any) => t.name).join(', ')
+              : ''
+          }`
+        );
+        console.log(
+          `🔍 Multi/dual audio: ${multiAudioCompatible.length}${
+            multiAudioCompatible.length > 0
+              ? ' → ' + multiAudioCompatible.map((t: any) => t.name).join(', ')
+              : ''
+          }`
+        );
+        console.log(`🔍 YTS: ${ytsTorrents.length}`);
+        if (
+          isNonEnglishPreferred &&
+          exactLangTorrents.length === 0 &&
+          multiAudioCompatible.length === 0
+        ) {
+          console.warn(`⚠️ No se encontraron torrents en ${prefLang} ni dual/multi audio`);
+          this.pushLoadingLog(`No se encontró torrent en ${prefLang}, usando inglés`, 'warn');
         }
+
+        // Selección de mejor torrent según idioma preferido:
+        // - Si el idioma preferido NO es inglés:
+        //   1. Torrent con idioma exacto (spanish, castellano, latino...)
+        //   2. Torrent dual/multi audio
+        //   3. YTS (suele ser inglés pero buena calidad)
+        //   4. H.264 compatible genérico
+        // - Si el idioma preferido ES inglés:
+        //   1. YTS (inglés garantizado, calidad excelente)
+        //   2. H.264 de calidad con buen audio
+        //   3. Genérico
+        let bestTorrent: any;
+        let selectionReason = '';
+
+        if (isNonEnglishPreferred && exactLangH264.length > 0) {
+          bestTorrent = exactLangH264[0];
+          selectionReason = `🌐 Idioma preferido (${prefLang}) encontrado directamente`;
+        } else if (isNonEnglishPreferred && multiAudioCompatible.length > 0) {
+          bestTorrent = multiAudioCompatible[0];
+          selectionReason = `🌐 Dual/Multi audio (probable ${prefLang})`;
+        } else if (isNonEnglishPreferred && exactLangH265.length > 0) {
+          bestTorrent = exactLangH265[0];
+          selectionReason = `🔄 Idioma preferido (${prefLang}) en HEVC - se transcodificará`;
+        } else if (isNonEnglishPreferred && preferSubtitles && subtitlesHinted.length > 0) {
+          bestTorrent = subtitlesHinted[0];
+          selectionReason = `🌐 Con subtítulos (fallback para ${prefLang})`;
+        } else if (shouldPreferSeasonPack) {
+          bestTorrent = seasonPackCompatible[0];
+          selectionReason = '📦 Pack de temporada compatible para localizar episodio';
+        } else if (ytsTorrents.length > 0) {
+          bestTorrent = ytsTorrents[0];
+          selectionReason = '✅ YTS (H.264 + AAC - inglés, calidad excelente)';
+        } else if (preferMultiAudio && preferSeekable && multiAudioSeekableHinted.length > 0) {
+          bestTorrent = multiAudioSeekableHinted[0];
+          selectionReason = '✅ Multi audio + seekable';
+        } else if (preferSeekable && seekableHinted.length > 0) {
+          bestTorrent = seekableHinted[0];
+          selectionReason = '✅ Seekable (MP4/x264/WebDL)';
+        } else if (preferMultiAudio && multiAudioHinted.length > 0) {
+          bestTorrent = multiAudioHinted[0];
+          selectionReason = '✅ Multi audio';
+        } else if (h264QualityGoodAudio.length > 0) {
+          bestTorrent = h264QualityGoodAudio[0];
+          selectionReason = '✅ H.264 de calidad con audio compatible';
+        } else if (h264QualitySorted.length > 0) {
+          bestTorrent = h264QualitySorted[0];
+          selectionReason = '⚠️ H.264 de calidad (audio avanzado, puede fallar)';
+        } else if (h264Any.length > 0) {
+          bestTorrent = h264Any[0];
+          selectionReason = '⚠️ H.264 baja calidad (TS/CAM)';
+        } else {
+          bestTorrent = candidateTorrents[0];
+          selectionReason = '🔄 HEVC/x265 - se transcodificará automáticamente';
+        }
+
+        console.log(selectionReason);
         console.log(`Torrent seleccionado: ${bestTorrent.name}`);
         console.log(`Seeders: ${bestTorrent.seeders}, Tamaño: ${bestTorrent.size}`);
         this.pushLoadingLog(`Torrent seleccionado: ${bestTorrent.name}`);
@@ -1251,8 +1450,25 @@ export class PlayerComponent implements OnInit, OnDestroy {
           }
         };
 
-        if (preferSubtitles) {
-          pushUnique(subtitlesHinted);
+        // Orden de fallback de candidatos según idioma preferido
+        if (isNonEnglishPreferred) {
+          // Idioma no-inglés: primero idioma exacto, luego multi-audio, luego el resto
+          pushUnique(exactLangTorrents);
+          pushUnique(multiAudioCompatible);
+          if (preferSubtitles) {
+            pushUnique(subtitlesHinted);
+          }
+        } else {
+          // Inglés: YTS primero, luego seekable/multi-audio
+          if (preferSubtitles) {
+            pushUnique(subtitlesHinted);
+          }
+        }
+        if (preferredLangTorrents.length > 0) {
+          pushUnique(preferredLangTorrents);
+        }
+        if (hasEpisodeTarget) {
+          pushUnique(episodeCompatible);
         }
         if (preferMultiAudio && preferSeekable) {
           pushUnique(multiAudioSeekableHinted);
@@ -2088,17 +2304,52 @@ export class PlayerComponent implements OnInit, OnDestroy {
   }
 
   private async loadAudioTracks(infoHash: string, fileIndex: number) {
-    try {
-      const normalized = await this.fetchAudioTracks(infoHash, fileIndex);
+    const maxRetries = 3;
+    const retryDelays = [0, 5000, 10000]; // ms: immediate, 5s, 10s
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      if (attempt > 0) {
+        console.log(`🔊 Reintentando detección de audio (intento ${attempt + 1}/${maxRetries}) en ${retryDelays[attempt] / 1000}s...`);
+        await new Promise(r => setTimeout(r, retryDelays[attempt]));
+      }
+
+      // Abort if torrent changed while waiting
       if (this.currentTorrentHash !== infoHash || this.currentVideoFileIndex !== fileIndex) {
         return;
       }
 
-      this.audioTracks.set(normalized);
-    } catch (error) {
-      console.error('Error al detectar pistas de audio:', error);
-      this.audioTracks.set([]);
+      try {
+        const normalized = await this.fetchAudioTracks(infoHash, fileIndex);
+        if (this.currentTorrentHash !== infoHash || this.currentVideoFileIndex !== fileIndex) {
+          return;
+        }
+
+        if (normalized.length > 0) {
+          this.audioTracks.set(normalized);
+          console.log(`🔊 Pistas de audio detectadas: ${normalized.length}`);
+          this.pushLoadingLog(`Pistas de audio: ${normalized.length}`);
+
+          // Auto-select preferred audio language if multiple tracks
+          if (normalized.length > 1) {
+            this.autoSelectPreferredAudioTrack(normalized);
+          }
+          return; // Success, no need to retry
+        }
+
+        // If empty and we have more retries, continue the loop
+        if (attempt < maxRetries - 1) {
+          console.log(`🔊 No se detectaron pistas de audio, reintentando...`);
+        }
+      } catch (error) {
+        console.error('Error al detectar pistas de audio:', error);
+        if (attempt >= maxRetries - 1) {
+          this.audioTracks.set([]);
+        }
+      }
     }
+
+    // All retries exhausted with no tracks found
+    console.log('🔊 No se pudieron detectar pistas de audio después de todos los intentos');
   }
 
   async onAudioTrackChange(eventOrTrack: Event | 'auto' | number) {
@@ -3643,8 +3894,102 @@ export class PlayerComponent implements OnInit, OnDestroy {
     this.showSubtitleSyncWindow.set(false);
   }
 
+  setPreferredAudioLanguage(language: string) {
+    this.savePreferredAudioLanguage(language);
+    // Try to auto-select if tracks are already loaded
+    const tracks = this.audioTracks();
+    if (tracks.length > 1) {
+      this.autoSelectPreferredAudioTrack(tracks);
+    }
+  }
+
   selectAudioTrack(track: 'auto' | number) {
+    // Save language preference when user manually selects a track
+    if (track !== 'auto') {
+      const tracks = this.audioTracks();
+      const selected = tracks.find(t => t.index === track);
+      if (selected?.language) {
+        this.savePreferredAudioLanguage(selected.language);
+      }
+    }
     void this.onAudioTrackChange(track);
+  }
+
+  private loadPreferredAudioLanguage(): string {
+    try {
+      // Read from pirateflix_settings (same key the Settings page uses)
+      const settingsRaw = localStorage.getItem('pirateflix_settings');
+      if (settingsRaw) {
+        const settings = JSON.parse(settingsRaw);
+        const code = settings.preferredAudioLang;
+        if (code) {
+          const codeToLang: Record<string, string> = {
+            'es': 'español', 'lat': 'latino', 'en': 'english',
+            'fr': 'français', 'de': 'deutsch', 'it': 'italiano',
+            'pt': 'português', 'ja': '日本語', 'original': 'english',
+          };
+          return codeToLang[code] || code;
+        }
+      }
+      // Fallback to legacy key
+      return localStorage.getItem('pirateflix_preferred_audio_lang') || 'English';
+    } catch {
+      return 'English';
+    }
+  }
+
+  private savePreferredAudioLanguage(language: string) {
+    try {
+      localStorage.setItem('pirateflix_preferred_audio_lang', language);
+      this.preferredAudioLanguage.set(language);
+    } catch {}
+  }
+
+  private autoSelectPreferredAudioTrack(tracks: AudioTrack[]) {
+    if (tracks.length <= 1) return;
+    if (this.selectedAudioTrack() !== 'auto') return;
+
+    const preferred = this.preferredAudioLanguage().toLowerCase();
+
+    // Map common language names/codes to match variants
+    const languageAliases: Record<string, string[]> = {
+      'español': ['español', 'spanish', 'spa', 'es', 'esp', 'castellano', 'cast'],
+      'latino': ['latino', 'lat', 'latin', 'la'],
+      'english': ['english', 'eng', 'en', 'inglés'],
+      'français': ['français', 'french', 'fra', 'fre', 'fr', 'francés'],
+      'deutsch': ['deutsch', 'german', 'deu', 'ger', 'de', 'alemán'],
+      'italiano': ['italiano', 'italian', 'ita', 'it'],
+      'português': ['português', 'portuguese', 'por', 'pt', 'portugués'],
+      '日本語': ['日本語', 'japanese', 'jpn', 'ja', 'japonés'],
+    };
+
+    // Find which alias group the preferred language belongs to
+    let matchAliases = [preferred];
+    for (const [key, aliases] of Object.entries(languageAliases)) {
+      if (aliases.includes(preferred) || key.toLowerCase() === preferred) {
+        matchAliases = aliases;
+        break;
+      }
+    }
+
+    // Try to find a track matching the preferred language
+    const matchedTrack = tracks.find(t => {
+      const lang = (t.language || '').toLowerCase();
+      const title = (t.title || '').toLowerCase();
+      return matchAliases.some(alias =>
+        lang.includes(alias) || title.includes(alias)
+      );
+    });
+
+    if (matchedTrack && !matchedTrack.default) {
+      console.log(`🔊 Auto-seleccionando pista de audio: ${matchedTrack.language} (${matchedTrack.title})`);
+      this.pushLoadingLog(`Audio: seleccionando ${matchedTrack.language} automáticamente`);
+      void this.onAudioTrackChange(matchedTrack.index);
+    } else if (matchedTrack && matchedTrack.default) {
+      console.log(`🔊 Pista preferida (${matchedTrack.language}) ya es la predeterminada`);
+    } else {
+      console.log(`🔊 No se encontró pista de audio para: ${this.preferredAudioLanguage()}`);
+    }
   }
 
   selectSubtitleTrack(index: number) {

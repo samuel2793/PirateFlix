@@ -13,6 +13,7 @@ import fs from 'fs';
 import dns from 'dns';
 import * as zlib from 'zlib';
 import { fileURLToPath } from 'url';
+import { execFile } from 'child_process';
 
 const app = express();
 const PORT = 3001;
@@ -55,6 +56,15 @@ const EXTENDED_MIRROR_TIMEOUT_MS = parseInt(
 const FAST_PARALLEL_MIRRORS = parseInt(process.env.PIRATEFLIX_FAST_PARALLEL_MIRRORS || '3', 10); // mirrors to probe first
 const MIRROR_RETRY_COUNT = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_COUNT || '0', 10);
 const MIRROR_RETRY_DELAY_MS = parseInt(process.env.PIRATEFLIX_MIRROR_RETRY_DELAY_MS || '500', 10);
+
+// 1337x mirrors (excelente para contenido en español/latino y dual audio)
+const MIRRORS_1337X = Object.freeze([
+  'https://1337x.to',
+  'https://1337x.st',
+  'https://1337x.ws',
+  'https://1337x.is',
+  'https://1337x.gd',
+]);
 
 // Torrent providers registry.
 // Add new providers here and wire their search URL strategy.
@@ -99,6 +109,24 @@ const TORRENT_PROVIDERS = Object.freeze({
         return `${base}/search/${encodeURIComponent(cleanQuery)}/category/${slug}/`;
       }
       return `${base}/search/${encodeURIComponent(cleanQuery)}/`;
+    },
+  }),
+  grantorrent: Object.freeze({
+    id: 'grantorrent',
+    label: 'GranTorrent',
+    mirrors: Object.freeze(['https://www3.grantorrent.lol']),
+    enableYtsFallback: false,
+    buildSearchUrl(base, cleanQuery) {
+      return `${base}/?s=${encodeURIComponent(cleanQuery)}&filtro=`;
+    },
+  }),
+  '1337x': Object.freeze({
+    id: '1337x',
+    label: '1337x',
+    mirrors: MIRRORS_1337X,
+    enableYtsFallback: false,
+    buildSearchUrl(base, cleanQuery) {
+      return `${base}/search/${encodeURIComponent(cleanQuery)}/1/`;
     },
   }),
 });
@@ -735,6 +763,39 @@ app.use(cors());
 app.use(express.json());
 
 // =====================
+// Tracker list (must be before WebTorrent client creation)
+// =====================
+const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.tiny-vps.com:6969/announce',
+  'udp://tracker.leechers-paradise.org:6969/announce',
+  'udp://tracker.coppersurfer.tk:6969/announce',
+  'udp://p4p.arenabg.com:1337/announce',
+  'udp://9.rarbg.me:2780/announce',
+  'udp://tracker.pirateparty.gr:6969/announce',
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.btorrent.xyz',
+  'wss://tracker.fastcast.nz',
+];
+
+const ADD_TORRENT_TIMEOUT_MS = parseInt(
+  process.env.PIRATEFLIX_ADD_TORRENT_TIMEOUT_MS || '30000',
+  10
+);
+const DOWNLOAD_TORRENT_TIMEOUT_MS = parseInt(
+  process.env.PIRATEFLIX_DOWNLOAD_TORRENT_TIMEOUT_MS || '15000',
+  10
+);
+const DOWNLOAD_TORRENT_RETRIES = parseInt(
+  process.env.PIRATEFLIX_DOWNLOAD_TORRENT_RETRIES || '1',
+  10
+);
+
+// =====================
 // WebTorrent client RECREABLE (esto es clave para "reset" real)
 // =====================
 let client = null;
@@ -747,7 +808,12 @@ function wireClientEvents(c) {
 }
 
 function createWebTorrentClient() {
-  const c = new WebTorrent();
+  const c = new WebTorrent({
+    maxConns: 100,
+    tracker: {
+      announce: DEFAULT_TRACKERS,
+    },
+  });
   wireClientEvents(c);
   return c;
 }
@@ -804,12 +870,6 @@ const H264_HINT_RE = /\b(x264|h\.?264|avc|web[-\s]?dl|web[-\s]?rip|hdtv)\b/i;
 const INCOMPATIBLE_AUDIO_HINT_RE =
   /\b(atmos|truehd|ddp|dd\+|eac3|ac-?3|dts|dd5\.?1|dd5\+1|dd\s*5\.?1|dolby)\b/i;
 const COMPATIBLE_AUDIO_HINT_RE = /\b(aac|mp3)\b/i;
-const DEFAULT_TRACKERS = [
-  'udp://tracker.opentrackr.org:1337/announce',
-  'udp://tracker.openbittorrent.com:6969/announce',
-  'udp://tracker.torrent.eu.org:451/announce',
-  'udp://open.stealth.si:80/announce',
-];
 
 // --- NUEVO: tracking de streams activos por torrent ---
 // Esto evita destruir torrents mientras el navegador todavía hace Range requests,
@@ -1272,22 +1332,77 @@ if (STORAGE_SWEEP_INTERVAL_MS > 0) {
   }
 }
 
+function buildTorrentFilePathCandidates(torrent, file) {
+  const candidates = [];
+  const pushCandidate = (value) => {
+    if (!value) return;
+    const normalized = path.normalize(String(value));
+    if (!normalized) return;
+    if (!candidates.includes(normalized)) {
+      candidates.push(normalized);
+    }
+  };
+
+  const filePath = String(file?.path || '').trim();
+  const fileName = String(file?.name || '').trim();
+  const torrentName = String(torrent?.name || '').trim();
+  const torrentPath = String(torrent?.path || TORRENT_DIR).trim();
+
+  if (path.isAbsolute(filePath)) {
+    pushCandidate(filePath);
+  } else {
+    pushCandidate(path.join(torrentPath, filePath));
+    pushCandidate(path.join(TORRENT_DIR, filePath));
+  }
+  if (fileName) {
+    pushCandidate(path.join(torrentPath, fileName));
+    pushCandidate(path.join(TORRENT_DIR, fileName));
+  }
+  if (fileName && torrentName) {
+    pushCandidate(path.join(torrentPath, torrentName, fileName));
+    pushCandidate(path.join(TORRENT_DIR, torrentName, fileName));
+  }
+
+  return candidates;
+}
+
+function resolveExistingTorrentFilePath(torrent, file) {
+  const candidates = buildTorrentFilePathCandidates(torrent, file);
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch (_) {}
+  }
+  return candidates[0] || null;
+}
+
 // Helper: esperar hasta que el archivo exista en disco y tenga al menos `minBytes` bytes
-async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15000) {
+async function waitForFileOnDisk(file, filePathOrCandidates, minBytes = 1024, timeoutMs = 15000) {
   const start = Date.now();
+  const candidates = (Array.isArray(filePathOrCandidates)
+    ? filePathOrCandidates
+    : [filePathOrCandidates]
+  )
+    .filter(Boolean)
+    .map((item) => path.normalize(String(item)));
+  const requiredBytes = Math.min(minBytes, Number(file?.length || minBytes));
+
   return new Promise((resolve, reject) => {
     const check = () => {
       try {
         try {
-          file.select(0, Math.min(minBytes, file.length));
+          file.select(0, Math.min(requiredBytes, Number(file?.length || requiredBytes)));
         } catch (e) {
           // ignore
         }
 
-        if (fs.existsSync(filePath)) {
-          const stat = fs.statSync(filePath);
-          if (stat.size >= Math.min(minBytes, file.length) || file.downloaded > 0) {
-            return resolve();
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+          if (fs.existsSync(candidate)) {
+            const stat = fs.statSync(candidate);
+            if (stat.size >= requiredBytes || Number(file?.downloaded || 0) > 0) {
+              return resolve(candidate);
+            }
           }
         }
 
@@ -1300,6 +1415,46 @@ async function waitForFileOnDisk(file, filePath, minBytes = 1024, timeoutMs = 15
       setTimeout(check, 150);
     };
     check();
+  });
+}
+
+// Helper: ejecutar ffprobe con argumentos mejorados para archivos en descargan
+async function ffprobeWithRetry(filePath, retries = 2) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '-v', 'error',
+      '-probesize', '50000000',
+      '-analyzeduration', '30000000',
+      '-print_format', 'json',
+      '-show_format',
+      '-show_streams',
+      filePath
+    ];
+    
+    const attemptProbe = (attempt) => {
+      execFile('ffprobe', args, (err, stdout, stderr) => {
+        if (err) {
+          if (attempt < retries) {
+            // Si falla y tenemos reintentos, esperar progresivamente más
+            const delay = 1000 * (attempt + 1);
+            setTimeout(() => attemptProbe(attempt + 1), delay);
+            return;
+          }
+          console.error(`ffprobe falló después de ${retries} intentos:`, stderr || err.message);
+          reject(err);
+          return;
+        }
+        
+        try {
+          const metadata = JSON.parse(stdout);
+          resolve(metadata);
+        } catch (parseErr) {
+          reject(new Error('No se pudo analizar resultado de ffprobe: ' + parseErr.message));
+        }
+      });
+    };
+    
+    attemptProbe(0);
   });
 }
 
@@ -1514,6 +1669,7 @@ async function ensureTranscodedFile({
   fileIndex,
   file,
   filePath,
+  filePathCandidates = [],
   mode,
   audioStreamIndex,
 }) {
@@ -1563,7 +1719,17 @@ async function ensureTranscodedFile({
     activeFFmpegProcesses.delete(cacheKey);
   }
 
-  removeTranscodedFiles(cacheKey);
+  // --- Resume support: detect partial progress for logging ---
+  const partialPath = `${cachedPath}.partial`;
+  if (fs.existsSync(partialPath)) {
+    try {
+      const stat = fs.statSync(partialPath);
+      if (stat.size > 256 * 1024) {
+        console.log(`🔄 Previous partial file found (${(stat.size / 1024 / 1024).toFixed(1)} MB). Restarting transcode...`);
+      }
+    } catch (_) {}
+    removeTranscodedFiles(cacheKey);
+  }
 
   const useTorrentStream = Number(file?.downloaded || 0) < Number(file?.length || 0);
   let inputStream = null;
@@ -1571,22 +1737,37 @@ async function ensureTranscodedFile({
     inputStream = file.createReadStream();
   } else {
     try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+      await waitForFileOnDisk(
+        file,
+        filePathCandidates.length > 0 ? filePathCandidates : filePath,
+        Math.min(64 * 1024, file.length),
+        15000
+      );
     } catch (err) {
       console.warn('Advertencia: waitForFileOnDisk falló antes de transcodificar:', err.message);
     }
   }
 
   const inputSource = useTorrentStream ? inputStream : filePath;
-  const partialPath = `${cachedPath}.partial`;
 
-  ffmpeg.ffprobe(filePath, (err, metadata) => {
-    if (err) return;
-    const duration = metadata?.format?.duration;
-    if (Number.isFinite(duration)) {
-      upsertTranscodeStatus(cacheKey, { durationSec: duration });
+  // Get duration for progress tracking - retry with delay if file is still downloading
+  const probeDuration = async () => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const metadata = await ffprobeWithRetry(filePath, 1);
+        const duration = metadata?.format?.duration;
+        if (Number.isFinite(duration) && duration > 0) {
+          upsertTranscodeStatus(cacheKey, { durationSec: duration });
+          console.log(`📏 Duración detectada: ${Math.round(duration)}s`);
+          return;
+        }
+      } catch (_) {}
+      // Wait for more data to download before retrying
+      await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
     }
-  });
+    console.warn('ffprobe: no se pudo determinar duración para progreso');
+  };
+  probeDuration();
 
   const mapOptions = [];
   if (Number.isFinite(audioStreamIndex)) {
@@ -1602,8 +1783,9 @@ async function ensureTranscodedFile({
   const ffmpegCommand = ffmpeg(inputSource)
     .format('mp4')
     .outputOptions(outputOptions)
-    .on('start', () => {
+    .on('start', (cmdLine) => {
       console.log('🔄 FFmpeg preparando MP4 seekable:', cacheKey, `(mode=${mode})`);
+      console.log('📋 FFmpeg cmd:', cmdLine);
       upsertTranscodeStatus(cacheKey, { status: 'running' });
     })
     .on('progress', (progress) => {
@@ -1672,7 +1854,7 @@ async function ensureTranscodedFile({
         rejectJob(err);
       } catch (_) {}
     })
-    .on('end', () => {
+    .on('end', async () => {
       if (inputStream) {
         try {
           inputStream.destroy();
@@ -1697,6 +1879,29 @@ async function ensureTranscodedFile({
         } catch (_) {}
         return;
       }
+
+      // Validate transcoded file with ffprobe
+      try {
+        const meta = await ffprobeWithRetry(cachedPath, 1);
+        const vStream = (meta?.streams || []).find(s => s.codec_type === 'video');
+        if (!vStream) throw new Error('No video stream in transcoded file');
+        const duration = Number(meta?.format?.duration);
+        if (!Number.isFinite(duration) || duration < 1) {
+          throw new Error(`Invalid duration: ${duration}`);
+        }
+        const fileStat = fs.statSync(cachedPath);
+        console.log(`✅ Validación OK: ${vStream.codec_name} ${vStream.width}x${vStream.height}, ${Math.round(duration)}s, ${(fileStat.size / 1024 / 1024).toFixed(1)} MB`);
+      } catch (valErr) {
+        console.error('❌ Archivo transcodificado inválido:', valErr.message);
+        transcodedCache.delete(cacheKey);
+        removeTranscodedFiles(cacheKey);
+        transcodeJobs.delete(cacheKey);
+        try {
+          rejectJob(new Error('Transcoded file validation failed: ' + valErr.message));
+        } catch (_) {}
+        return;
+      }
+
       transcodedCache.set(cacheKey, 'ready');
       transcodeJobs.delete(cacheKey);
       upsertTranscodeStatus(cacheKey, { status: 'ready', percent: 100, completedAt: Date.now() });
@@ -1709,11 +1914,10 @@ async function ensureTranscodedFile({
     ffmpegCommand
       .videoCodec('libx264')
       .audioCodec('aac')
-      .audioBitrate('128k')
-      .audioChannels(2)
+      .audioBitrate('192k')
+      .videoFilter('scale=-2:720')
       .outputOptions([
         '-preset ultrafast',
-        '-tune zerolatency',
         '-crf 28',
         '-threads 0',
         '-g 30',
@@ -1725,8 +1929,7 @@ async function ensureTranscodedFile({
     ffmpegCommand
       .videoCodec('copy')
       .audioCodec('aac')
-      .audioBitrate('128k')
-      .audioChannels(2)
+      .audioBitrate('192k')
       .outputOptions(['-threads 0']);
   } else if (mode === 'remux') {
     ffmpegCommand
@@ -1747,6 +1950,7 @@ async function streamTranscodedFile({
   fileIndex,
   file,
   filePath,
+  filePathCandidates = [],
   mode,
   audioStreamIndex,
   res,
@@ -1775,7 +1979,12 @@ async function streamTranscodedFile({
     inputStream = file.createReadStream();
   } else {
     try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+      await waitForFileOnDisk(
+        file,
+        filePathCandidates.length > 0 ? filePathCandidates : filePath,
+        Math.min(64 * 1024, file.length),
+        15000
+      );
     } catch (err) {
       console.warn('Advertencia: waitForFileOnDisk falló antes de streaming:', err.message);
     }
@@ -1904,11 +2113,10 @@ async function streamTranscodedFile({
     ffmpegCommand
       .videoCodec('libx264')
       .audioCodec('aac')
-      .audioBitrate('128k')
-      .audioChannels(2)
+      .audioBitrate('192k')
+      .videoFilter('scale=-2:720')
       .outputOptions([
         '-preset ultrafast',
-        '-tune zerolatency',
         '-crf 28',
         '-threads 0',
         '-g 30',
@@ -1918,8 +2126,7 @@ async function streamTranscodedFile({
     ffmpegCommand
       .videoCodec('copy')
       .audioCodec('aac')
-      .audioBitrate('128k')
-      .audioChannels(2)
+      .audioBitrate('192k')
       .outputOptions(['-threads 0']);
   } else if (mode === 'remux') {
     ffmpegCommand
@@ -1940,6 +2147,7 @@ async function streamSeekFromTime({
   fileIndex,
   file,
   filePath,
+  filePathCandidates = [],
   seekTime,
   mode,
   audioStreamIndex,
@@ -1961,7 +2169,12 @@ async function streamSeekFromTime({
   // Para seek, preferimos el archivo en disco si está disponible
   if (!useTorrentStream) {
     try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+      await waitForFileOnDisk(
+        file,
+        filePathCandidates.length > 0 ? filePathCandidates : filePath,
+        Math.min(64 * 1024, file.length),
+        15000
+      );
     } catch (err) {
       console.warn('Advertencia: waitForFileOnDisk falló antes de seek:', err.message);
     }
@@ -2040,11 +2253,10 @@ async function streamSeekFromTime({
     ffmpegCommand
       .videoCodec('libx264')
       .audioCodec('aac')
-      .audioBitrate('128k')
-      .audioChannels(2)
+      .audioBitrate('192k')
+      .videoFilter('scale=-2:720')
       .outputOptions([
         '-preset ultrafast',
-        '-tune zerolatency',
         '-crf 28',
         '-threads 0',
         '-g 30',
@@ -2054,8 +2266,7 @@ async function streamSeekFromTime({
     ffmpegCommand
       .videoCodec('copy')
       .audioCodec('aac')
-      .audioBitrate('128k')
-      .audioChannels(2);
+      .audioBitrate('192k');
   } else {
     // remux o default - solo copiar
     ffmpegCommand.videoCodec('copy').audioCodec('copy');
@@ -2101,6 +2312,184 @@ async function warmupMirrors(timeoutPer = 3000) {
   } catch (err) {
     console.warn('🔧 Warmup inesperado fallo:', err && err.message ? err.message : err);
   }
+}
+
+// =====================
+// 1337x search provider (gran cobertura de contenido en español, latino, dual audio)
+// =====================
+async function search1337x(query, parentSignal) {
+  const USE_1337X = String(process.env.PIRATEFLIX_USE_1337X || 'true').toLowerCase() === 'true';
+  if (!USE_1337X) return [];
+
+  const timeout1337x = parseInt(process.env.PIRATEFLIX_1337X_TIMEOUT_MS || '10000', 10);
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    Referer: 'https://www.google.com/',
+  };
+
+  const decodeHtml = (value) =>
+    String(value)
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+
+  // Step 1: Search listing page
+  for (const base of MIRRORS_1337X) {
+    if (parentSignal && parentSignal.aborted) break;
+    const searchUrl = `${base}/search/${encodeURIComponent(query)}/1/`;
+    let controller = null;
+    try {
+      controller = new AbortController();
+      if (parentSignal) {
+        parentSignal.addEventListener('abort', () => { try { controller.abort(); } catch (_) {} }, { once: true });
+      }
+
+      console.log(`🔍 1337x buscando: ${searchUrl} (timeout ${timeout1337x}ms)`);
+      const resp = await axios.get(searchUrl, {
+        headers,
+        timeout: timeout1337x,
+        maxRedirects: 5,
+        responseType: 'text',
+        httpsAgent: httpsAgentGlobal,
+        httpAgent: httpAgentGlobal,
+        signal: controller.signal,
+      });
+
+      if (!resp?.data || resp.data.length < 200) continue;
+
+      // Parse search results to extract detail page URLs and basic info
+      const html = resp.data;
+      const rowRegex = /<td\s+class="coll-1 name"[^>]*>[\s\S]*?<\/td>/gi;
+      const seedRegex = /<td\s+class="coll-2 seeds"[^>]*>\s*(\d+)\s*<\/td>/gi;
+      const leechRegex = /<td\s+class="coll-3 leeches"[^>]*>\s*(\d+)\s*<\/td>/gi;
+      const sizeRegex = /<td\s+class="coll-4 size[^"]*"[^>]*>([\s\S]*?)<\/td>/gi;
+
+      // Extract all rows more reliably
+      const tableRowRegex = /<tr>[\s\S]*?<\/tr>/gi;
+      const rows = [];
+      let rowMatch;
+      while ((rowMatch = tableRowRegex.exec(html)) !== null) {
+        const row = rowMatch[0];
+        // Only rows that have the torrent link pattern
+        if (row.includes('coll-1 name') || row.includes('/torrent/')) {
+          rows.push(row);
+        }
+      }
+
+      if (rows.length === 0) {
+        console.log(`1337x: no rows found from ${base}`);
+        continue;
+      }
+
+      // Extract detail links + metadata from rows
+      const results = [];
+      for (const row of rows.slice(0, 10)) {
+        // Extract link to detail page
+        const linkMatch = row.match(/<a\s+href="(\/torrent\/[^"]+)"[^>]*>([^<]+)<\/a>/i);
+        if (!linkMatch) continue;
+        const detailPath = linkMatch[1];
+        const name = decodeHtml(linkMatch[2]).trim();
+
+        // Extract seeders
+        const seedMatch = row.match(/<td\s+class="coll-2 seeds"[^>]*>\s*(\d+)\s*<\/td>/i);
+        const seeders = seedMatch ? parseInt(seedMatch[1], 10) : 0;
+
+        // Extract leechers
+        const leechMatch = row.match(/<td\s+class="coll-3 leeches"[^>]*>\s*(\d+)\s*<\/td>/i);
+        const leechers = leechMatch ? parseInt(leechMatch[1], 10) : 0;
+
+        // Extract size
+        const sizeMatch = row.match(/<td\s+class="coll-4 size[^"]*"[^>]*>([\s\S]*?)<span/i);
+        const size = sizeMatch ? decodeHtml(sizeMatch[1]).trim() : 'Unknown';
+
+        results.push({ name, detailPath, seeders, leechers, size, base });
+      }
+
+      if (results.length === 0) continue;
+
+      console.log(`🔍 1337x: ${results.length} resultados de ${base}`);
+
+      // Step 2: Fetch detail pages in parallel (limit 5) to get magnet links
+      const detailLimit = Math.min(results.length, 5);
+      const detailPromises = results.slice(0, detailLimit).map(async (item) => {
+        if (parentSignal && parentSignal.aborted) return null;
+        const detailUrl = `${item.base}${item.detailPath}`;
+        let ctrl = null;
+        try {
+          ctrl = new AbortController();
+          if (parentSignal) {
+            parentSignal.addEventListener('abort', () => { try { ctrl.abort(); } catch (_) {} }, { once: true });
+          }
+          const detailResp = await axios.get(detailUrl, {
+            headers,
+            timeout: timeout1337x,
+            maxRedirects: 5,
+            responseType: 'text',
+            httpsAgent: httpsAgentGlobal,
+            httpAgent: httpAgentGlobal,
+            signal: ctrl.signal,
+          });
+          if (!detailResp?.data) return null;
+          const detailHtml = detailResp.data;
+          const magnetMatch = detailHtml.match(/magnet:\?xt=urn:btih:[^'"\s<>]+/i);
+          if (!magnetMatch) {
+            // Try to build from info hash
+            const hashMatch = detailHtml.match(/infohash[^a-z0-9]{0,10}([a-f0-9]{40})/i)
+              || detailHtml.match(/btih[:=]([a-f0-9]{40})/i);
+            if (hashMatch) {
+              const dn = item.name ? `&dn=${encodeURIComponent(item.name)}` : '';
+              const trackers = DEFAULT_TRACKERS.map((t) => `&tr=${encodeURIComponent(t)}`).join('');
+              return {
+                name: item.name,
+                magnetLink: `magnet:?xt=urn:btih:${hashMatch[1]}${dn}${trackers}`,
+                size: item.size,
+                seeders: item.seeders,
+                leechers: item.leechers,
+                score: item.seeders * 2 + item.leechers,
+                source: '1337x',
+              };
+            }
+            return null;
+          }
+          return {
+            name: item.name,
+            magnetLink: magnetMatch[0],
+            size: item.size,
+            seeders: item.seeders,
+            leechers: item.leechers,
+            score: item.seeders * 2 + item.leechers,
+            source: '1337x',
+          };
+        } catch (err) {
+          if (err?.code === 'ERR_CANCELED' || err?.name === 'AbortError') return null;
+          console.warn(`1337x detail falló (${detailUrl}):`, err?.message || err);
+          return null;
+        }
+      });
+
+      const detailResults = (await Promise.allSettled(detailPromises))
+        .filter((r) => r.status === 'fulfilled' && r.value)
+        .map((r) => r.value);
+
+      if (detailResults.length > 0) {
+        console.log(`✅ 1337x: ${detailResults.length} torrents con magnet obtenidos`);
+        return detailResults;
+      }
+    } catch (err) {
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'AbortError') break;
+      console.warn(`1337x mirror falló (${base}):`, err?.message || err);
+    }
+  }
+  return [];
 }
 
 // =====================
@@ -2201,6 +2590,23 @@ app.get('/api/search-torrent', async (req, res) => {
     console.log(`Buscando torrent [provider=${provider}]: ${query}`);
     if (cleanQuery !== query) console.log(`Query limpio: ${cleanQuery}`);
 
+    if (provider === '1337x') {
+      const results1337x = await search1337x(cleanQuery, requestAbortSignal);
+      results1337x.sort(
+        (a, b) =>
+          (Number(b?.seeders) || 0) - (Number(a?.seeders) || 0) ||
+          (Number(b?.leechers) || 0) - (Number(a?.leechers) || 0)
+      );
+      console.log(`1337x provider: torrents parseados=${results1337x.length}`);
+      return res.json({
+        query,
+        provider,
+        requestedProvider: String(requestedProvider || '').trim().toLowerCase() || provider,
+        results: results1337x,
+        count: results1337x.length,
+      });
+    }
+
     const httpAgent = httpAgentGlobal;
     const httpsAgentShared = httpsAgentGlobal;
     const mirrors = (providerDefinition.mirrors || []).slice();
@@ -2252,6 +2658,10 @@ app.get('/api/search-torrent', async (req, res) => {
           lower.includes('detlink') ||
           lower.includes('detname') ||
           lower.includes('cellmainlink') ||
+          lower.includes('class="grantorrent"') ||
+          lower.includes('busqueda:') ||
+          lower.includes('movie-list') ||
+          lower.includes('linktorrent') ||
           lower.includes('torrentname') ||
           lower.includes('frontpagewidget') ||
           lower.includes('no hits') ||
@@ -2699,6 +3109,10 @@ app.get('/api/search-torrent', async (req, res) => {
 
     let html = null;
     let htmlBase = null;
+
+    // 1337x ahora es provider dedicado; no mezclar resultados con otros providers
+    const promise1337x = Promise.resolve([]);
+
     try {
       const searchResult = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
       html = searchResult?.html || searchResult;
@@ -2879,6 +3293,180 @@ app.get('/api/search-torrent', async (req, res) => {
       return urls;
     };
 
+    const resolveAbsoluteUrl = (href, base) => {
+      const raw = String(href || '').trim();
+      if (!raw || raw.startsWith('#') || raw.startsWith('javascript:')) return null;
+      try {
+        if (/^https?:\/\//i.test(raw)) return raw;
+        if (raw.startsWith('//')) return `https:${raw}`;
+        if (!base) return null;
+        return new URL(raw, `${base}/`).toString();
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const extractGrantorrentDetailEntries = (searchHtml, base) => {
+      const entries = [];
+      const seen = new Set();
+      const anchorRegex = /<a[^>]+href=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi;
+      let match;
+      while ((match = anchorRegex.exec(searchHtml)) !== null) {
+        const resolved = resolveAbsoluteUrl(match[1], base);
+        if (!resolved) continue;
+        let parsed = null;
+        try {
+          parsed = new URL(resolved);
+        } catch (_) {
+          continue;
+        }
+        const host = String(parsed.hostname || '').toLowerCase();
+        if (!host.includes('grantorrent')) continue;
+        const pathName = String(parsed.pathname || '');
+        if (!/^\/[^/?#]+\/?$/.test(pathName)) continue;
+        if (
+          pathName === '/' ||
+          /^\/(peliculas|series_p|contacto|ayuda|categoria|search|tag|author)\//i.test(pathName)
+        ) {
+          continue;
+        }
+
+        const inner = decodeHtmlEntities(match[2] || '');
+        const altMatch = inner.match(/\balt=['"]([^'"]+)['"]/i);
+        const pMatch = inner.match(/<p[^>]*>([^<]+)<\/p>/i);
+        const rawName = altMatch?.[1] || pMatch?.[1] || '';
+        const name = decodeHtmlEntities(String(rawName || ''))
+          .replace(/\s+/g, ' ')
+          .trim();
+        const key = resolved.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ url: resolved, name: name || 'Unknown' });
+      }
+      return entries;
+    };
+
+    const decodeGrantorrentDataSrc = (value) => {
+      const raw = decodeHtmlEntities(String(value || '')).trim();
+      if (!raw) return null;
+      try {
+        const decoded = Buffer.from(raw, 'base64').toString('utf8').trim();
+        if (!decoded) return null;
+        if (/^(https?:\/\/|magnet:\?)/i.test(decoded)) return decoded;
+      } catch (_) {}
+      return null;
+    };
+
+    const scoreGrantorrentName = (name) => {
+      const normalizedName = decodeHtmlEntities(String(name || ''))
+        .toLowerCase()
+        .replace(/['`´]/g, '')
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const normalizedQuery = String(cleanQuery || '')
+        .toLowerCase()
+        .replace(/['`´]/g, '')
+        .replace(/[^\w\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const queryTokens = normalizedQuery
+        .split(' ')
+        .map((t) => t.trim())
+        .filter(
+          (t) =>
+            t.length >= 3 &&
+            !/^(720p|1080p|2160p|4k|hdrip|bdrip|bluray|webrip|web|dl|dual|audio)$/.test(t)
+        );
+
+      let score = 0;
+      if (!normalizedName) return score;
+      if (normalizedName === normalizedQuery) score += 300;
+      if (normalizedName.startsWith(normalizedQuery) && normalizedQuery) score += 220;
+      if (normalizedQuery && normalizedName.includes(normalizedQuery)) score += 120;
+      if (queryTokens.length > 0) {
+        const matched = queryTokens.filter((token) => normalizedName.includes(token)).length;
+        score += matched * 40;
+        if (matched === queryTokens.length) score += 100;
+      }
+      const yearMatch = normalizedQuery.match(/\b(19|20)\d{2}\b/);
+      if (yearMatch && normalizedName.includes(yearMatch[0])) score += 60;
+      if (/\b(microhd|bdremux|1080p|720p|hdrip)\b/.test(normalizedName)) score += 8;
+      return score;
+    };
+
+    const fetchGrantorrentTorrentsFromDetails = async (entries) => {
+      const results = [];
+      const seen = new Set();
+      const limit = Math.min(entries.length, 12);
+      for (let i = 0; i < limit; i += 1) {
+        if (requestAbortSignal && requestAbortSignal.aborted) break;
+        const entry = entries[i];
+        if (!entry?.url) continue;
+        try {
+          const resp = await axios.get(entry.url, {
+            headers,
+            timeout: Math.min(15000, perMirrorTimeoutMs),
+            maxRedirects: 5,
+            responseType: 'text',
+            httpsAgent: httpsAgentShared,
+            httpAgent,
+            signal: requestAbortSignal,
+          });
+          if (!resp?.data) continue;
+          const detailHtml = String(resp.data);
+          const linkRegexes = [
+            /<a[^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*data-src=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi,
+            /<a[^>]*data-src=['"]([^'"]+)['"][^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*>([\s\S]*?)<\/a>/gi,
+          ];
+
+          for (const regex of linkRegexes) {
+            let match;
+            while ((match = regex.exec(detailHtml)) !== null) {
+              const torrentUrl = decodeGrantorrentDataSrc(match[1]);
+              if (!torrentUrl || seen.has(torrentUrl)) continue;
+              seen.add(torrentUrl);
+
+              const anchorInner = decodeHtmlEntities(String(match[2] || ''))
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+              const qualityText = anchorInner
+                .replace(/^(descargar|download)\s*/i, '')
+                .trim();
+              const fallbackNameRaw = decodeURIComponent(
+                String(torrentUrl.split('/').pop() || '')
+              ).replace(/\.torrent$/i, '');
+              const fallbackName = fallbackNameRaw.replace(/[_+.]+/g, ' ').trim();
+              const entryName = String(entry.name || '').trim();
+              const composedName =
+                entryName && qualityText && !entryName.toLowerCase().includes(qualityText.toLowerCase())
+                  ? `${entryName} - ${qualityText}`
+                  : entryName &&
+                      fallbackName &&
+                      !entryName.toLowerCase().includes(fallbackName.toLowerCase())
+                    ? `${entryName} - ${fallbackName}`
+                    : entryName || qualityText || fallbackName || 'Unknown';
+
+              const score = scoreGrantorrentName(composedName);
+              results.push({
+                name: composedName,
+                magnetLink: torrentUrl,
+                size: 'Unknown',
+                seeders: 0,
+                leechers: 0,
+                score,
+              });
+            }
+          }
+        } catch (err) {
+          const msg = err && err.message ? err.message : err;
+          console.warn('Detalle Grantorrent falló:', entry.url, msg);
+        }
+      }
+      return results;
+    };
+
     const fetchMagnetsFromDetails = async (entries) => {
       const results = [];
       const seen = new Set();
@@ -2941,11 +3529,53 @@ app.get('/api/search-torrent', async (req, res) => {
     const seenMagnets = new Set();
     const pendingDetailRows = [];
     const seenPendingDetailUrls = new Set();
+
+    if (provider === 'grantorrent') {
+      const directLinkRegexes = [
+        /<a[^>]*data-src=['"]([^'"]+)['"][^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*>/gi,
+        /<a[^>]*class=['"][^'"]*linktorrent[^'"]*['"][^>]*data-src=['"]([^'"]+)['"][^>]*>/gi,
+      ];
+      for (const directLinkRegex of directLinkRegexes) {
+        let directMatch;
+        while ((directMatch = directLinkRegex.exec(html)) !== null) {
+          const torrentUrl = decodeGrantorrentDataSrc(directMatch[1]);
+          if (!torrentUrl || seenMagnets.has(torrentUrl)) continue;
+          const fallbackName = decodeURIComponent(String(torrentUrl.split('/').pop() || ''))
+            .replace(/\.torrent$/i, '')
+            .replace(/[_+.]+/g, ' ')
+            .trim();
+          const displayName = fallbackName || 'Grantorrent result';
+          seenMagnets.add(torrentUrl);
+          torrents.push({
+            name: displayName,
+            magnetLink: torrentUrl,
+            size: 'Unknown',
+            seeders: 0,
+            leechers: 0,
+            score: scoreGrantorrentName(displayName),
+          });
+        }
+      }
+
+      const detailEntries = extractGrantorrentDetailEntries(html, htmlBase || mirrors[0]);
+      if (detailEntries.length > 0) {
+        console.log(`Grantorrent: resolviendo detalles (${detailEntries.length})...`);
+        const detailTorrents = await fetchGrantorrentTorrentsFromDetails(detailEntries);
+        for (const torrent of detailTorrents) {
+          if (torrents.length >= 25) break;
+          if (seenMagnets.has(torrent.magnetLink)) continue;
+          seenMagnets.add(torrent.magnetLink);
+          torrents.push(torrent);
+        }
+      }
+      torrents.sort((a, b) => b.score - a.score);
+    }
+
     const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
     let rowMatch;
 
     while ((rowMatch = rowRegex.exec(html)) !== null) {
-      if (torrents.length >= 10) break;
+      if (torrents.length >= 15) break;
 
       const rowHtml = rowMatch[0];
       const decodedRow = decodeHtmlEntities(rowHtml);
@@ -3009,7 +3639,7 @@ app.get('/api/search-torrent', async (req, res) => {
       console.log(`Magnet links encontrados (fallback): ${magnets.length}`);
 
       for (const magnetLink of magnets) {
-        if (torrents.length >= 10) break;
+        if (torrents.length >= 15) break;
         if (seenMagnets.has(magnetLink)) continue;
         seenMagnets.add(magnetLink);
 
@@ -3027,7 +3657,10 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     const shouldResolveDetails =
-      htmlBase && torrents.length < 10 && (pendingDetailRows.length > 0 || torrents.length === 0);
+      provider !== 'grantorrent' &&
+      htmlBase &&
+      torrents.length < 10 &&
+      (pendingDetailRows.length > 0 || torrents.length === 0);
 
     if (shouldResolveDetails) {
       const detailEntries =
@@ -3038,14 +3671,41 @@ app.get('/api/search-torrent', async (req, res) => {
         console.log(`Intentando detalles para ${detailEntries.length} resultados...`);
         const detailTorrents = await fetchMagnetsFromDetails(detailEntries);
         for (const torrent of detailTorrents) {
-          if (torrents.length >= 10) break;
+          if (torrents.length >= 15) break;
           if (seenMagnets.has(torrent.magnetLink)) continue;
           seenMagnets.add(torrent.magnetLink);
           torrents.push(torrent);
         }
       }
     } else {
-      console.log(`Magnet links encontrados: ${torrents.length}`);
+      console.log(`Magnet links encontrados (TPB): ${torrents.length}`);
+    }
+
+    // Merge resultados de 1337x (corrió en paralelo)
+    try {
+      const results1337x = await promise1337x;
+      if (results1337x && results1337x.length > 0) {
+        const extractHash = (magnet) => {
+          const m = String(magnet || '').match(/btih:([a-f0-9]{40})/i);
+          return m ? m[1].toLowerCase() : null;
+        };
+        const existingHashes = new Set(
+          torrents.map((t) => extractHash(t.magnetLink)).filter(Boolean)
+        );
+        let added = 0;
+        for (const t of results1337x) {
+          const hash = extractHash(t.magnetLink);
+          if (hash && existingHashes.has(hash)) continue;
+          if (seenMagnets.has(t.magnetLink)) continue;
+          seenMagnets.add(t.magnetLink);
+          if (hash) existingHashes.add(hash);
+          torrents.push(t);
+          added++;
+        }
+        if (added > 0) console.log(`✅ 1337x aportó ${added} torrents adicionales`);
+      }
+    } catch (mergeErr) {
+      console.warn('Error merging 1337x:', mergeErr?.message || mergeErr);
     }
 
     torrents.sort((a, b) => b.score - a.score);
@@ -3425,13 +4085,56 @@ app.get('/api/opensubtitles/subtitle/:fileId', async (req, res) => {
 // =====================
 // Endpoint para agregar un torrent
 // =====================
-app.post('/api/torrent/add', (req, res) => {
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+async function downloadTorrentBufferWithRetry(url) {
+  const attempts = Math.max(1, DOWNLOAD_TORRENT_RETRIES + 1);
+  let lastError = null;
+
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const response = await axios.get(url, {
+        timeout: DOWNLOAD_TORRENT_TIMEOUT_MS,
+        responseType: 'arraybuffer',
+        maxRedirects: 5,
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          Accept: 'application/x-bittorrent,*/*',
+        },
+        httpAgent: httpAgentGlobal,
+        httpsAgent: httpsAgentGlobal,
+      });
+      const data = response?.data;
+      if (!data) throw new Error('Respuesta vacía al descargar .torrent');
+      const buffer = Buffer.from(data);
+      if (!buffer.length) throw new Error('Archivo .torrent vacío');
+      return buffer;
+    } catch (err) {
+      lastError = err;
+      if (i < attempts - 1) {
+        const delayMs = 500 * (i + 1);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw lastError || new Error('No se pudo descargar el archivo .torrent');
+}
+
+app.post('/api/torrent/add', async (req, res) => {
   const { magnetUri } = req.body;
   if (!magnetUri) return res.status(400).json({ error: 'magnetUri es requerido' });
 
-  console.log('Agregando torrent:', magnetUri);
+  const sourceInput = String(magnetUri).trim();
+  if (!sourceInput) return res.status(400).json({ error: 'magnetUri es requerido' });
 
-  const existingTorrent = client.get(magnetUri);
+  console.log('Agregando torrent:', sourceInput);
+
+  const existingTorrent = client.get(sourceInput);
   if (existingTorrent) {
     console.log('Torrent ya existe');
     return res.json({
@@ -3446,30 +4149,75 @@ app.post('/api/torrent/add', (req, res) => {
     });
   }
 
-  client.add(magnetUri, { path: TORRENT_DIR }, (torrent) => {
-    console.log('Torrent agregado:', torrent.name);
-    console.log('InfoHash:', torrent.infoHash);
-    console.log('Archivos:', torrent.files.length);
+  let sourceForClient = sourceInput;
+  if (isHttpUrl(sourceInput)) {
+    try {
+      sourceForClient = await downloadTorrentBufferWithRetry(sourceInput);
+    } catch (err) {
+      const msg = String(err?.message || err || '').toLowerCase();
+      const isTimeout =
+        msg.includes('timeout') ||
+        err?.code === 'ECONNABORTED' ||
+        err?.code === 'ERR_CANCELED' ||
+        err?.name === 'AbortError';
+      return res.status(isTimeout ? 504 : 502).json({
+        error: 'Error descargando .torrent',
+        message: err?.message || String(err),
+      });
+    }
+  }
 
-    activeTorrents.set(torrent.infoHash, torrent);
+  let settled = false;
+  const finish = (statusCode, payload) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(addTimeout);
+    res.status(statusCode).json(payload);
+  };
 
-    torrent.files.forEach((file) => {
-      try {
-        file.deselect();
-      } catch (_) {}
+  const addTimeout = setTimeout(() => {
+    finish(504, {
+      error: 'Timeout agregando torrent',
+      message: 'WebTorrent tardó demasiado en añadir el torrent',
     });
+  }, ADD_TORRENT_TIMEOUT_MS);
 
-    res.json({
-      infoHash: torrent.infoHash,
-      name: torrent.name,
-      files: torrent.files.map((f, i) => ({
-        index: i,
-        name: f.name,
-        length: f.length,
-        type: getFileType(f.name),
-      })),
+  try {
+    client.add(sourceForClient, { path: TORRENT_DIR, announce: DEFAULT_TRACKERS }, (torrent) => {
+      if (!torrent) {
+        finish(500, { error: 'No se pudo agregar torrent', message: 'Respuesta vacía de WebTorrent' });
+        return;
+      }
+
+      console.log('Torrent agregado:', torrent.name);
+      console.log('InfoHash:', torrent.infoHash);
+      console.log('Archivos:', torrent.files.length);
+
+      activeTorrents.set(torrent.infoHash, torrent);
+
+      torrent.files.forEach((file) => {
+        try {
+          file.deselect();
+        } catch (_) {}
+      });
+
+      finish(200, {
+        infoHash: torrent.infoHash,
+        name: torrent.name,
+        files: torrent.files.map((f, i) => ({
+          index: i,
+          name: f.name,
+          length: f.length,
+          type: getFileType(f.name),
+        })),
+      });
     });
-  });
+  } catch (err) {
+    finish(500, {
+      error: 'Error al agregar torrent',
+      message: err?.message || String(err),
+    });
+  }
 });
 
 // Función helper para determinar el tipo de archivo
@@ -3517,40 +4265,49 @@ app.get('/api/embedded-subtitles/:infoHash/:fileIndex', async (req, res) => {
   selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   try {
-    const filePath = path.join(torrent.path, file.path);
+    const filePath = resolveExistingTorrentFilePath(torrent, file);
     console.log('Analizando subtítulos embebidos en:', filePath);
 
     try {
-      await waitForFileOnDisk(file, filePath, Math.min(10 * 1024 * 1024, file.length), 20000);
+      await waitForFileOnDisk(
+        file,
+        buildTorrentFilePathCandidates(torrent, file),
+        Math.min(10 * 1024 * 1024, file.length),
+        20000
+      );
     } catch (err) {
       console.warn('Advertencia: waitForFileOnDisk falló:', err.message);
     }
 
+    if (!filePath || !fs.existsSync(filePath)) {
+      console.warn('Subtítulos embebidos: archivo aún no disponible en disco');
+      return res.json([]);
+    }
+
     const subtitles = await new Promise((resolve) => {
-      const subtitleTracks = [];
-      ffmpeg.ffprobe(filePath, (err, metadata) => {
-        if (err) {
+      ffprobeWithRetry(filePath)
+        .then((metadata) => {
+          const subtitleTracks = [];
+          if (metadata.streams) {
+            metadata.streams.forEach((stream, index) => {
+              if (stream.codec_type === 'subtitle') {
+                subtitleTracks.push({
+                  index: stream.index,
+                  codec: stream.codec_name,
+                  language: stream.tags?.language || 'und',
+                  title: stream.tags?.title || `Subtitle ${index}`,
+                  forced: stream.disposition?.forced === 1,
+                  default: stream.disposition?.default === 1,
+                });
+              }
+            });
+          }
+          resolve(subtitleTracks);
+        })
+        .catch((err) => {
           console.error('Error al analizar archivo:', err.message);
           resolve([]);
-          return;
-        }
-
-        if (metadata.streams) {
-          metadata.streams.forEach((stream, index) => {
-            if (stream.codec_type === 'subtitle') {
-              subtitleTracks.push({
-                index: stream.index,
-                codec: stream.codec_name,
-                language: stream.tags?.language || 'und',
-                title: stream.tags?.title || `Subtitle ${index}`,
-                forced: stream.disposition?.forced === 1,
-                default: stream.disposition?.default === 1,
-              });
-            }
-          });
-        }
-        resolve(subtitleTracks);
-      });
+        });
     });
 
     embeddedSubtitlesCache.set(cacheKey, subtitles);
@@ -3578,40 +4335,68 @@ app.get('/api/audio-tracks/:infoHash/:fileIndex', async (req, res) => {
   selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
   try {
-    const filePath = path.join(torrent.path, file.path);
+    const filePath = resolveExistingTorrentFilePath(torrent, file);
     console.log('Analizando pistas de audio embebidas en:', filePath);
 
+    // Esperar bytes mínimos (2MB) con timeout generoso (30s) para que haya datos suficientes
     try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+      await waitForFileOnDisk(
+        file,
+        buildTorrentFilePathCandidates(torrent, file),
+        Math.min(2 * 1024 * 1024, file.length),
+        30000
+      );
     } catch (err) {
       console.warn('Advertencia: waitForFileOnDisk falló:', err.message);
     }
 
-    const audioTracks = await new Promise((resolve) => {
-      const tracks = [];
-      ffmpeg.ffprobe(filePath, (err, metadata) => {
-        if (err) {
-          console.error('Error al analizar archivo:', err.message);
-          resolve([]);
-          return;
-        }
+    if (!filePath || !fs.existsSync(filePath)) {
+      console.warn('Pistas de audio embebidas: archivo aún no disponible en disco');
+      return res.json([]);
+    }
 
-        if (metadata.streams) {
-          metadata.streams.forEach((stream, index) => {
-            if (stream.codec_type === 'audio') {
-              tracks.push({
-                index: stream.index,
-                codec: stream.codec_name,
-                language: stream.tags?.language || 'und',
-                title: stream.tags?.title || `Audio ${index}`,
-                channels: stream.channels || null,
-                default: stream.disposition?.default === 1,
+    // Progressive ffprobe: retry with increasing delays to allow more data to download
+    const audioTracks = await new Promise((resolve) => {
+      const maxProbeAttempts = 4;
+      const probeDelays = [0, 2000, 4000, 6000]; // ms between attempts
+
+      const attemptProbe = (attempt) => {
+        ffprobeWithRetry(filePath, 2)
+          .then((metadata) => {
+            const tracks = [];
+            if (metadata.streams) {
+              metadata.streams.forEach((stream, index) => {
+                if (stream.codec_type === 'audio') {
+                  tracks.push({
+                    index: stream.index,
+                    codec: stream.codec_name,
+                    language: stream.tags?.language || 'und',
+                    title: stream.tags?.title || `Audio ${index}`,
+                    channels: stream.channels || null,
+                    default: stream.disposition?.default === 1,
+                  });
+                }
               });
             }
+            if (tracks.length === 0 && attempt + 1 < maxProbeAttempts) {
+              console.log(`ffprobe audio: intento ${attempt + 1}/${maxProbeAttempts} sin pistas, reintentando en ${probeDelays[attempt + 1]}ms...`);
+              setTimeout(() => attemptProbe(attempt + 1), probeDelays[attempt + 1]);
+            } else {
+              resolve(tracks);
+            }
+          })
+          .catch((err) => {
+            if (attempt + 1 < maxProbeAttempts) {
+              console.log(`ffprobe audio: intento ${attempt + 1}/${maxProbeAttempts} falló (${err.message}), reintentando en ${probeDelays[attempt + 1]}ms...`);
+              setTimeout(() => attemptProbe(attempt + 1), probeDelays[attempt + 1]);
+            } else {
+              console.error('Error al analizar archivo (todos los intentos fallaron):', err.message);
+              resolve([]);
+            }
           });
-        }
-        resolve(tracks);
-      });
+      };
+
+      attemptProbe(0);
     });
 
     embeddedAudioTracksCache.set(cacheKey, audioTracks);
@@ -3632,7 +4417,7 @@ app.get('/api/seekable/:infoHash/:fileIndex', async (req, res) => {
   if (!file) return res.status(404).json({ seekable: false, error: 'Archivo no encontrado' });
   selectOnlyFile(torrent, parseInt(fileIndex, 10));
 
-  const filePath = path.join(torrent.path, file.path);
+  const filePath = resolveExistingTorrentFilePath(torrent, file);
 
   const fileLength = Number(file.length || 0);
   const fileDownloaded = Number(file.downloaded || 0);
@@ -3735,7 +4520,8 @@ app.get('/api/stream-seek/:infoHash/:fileIndex', async (req, res) => {
 
   attachStreamLifecycle(infoHash, res);
 
-  const filePath = path.join(torrent.path, file.path);
+  const filePathCandidates = buildTorrentFilePathCandidates(torrent, file);
+  const filePath = resolveExistingTorrentFilePath(torrent, file);
   const transcodeDecision = await determineTranscodeMode(
     file,
     filePath,
@@ -3754,6 +4540,7 @@ app.get('/api/stream-seek/:infoHash/:fileIndex', async (req, res) => {
       fileIndex,
       file,
       filePath,
+      filePathCandidates,
       seekTime,
       mode: transcodeDecision.mode,
       audioStreamIndex,
@@ -3792,7 +4579,8 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
   // NUEVO: contabilizar stream activo de este torrent
   attachStreamLifecycle(infoHash, res);
 
-  const filePath = path.join(torrent.path, file.path);
+  const filePathCandidates = buildTorrentFilePathCandidates(torrent, file);
+  const filePath = resolveExistingTorrentFilePath(torrent, file);
   const transcodeDecision = await determineTranscodeMode(
     file,
     filePath,
@@ -3836,6 +4624,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
           fileIndex,
           file,
           filePath,
+          filePathCandidates,
           mode: transcodeDecision.mode,
           audioStreamIndex: forceTranscode ? audioStreamIndex : null,
           res,
@@ -3849,6 +4638,7 @@ app.get('/api/stream/:infoHash/:fileIndex', async (req, res) => {
         fileIndex,
         file,
         filePath,
+        filePathCandidates,
         mode: transcodeDecision.mode,
         audioStreamIndex: forceTranscode ? audioStreamIndex : null,
       });
@@ -3958,7 +4748,7 @@ app.get('/api/embedded-subtitle/:infoHash/:fileIndex/:streamIndex', async (req, 
   try {
     console.log(`Extrayendo subtítulo stream ${streamIndex} de:`, file.name);
 
-    const filePath = path.join(torrent.path, file.path);
+    const filePath = resolveExistingTorrentFilePath(torrent, file);
 
     let clientDisconnected = false;
     let ffmpegCommand = null;
@@ -3972,9 +4762,18 @@ app.get('/api/embedded-subtitle/:infoHash/:fileIndex/:streamIndex', async (req, 
     });
 
     try {
-      await waitForFileOnDisk(file, filePath, Math.min(64 * 1024, file.length), 15000);
+      await waitForFileOnDisk(
+        file,
+        buildTorrentFilePathCandidates(torrent, file),
+        Math.min(64 * 1024, file.length),
+        15000
+      );
     } catch (err) {
       console.warn('Advertencia: waitForFileOnDisk falló antes de extraer subtítulo:', err.message);
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(503).send('Archivo aún no disponible en disco');
     }
 
     res.writeHead(200, {

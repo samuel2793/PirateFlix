@@ -5,6 +5,7 @@ import { PlayerComponent } from './features/player/player';
 import { PersonComponent } from './features/person/person';
 import { ProfileComponent } from './features/profile/profile';
 import { SettingsComponent } from './features/settings/settings';
+import { CollectionComponent } from './features/collection/collection';
 
 export const routes: Routes = [
   { path: '', component: HomeComponent, data: { animation: 'home' } },
@@ -14,5 +15,6 @@ export const routes: Routes = [
   { path: 'play/:type/:id/:season/:episode', component: PlayerComponent, data: { animation: 'player' } },
   { path: 'profile', component: ProfileComponent, data: { animation: 'profile' } },
   { path: 'settings', component: SettingsComponent, data: { animation: 'settings' } },
+  { path: 'collection/:id', component: CollectionComponent, data: { animation: 'collection' } },
   { path: '**', redirectTo: '' },
 ];

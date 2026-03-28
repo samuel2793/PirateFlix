@@ -3,12 +3,20 @@
   <nav class="navbar">
     <!-- Left Section: Logo + Tabs -->
     <div class="nav-left">
-      <div class="logo">
+      <div class="logo" (click)="activeTab.set('home')">
         <span class="logo-img" aria-hidden="true"></span>
         <span>PirateFlix</span>
       </div>
 
       <div class="nav-tabs">
+        <button
+          class="nav-tab"
+          [class.active]="activeTab() === 'home'"
+          (click)="activeTab.set('home')"
+        >
+          <mat-icon>home</mat-icon>
+          <span class="translate-text">{{ 'Home' | t }}</span>
+        </button>
         <button
           class="nav-tab"
           [class.active]="activeTab() === 'movies'"
@@ -41,9 +49,10 @@
 
     <!-- Right Section: Grid Toggle + Profile -->
     <div class="nav-right">
-      <!-- Grid Toggle (unified) -->
+      <!-- Grid Toggle (hidden on Home tab where it doesn't apply) -->
       <button
         class="grid-toggle"
+        *ngIf="activeTab() !== 'home'"
         (click)="cycleGridSize()"
         [title]="'Toggle view' | t"
       >
@@ -127,8 +136,97 @@
   </nav>
 
   <!-- Loading Bar -->
-  <div class="loading-bar" *ngIf="loading()">
+  <div class="loading-bar" *ngIf="loading() || collectionsLoading()">
     <div class="loading-progress"></div>
+  </div>
+
+  <!-- ========================================
+       HOME TAB (Collections)
+       ======================================== -->
+  <div class="tab-content" *ngIf="activeTab() === 'home'">
+    <!-- Home Hero Carousel -->
+    <section class="hero hero-carousel" *ngIf="!collectionsLoading() && heroItems().length">
+      <div class="hero-backdrop hero-backdrop-animated" [style.backgroundImage]="'url(' + getCollectionHeroBackdrop() + ')'"></div>
+      <div class="hero-gradient"></div>
+      <div class="hero-content">
+        <span class="hero-badge">
+          <mat-icon>local_fire_department</mat-icon>
+          <span class="translate-text">{{ 'Trending' | t }}</span>
+        </span>
+        <h1 class="hero-title">{{ currentHeroItem()?.title || currentHeroItem()?.name }}</h1>
+        <p class="hero-overview">{{ currentHeroItem()?.overview }}</p>
+        <div class="hero-meta">
+          <span class="hero-rating" *ngIf="currentHeroItem()?.vote_average">
+            <mat-icon>star</mat-icon>
+            {{ currentHeroItem()?.vote_average | number:'1.1-1' }}
+          </span>
+          <span *ngIf="currentHeroItem()?.release_date || currentHeroItem()?.first_air_date">
+            {{ (currentHeroItem()?.release_date || currentHeroItem()?.first_air_date) | date:'yyyy' }}
+          </span>
+        </div>
+        <div class="hero-actions">
+          <button class="btn-play" (click)="playHeroItem(currentHeroItem())">
+            <mat-icon>play_arrow</mat-icon>
+            <span class="translate-text">{{ 'Watch now' | t }}</span>
+          </button>
+          <button class="btn-info" (click)="infoHeroItem(currentHeroItem())">
+            <mat-icon>info_outline</mat-icon>
+            <span class="translate-text">{{ 'More info' | t }}</span>
+          </button>
+        </div>
+      </div>
+      <!-- Carousel navigation -->
+      <div class="hero-nav" *ngIf="heroItems().length > 1">
+        <button class="hero-arrow hero-arrow-prev" (click)="heroPrev()" [title]="'Previous' | t">
+          <mat-icon>chevron_left</mat-icon>
+        </button>
+        <div class="hero-indicators">
+          <button
+            *ngFor="let item of heroItems(); let i = index"
+            class="hero-dot"
+            [class.active]="i === heroIndex()"
+            (click)="goToHeroSlide(i)"
+            [title]="item.title || item.name"
+          ></button>
+        </div>
+        <button class="hero-arrow hero-arrow-next" (click)="heroNext()" [title]="'Next' | t">
+          <mat-icon>chevron_right</mat-icon>
+        </button>
+      </div>
+    </section>
+
+    <!-- Collections Loading Skeleton -->
+    <main class="main-content" *ngIf="collectionsLoading()">
+      <app-collection-row [loading]="true"></app-collection-row>
+      <app-collection-row [loading]="true"></app-collection-row>
+      <app-collection-row [loading]="true"></app-collection-row>
+      <app-collection-row [loading]="true"></app-collection-row>
+    </main>
+
+    <!-- Collections Rows -->
+    <main class="main-content" *ngIf="!collectionsLoading()">
+      <ng-container *ngIf="!collectionsError()">
+        <app-collection-row
+          *ngFor="let collection of collections()"
+          [collection]="collection"
+          [showRank]="collection.id === 'trending' || collection.id === 'top_weekly'"
+          (itemClick)="onCollectionItemClick($event)"
+        ></app-collection-row>
+      </ng-container>
+
+      <!-- Error -->
+      <div class="error-banner" *ngIf="collectionsError()">
+        <mat-icon>error_outline</mat-icon>
+        <span>{{ collectionsError() }}</span>
+        <button class="btn-retry" (click)="loadCollections()">{{ 'Retry' | t }}</button>
+      </div>
+
+      <!-- Empty State -->
+      <div class="empty-state" *ngIf="!collectionsError() && collections().length === 0">
+        <mat-icon>movie_filter</mat-icon>
+        <p class="translate-text">{{ 'No content available' | t }}</p>
+      </div>
+    </main>
   </div>
 
   <!-- ========================================
@@ -154,7 +252,7 @@
           <span>{{ getMovieHero()?.release_date | date:'yyyy' }}</span>
         </div>
         <div class="hero-actions">
-          <button class="btn-play" (click)="openDetails('movie', getMovieHero()?.id)">
+          <button class="btn-play" (click)="router.navigate(['/play', 'movie', getMovieHero()?.id])">
             <mat-icon>play_arrow</mat-icon>
             <span class="translate-text">{{ 'Watch now' | t }}</span>
           </button>
@@ -203,7 +301,7 @@
             [class.featured]="i === 0"
           >
             <div class="card-poster">
-              <img [src]="posterOrPlaceholder(item.poster_path)" [alt]="item.title" [title]="item.title" loading="lazy" />
+              <img [src]="posterOrPlaceholder(item.poster_path)" alt="Movie poster" [attr.alt]="item.title || 'Movie poster'" title="Movie" [attr.title]="item.title || 'Movie'" loading="lazy" />
               <div class="card-overlay">
                 <div class="overlay-top">
                   <span class="card-rank">#{{ i + 1 }}</span>
@@ -259,7 +357,7 @@
           <span>{{ getTvHero()?.first_air_date | date:'yyyy' }}</span>
         </div>
         <div class="hero-actions">
-          <button class="btn-play" (click)="openDetails('tv', getTvHero()?.id)">
+          <button class="btn-play" (click)="router.navigate(['/play', 'tv', getTvHero()?.id])">
             <mat-icon>play_arrow</mat-icon>
             <span class="translate-text">{{ 'Watch now' | t }}</span>
           </button>
@@ -308,7 +406,7 @@
             [class.featured]="i === 0"
           >
             <div class="card-poster">
-              <img [src]="posterOrPlaceholder(item.poster_path)" [alt]="item.name" [title]="item.name" loading="lazy" />
+              <img [src]="posterOrPlaceholder(item.poster_path)" alt="TV show poster" [attr.alt]="item.name || 'TV show poster'" title="TV Show" [attr.title]="item.name || 'TV Show'" loading="lazy" />
               <div class="card-overlay">
                 <div class="overlay-top">
                   <span class="card-rank">#{{ i + 1 }}</span>
@@ -358,7 +456,11 @@
             <input
               type="text"
               class="search-input"
+              placeholder="Search..."
+              title="Search"
               [placeholder]="'Search...' | t"
+              [attr.aria-label]="'Search' | t"
+              [attr.title]="'Search' | t"
               [ngModel]="query()"
               (ngModelChange)="setQuery($event)"
               (keydown.enter)="doSearch()"
@@ -422,7 +524,7 @@
             (click)="openDetailsForResult(item)"
           >
             <div class="card-poster">
-              <img [src]="posterOrPlaceholder(item.poster_path || item.profile_path)" [alt]="title(item)" [title]="title(item)" loading="lazy" />
+              <img [src]="posterOrPlaceholder(item.poster_path || item.profile_path)" alt="Poster" [attr.alt]="title(item) || 'Poster'" title="Media" [attr.title]="title(item) || 'Media'" loading="lazy" />
               <div class="card-overlay">
                 <div class="overlay-top">
                   <span class="media-badge">{{ labelMediaType(item.media_type) | t }}</span>

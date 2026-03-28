@@ -1,0 +1,96 @@
+<section class="collection-row" *ngIf="collection || loading">
+  <!-- Header -->
+  <div class="row-header">
+    <div class="row-title-group">
+      <mat-icon class="row-icon" *ngIf="collection.icon">{{ collection.icon }}</mat-icon>
+      <h2 class="row-title">
+        <ng-container *ngIf="!loading">{{ collection.name | t }}</ng-container>
+        <span class="skeleton-title" *ngIf="loading"></span>
+      </h2>
+    </div>
+    <button 
+      class="view-all-btn" 
+      (click)="navigateToCollection()"
+      *ngIf="!loading && collection.items?.length"
+    >
+      <span class="translate-text">{{ 'View all' | t }}</span>
+      <mat-icon>chevron_right</mat-icon>
+    </button>
+  </div>
+
+  <!-- Description (optional) -->
+  <p class="row-description" *ngIf="collection.description && !loading">
+    {{ collection.description | t }}
+  </p>
+
+  <!-- Scrollable content -->
+  <div class="row-scroll-container">
+    <div class="row-scroll" [class.loading]="loading">
+      
+      <!-- Loading skeletons -->
+      <ng-container *ngIf="loading">
+        <div class="row-card skeleton-card" *ngFor="let _ of skeletonItems">
+          <div class="card-poster skeleton-poster">
+            <div class="skeleton-shimmer"></div>
+          </div>
+          <div class="card-info">
+            <div class="skeleton-text skeleton-text-title"></div>
+            <div class="skeleton-text skeleton-text-year"></div>
+          </div>
+        </div>
+      </ng-container>
+
+      <!-- Actual items -->
+      <ng-container *ngIf="!loading && collection.items">
+        <div 
+          class="row-card" 
+          *ngFor="let item of collection.items; let i = index"
+          (click)="onItemClick(item)"
+          matRipple
+        >
+          <div class="card-poster">
+            <img 
+              [src]="getPoster(item)" 
+              alt="Poster"
+              [attr.alt]="getTitle(item) || 'Poster'"
+              title="Media"
+              [attr.title]="getTitle(item) || 'Media'"
+              loading="lazy"
+            />
+            <div class="card-overlay">
+              <div class="overlay-top">
+                <span class="card-rank" *ngIf="showRank">#{{ i + 1 }}</span>
+                <span class="media-badge" *ngIf="collection.mediaType === 'mixed'">
+                  {{ item.media_type === 'movie' ? ('Movie' | t) : ('TV' | t) }}
+                </span>
+              </div>
+              <div class="overlay-bottom">
+                <button class="play-btn">
+                  <mat-icon>play_arrow</mat-icon>
+                </button>
+              </div>
+            </div>
+            <div class="card-rating" *ngIf="item.vote_average">
+              <mat-icon>star</mat-icon>
+              {{ item.vote_average | number:'1.1-1' }}
+            </div>
+          </div>
+          <div class="card-info">
+            <div class="card-title">{{ getTitle(item) }}</div>
+            <div class="card-year">{{ getYear(item) }}</div>
+          </div>
+        </div>
+      </ng-container>
+
+      <!-- Empty state -->
+      <div class="empty-row" *ngIf="!loading && (!collection.items || collection.items.length === 0)">
+        <mat-icon>movie_filter</mat-icon>
+        <span class="translate-text">{{ 'No content available' | t }}</span>
+      </div>
+    </div>
+
+    <!-- Scroll indicators (fade edges) -->
+    <div class="scroll-fade-left"></div>
+    <div class="scroll-fade-right"></div>
+  </div>
+</section>

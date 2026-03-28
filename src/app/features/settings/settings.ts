@@ -103,6 +103,7 @@ export class SettingsComponent implements OnInit {
     { value: 'original', label: 'Original' },
     { value: 'en', label: 'English' },
     { value: 'es', label: 'Español' },
+    { value: 'lat', label: 'Latino' },
     { value: 'fr', label: 'Français' },
     { value: 'de', label: 'Deutsch' },
     { value: 'pt', label: 'Português' },
