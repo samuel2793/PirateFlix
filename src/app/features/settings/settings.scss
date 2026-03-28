@@ -275,6 +275,115 @@ $transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 // ========================================
+// Provider Cards - Logo + Description
+// ========================================
+.provider-options {
+  width: 100%;
+  display: grid;
+  gap: $spacing-sm;
+}
+
+.provider-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  text-align: left;
+  padding: $spacing-sm;
+  border-radius: $radius-md;
+  border: 1px solid var(--border-default, $border-default);
+  background: var(--bg-subtle, $bg-subtle);
+  color: var(--text-primary, $text-primary);
+  cursor: pointer;
+  transition: border-color $transition-normal, background-color $transition-normal, transform $transition-fast;
+
+  &:hover {
+    border-color: var(--border-hover, $border-hover);
+    background: var(--bg-hover, $bg-hover);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+  }
+
+  &.active {
+    border-color: var(--accent-primary, $accent-gold);
+    background: var(--accent-muted, $accent-gold-subtle);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 212, 160, 18), 0.2);
+
+    .provider-check {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+.provider-logo-wrapper {
+  width: 56px;
+  height: 56px;
+  min-width: 56px;
+  border-radius: $radius-sm;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.provider-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  display: block;
+}
+
+.provider-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.provider-label {
+  font-size: var(--text-md, 15px);
+  font-weight: 600;
+  color: var(--text-primary, $text-primary);
+  letter-spacing: -0.01em;
+}
+
+.provider-description {
+  font-size: var(--text-sm, 13px);
+  color: var(--text-tertiary, $text-tertiary);
+  line-height: 1.4;
+}
+
+.provider-check {
+  color: var(--accent-primary, $accent-gold);
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity $transition-fast, transform $transition-fast;
+}
+
+@media (max-width: 600px) {
+  .provider-logo-wrapper {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+  }
+
+  .provider-logo {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+// ========================================
 // Option Chips - Elegant Selection
 // ========================================
 .option-chips {

@@ -36,14 +36,26 @@
             <span class="setting-label translate-text">{{ 'Torrent provider' | t }}</span>
             <span class="setting-description translate-text">{{ 'Select the source used to search torrents' | t }}</span>
           </div>
-          <div class="option-chips">
+          <div class="provider-options">
             <button
               *ngFor="let provider of torrentProviderOptions"
-              class="option-chip"
+              class="provider-card"
               [class.active]="isTorrentProviderActive(provider.value)"
               [disabled]="!isAuthenticated()"
               (click)="setTorrentProvider(provider.value)">
-              {{ provider.label }}
+              <span class="provider-logo-wrapper">
+                <img
+                  class="provider-logo"
+                  [src]="provider.logoPath"
+                  [alt]="provider.label + ' logo'"
+                  loading="lazy"
+                  decoding="async" />
+              </span>
+              <span class="provider-content">
+                <span class="provider-label">{{ provider.label }}</span>
+                <span class="provider-description">{{ provider.description }}</span>
+              </span>
+              <mat-icon class="provider-check">check_circle</mat-icon>
             </button>
           </div>
           <span class="setting-helper translate-text" *ngIf="!isAuthenticated()">

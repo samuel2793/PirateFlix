@@ -4,6 +4,7 @@ export interface TorrentProviderOption {
   value: TorrentProviderId;
   label: string;
   description: string;
+  logoPath: string;
 }
 
 export const DEFAULT_TORRENT_PROVIDER: TorrentProviderId = 'piratebay';
@@ -13,12 +14,14 @@ export const TORRENT_PROVIDER_OPTIONS: ReadonlyArray<TorrentProviderOption> = Ob
   {
     value: 'piratebay',
     label: 'The Pirate Bay',
-    description: 'Provider por defecto compatible con la app actualmente.',
+    description: 'Proveedor recomendado y compatible por defecto con la app.',
+    logoPath: 'assets/providers/piratebay.svg',
   },
   {
     value: 'kikass',
     label: 'Kikass',
-    description: 'Provider alternativo basado en el buscador de kikass.to.',
+    description: 'Proveedor alternativo basado en el buscador de kikass.to.',
+    logoPath: 'assets/providers/kikass.svg',
   },
 ]);
 
