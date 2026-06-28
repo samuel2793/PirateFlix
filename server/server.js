@@ -72,21 +72,30 @@ function resolveKikassCategory(categoryLike) {
   return null;
 }
 
+function resolveTpbApiCategory(categoryLike) {
+  const category = String(categoryLike || '').trim().toLowerCase();
+  if (!category) return '';
+
+  if (['100', '200', '300', '400', '500', '600'].includes(category)) return category;
+  if (['201', '202', '203', '204', '205', '206', '207', '208'].includes(category)) return '200';
+  return '';
+}
+
 const TORRENT_PROVIDERS = Object.freeze({
   piratebay: Object.freeze({
     id: 'piratebay',
     label: 'The Pirate Bay',
     mirrors: Object.freeze([
-      'https://thepibay.site',
-      'https://tpb.party',
-      'https://thepiratebay.org',
-      'https://thpibay.xyz',
-      'https://thpibay.site',
-      'https://thepibay.online',
+      'https://tpbnow.com/',
+      'https://proxytpb.com/',
     ]),
     enableYtsFallback: true,
     buildSearchUrl(base, cleanQuery, category) {
-      return `${base}/search/${encodeURIComponent(cleanQuery)}/1/99/${category}`;
+      const normalizedBase = String(base || '').replace(/\/+$/, '');
+      const apiCategory = resolveTpbApiCategory(category);
+      const query = `q=${encodeURIComponent(cleanQuery)}`;
+      const catQuery = apiCategory ? `&cat=${encodeURIComponent(apiCategory)}` : '';
+      return `${normalizedBase}/api/search?${query}${catQuery}`;
     },
   }),
   kikass: Object.freeze({
@@ -1403,7 +1412,7 @@ async function ffprobeWithRetry(filePath, retries = 2) {
       '-show_streams',
       filePath
     ];
-    
+
     const attemptProbe = (attempt) => {
       execFile('ffprobe', args, (err, stdout, stderr) => {
         if (err) {
@@ -1417,7 +1426,7 @@ async function ffprobeWithRetry(filePath, retries = 2) {
           reject(err);
           return;
         }
-        
+
         try {
           const metadata = JSON.parse(stdout);
           resolve(metadata);
@@ -1426,7 +1435,7 @@ async function ffprobeWithRetry(filePath, retries = 2) {
         }
       });
     };
-    
+
     attemptProbe(0);
   });
 }
@@ -2127,7 +2136,7 @@ async function streamSeekFromTime({
   res,
 }) {
   const cacheKey = `seek_${infoHash}_${fileIndex}_${Math.floor(seekTime)}`;
-  
+
   const existing = activeFFmpegProcesses.get(cacheKey);
   if (existing) {
     try {
@@ -2138,7 +2147,7 @@ async function streamSeekFromTime({
 
   const useTorrentStream = Number(file?.downloaded || 0) < Number(file?.length || 0);
   let inputStream = null;
-  
+
   // Para seek, preferimos el archivo en disco si está disponible
   if (!useTorrentStream) {
     try {
@@ -2414,6 +2423,52 @@ app.get('/api/search-torrent', async (req, res) => {
       console.warn('No se pudieron obtener diagnostics internos:', e.message);
     }
 
+    const tryYtsFallback = async (q) => {
+      if (
+        !providerDefinition.enableYtsFallback ||
+        String(process.env.PIRATEFLIX_USE_EXTERNAL_API || 'true').toLowerCase() !== 'true'
+      )
+        return null;
+      try {
+        if (requestAbortSignal.aborted) return null;
+        const apiUrl = `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(
+          q
+        )}&limit=5`;
+        const ytsTimeout = parseInt(process.env.PIRATEFLIX_YTS_TIMEOUT_MS || '7000', 10);
+        console.log(
+          'Intentando fallback externo rápido (YTS):',
+          apiUrl,
+          `(timeout ${ytsTimeout}ms)`
+        );
+        const resp = await axios.get(apiUrl, {
+          timeout: ytsTimeout,
+          responseType: 'json',
+          httpsAgent: httpsAgentShared,
+          httpAgent,
+          signal: requestAbortSignal,
+        });
+        const movies = resp?.data?.data?.movies;
+        if (!movies || movies.length === 0) return null;
+
+        const magnets = [];
+        for (const m of movies) {
+          if (!m.torrents) continue;
+          for (const t of m.torrents) {
+            if (!t.hash) continue;
+            const dn = encodeURIComponent(`${m.title} ${m.year} ${t.quality}`);
+            magnets.push(`magnet:?xt=urn:btih:${t.hash}&dn=${dn}`);
+          }
+        }
+
+        if (magnets.length === 0) return null;
+        return magnets.map((m) => `<a href="${m}">download</a>`).join('\n');
+      } catch (err) {
+        if (requestAbortSignal.aborted || isAbortLikeError(err)) return null;
+        console.warn('Fallback YTS falló:', err && err.message ? err.message : err);
+        return null;
+      }
+    };
+
     async function fetchSearchHtml(cleanQuery, category, parentSignal) {
       const looksLikeBlockedHtml = (html) => {
         const lower = normalizeHtmlForScan(html);
@@ -2509,66 +2564,6 @@ app.get('/api/search-torrent', async (req, res) => {
         return controller;
       };
 
-      const tryYtsFallback = async (q) => {
-        if (
-          !providerDefinition.enableYtsFallback ||
-          String(process.env.PIRATEFLIX_USE_EXTERNAL_API || 'true').toLowerCase() !== 'true'
-        )
-          return null;
-        ensureNotAborted();
-        let controller = null;
-        try {
-          const apiUrl = `https://yts.mx/api/v2/list_movies.json?query_term=${encodeURIComponent(
-            q
-          )}&limit=5`;
-          const ytsTimeout = parseInt(process.env.PIRATEFLIX_YTS_TIMEOUT_MS || '7000', 10);
-          console.log(
-            'Intentando fallback externo rápido (YTS):',
-            apiUrl,
-            `(timeout ${ytsTimeout}ms)`
-          );
-          controller = trackController(new AbortController());
-          const resp = await axios.get(apiUrl, {
-            timeout: ytsTimeout,
-            responseType: 'json',
-            httpsAgent: httpsAgentShared,
-            httpAgent,
-            signal: controller.signal,
-          });
-          try {
-            activeSearchControllers.delete(controller);
-          } catch (e) {
-            /* ignore */
-          }
-          const movies = resp?.data?.data?.movies;
-          if (!movies || movies.length === 0) return null;
-
-          const magnets = [];
-          for (const m of movies) {
-            if (!m.torrents) continue;
-            for (const t of m.torrents) {
-              if (!t.hash) continue;
-              const dn = encodeURIComponent(`${m.title} ${m.year} ${t.quality}`);
-              magnets.push(`magnet:?xt=urn:btih:${t.hash}&dn=${dn}`);
-            }
-          }
-
-          if (magnets.length === 0) return null;
-          return magnets.map((m) => `<a href="${m}">download</a>`).join('\n');
-        } catch (err) {
-          if (controller) {
-            try {
-              activeSearchControllers.delete(controller);
-            } catch (e) {
-              /* ignore */
-            }
-          }
-          if (isAbortError(err) || (overallSignal && overallSignal.aborted)) throw makeAbortError();
-          console.warn('Fallback YTS falló:', err && err.message ? err.message : err);
-          return null;
-        }
-      };
-
       // try {
       //   if (Date.now() - lastWarmupAt > WARMUP_INTERVAL_MS) {
       //     console.log(
@@ -2623,23 +2618,45 @@ app.get('/api/search-torrent', async (req, res) => {
             signal: controller.signal,
           })
           .then((resp) => {
-            if (resp && resp.data && resp.data.length > 0) {
-              if (!looksLikeSearchHtml(resp.data)) {
-                const blocked = looksLikeBlockedHtml(resp.data);
-                console.warn(
-                  `HTML inesperado desde ${base} (${blocked ? 'bloqueado' : 'no-search'})`
-                );
-                throw new Error(`Invalid search HTML from ${base}`);
+            if (resp && resp.data) {
+              const responseData = resp.data;
+              if (url.includes('/api/search')) {
+                try {
+                  const jsonPayload =
+                    Array.isArray(responseData) || typeof responseData === 'object'
+                      ? responseData
+                      : JSON.parse(responseData);
+                  console.log(`JSON recibido desde ${base}`);
+                  mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
+                  try {
+                    activeSearchControllers.delete(controller);
+                  } catch (e) {
+                    /* ignore */
+                  }
+                  return { base, json: jsonPayload };
+                } catch (jsonErr) {
+                  console.warn(`JSON inválido desde ${base}:`, jsonErr && jsonErr.message ? jsonErr.message : jsonErr);
+                }
               }
 
-              console.log(`HTML recibido desde ${base}: ${resp.data.length} bytes`);
-              mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
-              try {
-                activeSearchControllers.delete(controller);
-              } catch (e) {
-                /* ignore */
+              if (typeof responseData === 'string' && responseData.length > 0) {
+                if (!looksLikeSearchHtml(responseData)) {
+                  const blocked = looksLikeBlockedHtml(responseData);
+                  console.warn(
+                    `HTML inesperado desde ${base} (${blocked ? 'bloqueado' : 'no-search'})`
+                  );
+                  throw new Error(`Invalid search HTML from ${base}`);
+                }
+
+                console.log(`HTML recibido desde ${base}: ${responseData.length} bytes`);
+                mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
+                try {
+                  activeSearchControllers.delete(controller);
+                } catch (e) {
+                  /* ignore */
+                }
+                return { base, html: responseData };
               }
-              return { base, html: resp.data };
             }
             throw new Error(`Empty response from ${base}`);
           })
@@ -2812,6 +2829,24 @@ app.get('/api/search-torrent', async (req, res) => {
                 }
 
                 if (resp && resp.data && resp.data.length > 0) {
+                  if (url.includes('/api/search')) {
+                    try {
+                      const jsonPayload =
+                        Array.isArray(resp.data) || typeof resp.data === 'object'
+                          ? resp.data
+                          : JSON.parse(resp.data);
+                      console.log(`JSON recibido (secuencial) desde ${base}`);
+                      mirrorStats.set(base, { fails: 0, lastSuccess: Date.now(), openUntil: null });
+                      result = { base, json: jsonPayload };
+                      break;
+                    } catch (jsonErr) {
+                      console.warn(
+                        `JSON inválido (secuencial) desde ${base}:`,
+                        jsonErr && jsonErr.message ? jsonErr.message : jsonErr
+                      );
+                    }
+                  }
+
                   if (!looksLikeSearchHtml(resp.data)) {
                     const blocked = looksLikeBlockedHtml(resp.data);
                     console.warn(
@@ -2885,11 +2920,14 @@ app.get('/api/search-torrent', async (req, res) => {
 
     let html = null;
     let htmlBase = null;
+    let searchJson = null;
 
     try {
       const searchResult = await fetchSearchHtml(cleanQuery, category, requestAbortSignal);
-      html = searchResult?.html || searchResult;
+      html = searchResult?.html || null;
+      searchJson = searchResult?.json || null;
       htmlBase = searchResult?.base || null;
+      if (searchJson) html = '';
       console.log(`Busqueda finalizada en ${Date.now() - searchStart} ms`);
     } catch (initialErr) {
       if (isAbortLikeError(initialErr) || requestAbortSignal.aborted) throw initialErr;
@@ -2940,6 +2978,29 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     const torrents = [];
+
+    if (searchJson) {
+      const apiResults = Array.isArray(searchJson) ? searchJson : [];
+      for (const entry of apiResults) {
+        if (torrents.length >= 15) break;
+        const infoHash = String(entry?.info_hash || '').trim();
+        const name = String(entry?.name || '').trim();
+        if (!infoHash || /^0+$/.test(infoHash) || !name || name === 'No results returned') continue;
+
+        const seeders = Number(entry?.seeders) || 0;
+        const leechers = Number(entry?.leechers) || 0;
+        const size = String(entry?.size || '').trim() || 'Unknown';
+        const magnetLink = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(name)}`;
+        torrents.push({
+          name,
+          magnetLink,
+          size,
+          seeders,
+          leechers,
+          score: seeders * 2 + leechers,
+        });
+      }
+    }
 
     const extractPeersFromRow = (rowHtml) => {
       const numbersFrom = (regex) => {
@@ -3185,32 +3246,49 @@ app.get('/api/search-torrent', async (req, res) => {
     }
 
     if (torrents.length === 0) {
-      const normalizedHtml = decodeHtmlEntities(html);
-      const magnetRegex = /magnet:\?xt=urn:btih:[^'"\s<>]+/gi;
-      const magnets = [];
-      let magnetMatch;
+      const appendMagnetsFromHtml = (sourceHtml) => {
+        const normalizedHtml = decodeHtmlEntities(sourceHtml);
+        const magnetRegex = /magnet:\?xt=urn:btih:[^'"\s<>]+/gi;
+        const magnets = [];
+        let magnetMatch;
 
-      while ((magnetMatch = magnetRegex.exec(normalizedHtml)) !== null) {
-        magnets.push(magnetMatch[0]);
-      }
+        while ((magnetMatch = magnetRegex.exec(normalizedHtml)) !== null) {
+          magnets.push(magnetMatch[0]);
+        }
 
-      console.log(`Magnet links encontrados (fallback): ${magnets.length}`);
+        for (const magnetLink of magnets) {
+          if (torrents.length >= 15) break;
+          if (seenMagnets.has(magnetLink)) continue;
+          seenMagnets.add(magnetLink);
 
-      for (const magnetLink of magnets) {
-        if (torrents.length >= 15) break;
-        if (seenMagnets.has(magnetLink)) continue;
-        seenMagnets.add(magnetLink);
+          const name = extractName(magnetLink, normalizedHtml);
 
-        const name = extractName(magnetLink, normalizedHtml);
+          torrents.push({
+            name,
+            magnetLink,
+            size: 'Unknown',
+            seeders: 0,
+            leechers: 0,
+            score: 0,
+          });
+        }
 
-        torrents.push({
-          name,
-          magnetLink,
-          size: 'Unknown',
-          seeders: 0,
-          leechers: 0,
-          score: 0,
-        });
+        return magnets.length;
+      };
+
+      const fallbackMagnets = appendMagnetsFromHtml(html);
+      console.log(`Magnet links encontrados (fallback): ${fallbackMagnets}`);
+
+      if (torrents.length === 0 && providerDefinition.enableYtsFallback) {
+        try {
+          const ytsHtml = await tryYtsFallback(cleanQuery);
+          if (ytsHtml) {
+            const ytsMagnets = appendMagnetsFromHtml(ytsHtml);
+            console.log(`Magnet links encontrados (fallback YTS): ${ytsMagnets}`);
+          }
+        } catch (e) {
+          console.warn('Fallback YTS post-parse falló:', e && e.message ? e.message : e);
+        }
       }
     }
 
@@ -4032,13 +4110,13 @@ app.get('/api/stream-seek/:infoHash/:fileIndex', async (req, res) => {
   const { infoHash, fileIndex } = req.params;
   const timeParam = req.query.time || req.query.t;
   const audioStreamParam = req.query.audioStream;
-  
+
   const seekTime = parseFloat(timeParam) || 0;
   const audioStreamIndex =
     typeof audioStreamParam === 'string' && audioStreamParam.trim() !== ''
       ? Number(audioStreamParam)
       : null;
-  
+
   const torrent = client.get(infoHash);
   if (!torrent) return res.status(404).send('Torrent no encontrado');
 
@@ -4467,21 +4545,21 @@ app.post('/api/storage/prune', (req, res) => {
 // API Docs: https://theintrodb.org/docs
 app.get('/api/theintrodb/media', async (req, res) => {
   const { tmdb_id, season, episode } = req.query;
-  
+
   if (!tmdb_id) {
     return res.status(400).json({ error: 'tmdb_id is required' });
   }
-  
+
   try {
     // Build query params
     const params = new URLSearchParams();
     params.set('tmdb_id', tmdb_id);
     if (season) params.set('season', season);
     if (episode) params.set('episode', episode);
-    
+
     const url = `https://api.theintrodb.org/v1/media?${params.toString()}`;
     console.log(`[TheIntroDB] Fetching: ${url}`);
-    
+
     const response = await axios.get(url, {
       headers: {
         'Accept': 'application/json',
@@ -4490,13 +4568,13 @@ app.get('/api/theintrodb/media', async (req, res) => {
       httpsAgent: httpsAgentGlobal,
       timeout: 10000,
     });
-    
+
     console.log(`[TheIntroDB] Response:`, JSON.stringify(response.data));
     res.json(response.data);
   } catch (err) {
     const status = err?.response?.status || 500;
     console.warn(`[TheIntroDB] Error fetching tmdb_id=${tmdb_id}:`, err?.message || err);
-    
+
     // Return empty data for 404 (not found in database)
     if (status === 404) {
       return res.json({
@@ -4507,7 +4585,7 @@ app.get('/api/theintrodb/media', async (req, res) => {
         credits: null,
       });
     }
-    
+
     res.status(status).json({
       error: 'Failed to fetch from TheIntroDB',
       message: err?.message || 'Unknown error',
