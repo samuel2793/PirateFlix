@@ -92,6 +92,26 @@ export const LIVE_CHANNELS: readonly LiveChannel[] = [
     ],
   },
   {
+    id: 'telecinco', name: 'Telecinco', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'https://files.mediaset.es/cimg/2026/06/18/logo-black_da39.svg',
+    websiteUrl: 'https://www.mediasetinfinity.es/directo/telecinco/', epgId: 'Telecinco.TV', geoRestricted: true,
+    streams: [
+      {
+        label: 'Principal',
+        url: 'https://live.tvup.edge2befaster.io/telecincohd/telecincohd.mpd',
+        geoRestricted: true,
+        drm: {
+          keySystem: 'org.w3.clearkey',
+          clearKeys: {
+        'def5769eed6152d2b32aa1c75a624764': 'ed06df900e0b84549a834c49997dc8ad',
+        '7ca93b77733454d3830c60996ad8929b': '8ab9809fc799015a41c39b8b9d6ab9a5',
+        'faebbb9b817459d2965625708666a114': '9a1aa94adb0b15b523836c6f41843726'
+          },
+        },
+      },
+    ],
+  },
+  {
     id: 'trece', name: 'TRECE', category: 'national', countryCode: 'ES', languages: ['es'],
     logoUrl: 'https://graph.facebook.com/TRECEtves/picture?width=200&height=200',
     websiteUrl: 'https://www.cope.es/directos/trece', epgId: '13.TV',

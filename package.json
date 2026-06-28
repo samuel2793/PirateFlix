@@ -42,6 +42,7 @@
     "@choreruiz/capacitor-node-js": "^1.0.2",
     "@ionic/angular": "^8.7.16",
     "axios": "^1.13.2",
+    "dashjs": "^5.2.0",
     "firebase": "^10.14.1",
     "hls.js": "^1.6.16",
     "rxjs": "~7.8.0",

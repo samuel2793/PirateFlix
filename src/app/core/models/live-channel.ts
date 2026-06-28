@@ -5,6 +5,16 @@ export interface LiveStream {
   url?: string;
   language?: string;
   geoRestricted?: boolean;
+  drm?: {
+    keySystem?: 'org.w3.clearkey' | 'com.widevine.alpha';
+    clearKeys?: Record<string, string>;
+    licenseServerUrl?: string;
+    audioRobustness?: string;
+    videoRobustness?: string;
+    serverCertificate?: string;
+    headers?: Record<string, string>;
+    withCredentials?: boolean;
+  };
   resolver?: {
     provider: 'atresplayer';
     pagePath: string;

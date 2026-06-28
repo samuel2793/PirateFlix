@@ -11,11 +11,12 @@ import {
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
+import * as dashjs from 'dashjs';
 import Hls from 'hls.js';
 import { Subject, takeUntil } from 'rxjs';
 
 import { LIVE_CHANNELS } from '../../core/config/live-channels';
-import { LiveChannel, LiveChannelCategory } from '../../core/models/live-channel';
+import { LiveChannel, LiveChannelCategory, LiveStream } from '../../core/models/live-channel';
 import { LiveStreamResolverService } from '../../core/services/live-stream-resolver.service';
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 
@@ -33,6 +34,7 @@ export class LiveTvComponent implements OnDestroy {
   private readonly router = inject(Router);
   private readonly streamResolver = inject(LiveStreamResolverService);
   private readonly destroy$ = new Subject<void>();
+  private dash: any = null;
   private hls: Hls | null = null;
   private videoElement: HTMLVideoElement | null = null;
   private attachToken = 0;
@@ -146,6 +148,9 @@ export class LiveTvComponent implements OnDestroy {
   setQuality(index: number) {
     this.selectedQuality.set(index);
     if (this.hls) this.hls.currentLevel = index;
+    if (this.dash && index >= 0 && typeof this.dash.setQualityFor === 'function') {
+      this.dash.setQualityFor('video', index);
+    }
   }
 
   toggleFavorite(channel: LiveChannel, event?: Event) {
@@ -223,6 +228,66 @@ export class LiveTvComponent implements OnDestroy {
       return;
     }
 
+    if (streamUrl.toLowerCase().endsWith('.mpd')) {
+      if (typeof (dashjs.MediaPlayer as any).isSupported === 'function' && !(dashjs.MediaPlayer as any).isSupported()) {
+        this.playerStatus.set('error');
+        this.playerMessage.set('DASH playback is not supported on this device.');
+        return;
+      }
+
+      const player = dashjs.MediaPlayer().create() as any;
+      this.dash = player;
+      if (typeof player.updateSettings === 'function') {
+        player.updateSettings({
+          streaming: {
+            text: {
+              defaultEnabled: false,
+            },
+          },
+        });
+      }
+      const drmConfig = this.getDrmConfig(stream);
+      if (drmConfig && typeof player.setProtectionData === 'function') {
+        player.setProtectionData(drmConfig);
+      }
+      player.initialize(video, streamUrl, true);
+      player.on(dashjs.MediaPlayer.events.STREAM_INITIALIZED, () => {
+        if (loadToken !== this.streamLoadToken || this.dash !== player) return;
+        const tracks: Array<{ height?: number; bitrate?: number }> =
+          (typeof player.getBitrateInfoListFor === 'function'
+            ? (player.getBitrateInfoListFor('video') as Array<{ height?: number; bitrate?: number }> | undefined)
+            : undefined) ??
+          [];
+        this.qualityLevels.set(
+          tracks.map((track: { height?: number; bitrate?: number }, index: number) => ({
+            index,
+            label: track.height ? `${track.height}p` : `${Math.round((track.bitrate || 0) / 1000)} kbps`,
+          }))
+        );
+        this.playerMessage.set('');
+      });
+      const handleDashError = (event: unknown) => {
+        if (loadToken !== this.streamLoadToken || this.dash !== player) return;
+        const serialized = this.stringifyDashError(event);
+        console.error('DASH playback error.', event);
+
+        if (this.isTransientDashError(serialized)) {
+          return;
+        }
+        if (this.isDrmDashError(serialized)) {
+          this.tryNextStream('This broadcast is DRM-protected and cannot be played without a license.');
+          return;
+        }
+        this.tryNextStream('The broadcast is unavailable or blocked by its provider.');
+      };
+      player.on(dashjs.MediaPlayer.events.ERROR, handleDashError);
+      player.on(dashjs.MediaPlayer.events.PLAYBACK_ERROR, handleDashError);
+      void video.play().catch(() => {
+        this.playerMessage.set('Press play to start the broadcast.');
+      });
+      return;
+    }
+
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
       video.load();
@@ -294,6 +359,9 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   private destroyHlsOnly() {
+    // On stream switches we only detach the current player; full teardown happens
+    // in destroyPlayer() to avoid closing EME sessions while a new load is starting.
+    this.dash = null;
     this.hls?.destroy();
     this.hls = null;
   }
@@ -301,6 +369,11 @@ export class LiveTvComponent implements OnDestroy {
   private destroyPlayer() {
     this.attachToken += 1;
     this.streamLoadToken += 1;
+    try {
+      this.dash?.destroy();
+    } catch (error) {
+      console.warn('Could not destroy DASH player cleanly.', error);
+    }
     this.destroyHlsOnly();
     if (this.videoElement) {
       this.videoElement.pause();
@@ -308,6 +381,114 @@ export class LiveTvComponent implements OnDestroy {
       this.videoElement.load();
     }
     this.qualityLevels.set([]);
+  }
+
+  private getDrmConfig(stream: LiveStream) {
+    const drm = stream.drm;
+    if (!drm) return null;
+    if (drm.keySystem === 'org.w3.clearkey' && (!drm.clearKeys || Object.keys(drm.clearKeys).length === 0)) {
+      return null;
+    }
+
+    const protectionData: Record<string, any> = {};
+    const keySystem = drm.keySystem ?? (drm.clearKeys ? 'org.w3.clearkey' : 'com.widevine.alpha');
+
+    if (drm.clearKeys && Object.keys(drm.clearKeys).length > 0) {
+      // dash.js expects ClearKey material as base64, while several channel configs
+      // are stored as hex strings because that matches the provider metadata.
+      protectionData['clearkeys'] = this.normalizeClearKeys(drm.clearKeys);
+    }
+    if (drm.licenseServerUrl) {
+      protectionData['laURL'] = drm.licenseServerUrl;
+    }
+    if (drm.audioRobustness) {
+      protectionData['audioRobustness'] = drm.audioRobustness;
+    }
+    if (drm.videoRobustness) {
+      protectionData['videoRobustness'] = drm.videoRobustness;
+    }
+    if (drm.serverCertificate) {
+      protectionData['serverCertificate'] = drm.serverCertificate;
+    }
+    if (drm.headers) {
+      protectionData['httpRequestHeaders'] = drm.headers;
+    }
+    if (drm.withCredentials !== undefined) {
+      protectionData['withCredentials'] = drm.withCredentials;
+    }
+
+    return Object.keys(protectionData).length > 0 ? { [keySystem]: protectionData } : null;
+  }
+
+  private stringifyDashError(event: unknown) {
+    if (event == null) return '';
+    if (typeof event === 'string') return event;
+    const parts: string[] = [];
+    const stack: unknown[] = [event];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || typeof current !== 'object') continue;
+      for (const [key, value] of Object.entries(current as Record<string, unknown>)) {
+        if (typeof value === 'string') parts.push(value);
+        else if (typeof value === 'number' || typeof value === 'boolean') parts.push(String(value));
+        else if (value && typeof value === 'object') stack.push(value);
+        if (key === 'message' || key === 'code' || key === 'name' || key === 'event' || key === 'error') {
+          if (typeof value === 'string') parts.push(value);
+        }
+      }
+    }
+    return parts.join(' ').toLowerCase();
+  }
+
+  private isTransientDashError(serialized: string) {
+    return [
+      'aborterror',
+      'play() request was interrupted',
+      'new load request',
+      'sourcebuffer has been removed',
+      'operation is not allowed',
+      'session is not callable',
+      'generating key request',
+    ].some((pattern) => serialized.includes(pattern));
+  }
+
+  private isDrmDashError(serialized: string) {
+    return [
+      'license',
+      'drm',
+      'keysystem',
+      'clearkey',
+      'widevine',
+      'key request',
+      'update() message',
+      'media keyerr',
+    ].some((pattern) => serialized.includes(pattern));
+  }
+
+  private normalizeClearKeys(clearKeys: Record<string, string>) {
+    const normalized: Record<string, string> = {};
+    for (const [keyId, key] of Object.entries(clearKeys)) {
+      normalized[this.normalizeClearKeyValue(keyId)] = this.normalizeClearKeyValue(key);
+    }
+    return normalized;
+  }
+
+  private normalizeClearKeyValue(value: string) {
+    const trimmed = value.trim();
+    if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0) {
+      const bytes = new Uint8Array(trimmed.length / 2);
+      for (let index = 0; index < trimmed.length; index += 2) {
+        bytes[index / 2] = Number.parseInt(trimmed.slice(index, index + 2), 16);
+      }
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return this.toBase64Url(btoa(binary));
+    }
+    return this.toBase64Url(trimmed);
+  }
+
+  private toBase64Url(value: string) {
+    return value.replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '');
   }
 
   private loadFavorites() {
