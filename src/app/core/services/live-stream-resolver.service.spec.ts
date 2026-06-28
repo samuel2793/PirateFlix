@@ -68,4 +68,5 @@ describe('LiveStreamResolverService', () => {
     const service = new LiveStreamResolverService();
     expect(await service.resolve(stream)).toBe(fallbackUrl);
   });
+
 });

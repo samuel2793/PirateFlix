@@ -32,6 +32,66 @@ export const LIVE_CHANNELS: readonly LiveChannel[] = [
     ],
   },
   {
+    id: 'la-sexta', name: 'La Sexta', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'https://graph.facebook.com/laSexta/picture?width=200&height=200',
+    websiteUrl: 'https://www.atresplayer.com/directos/lasexta/', epgId: 'LaSexta.TV', geoRestricted: true,
+    streams: [
+      {
+        label: 'Principal',
+        geoRestricted: true,
+        resolver: { provider: 'atresplayer', pagePath: '/directos/lasexta/' },
+      },
+    ],
+  },
+  {
+    id: 'neox', name: 'Neox', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'https://graph.facebook.com/Neox/picture?width=200&height=200',
+    websiteUrl: 'https://www.atresplayer.com/directos/neox/', geoRestricted: true,
+    streams: [
+      {
+        label: 'Principal',
+        geoRestricted: true,
+        resolver: { provider: 'atresplayer', pagePath: '/directos/neox/' },
+      },
+    ],
+  },
+  {
+    id: 'nova', name: 'Nova', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'assets/providers/nova.svg',
+    websiteUrl: 'https://www.atresplayer.com/directos/nova/', geoRestricted: true,
+    streams: [
+      {
+        label: 'Principal',
+        geoRestricted: true,
+        resolver: { provider: 'atresplayer', pagePath: '/directos/nova/' },
+      },
+    ],
+  },
+  {
+    id: 'mega', name: 'Mega', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'assets/providers/mega.svg',
+    websiteUrl: 'https://www.atresplayer.com/directos/mega/', geoRestricted: true,
+    streams: [
+      {
+        label: 'Principal',
+        geoRestricted: true,
+        resolver: { provider: 'atresplayer', pagePath: '/directos/mega/' },
+      },
+    ],
+  },
+  {
+    id: 'atreseries', name: 'Atreseries', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'https://graph.facebook.com/atreseries/picture?width=200&height=200',
+    websiteUrl: 'https://www.atresplayer.com/directos/atreseries/', geoRestricted: true,
+    streams: [
+      {
+        label: 'Principal',
+        geoRestricted: true,
+        resolver: { provider: 'atresplayer', pagePath: '/directos/atreseries/' },
+      },
+    ],
+  },
+  {
     id: 'trece', name: 'TRECE', category: 'national', countryCode: 'ES', languages: ['es'],
     logoUrl: 'https://graph.facebook.com/TRECEtves/picture?width=200&height=200',
     websiteUrl: 'https://www.cope.es/directos/trece', epgId: '13.TV',

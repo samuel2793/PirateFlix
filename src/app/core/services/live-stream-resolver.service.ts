@@ -105,16 +105,19 @@ export class LiveStreamResolverService {
     return url.toString();
   }
 
-  private async fetchJson<T>(url: string): Promise<T> {
+  private async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
+      const headers = new Headers(init?.headers);
+      headers.set('Accept', 'application/json');
       const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
+        ...init,
+        headers,
         credentials: 'omit',
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Atresplayer API responded with ${response.status}`);
+      if (!response.ok) throw new Error(`API responded with ${response.status}`);
       return (await response.json()) as T;
     } finally {
       clearTimeout(timeout);

@@ -2,8 +2,8 @@ import { LIVE_CHANNELS } from './live-channels';
 
 describe('LIVE_CHANNELS', () => {
   it('contains the expected M3U8 channel catalog', () => {
-    expect(LIVE_CHANNELS).toHaveLength(25);
-    expect(LIVE_CHANNELS.reduce((total, channel) => total + channel.streams.length, 0)).toBe(47);
+    expect(LIVE_CHANNELS).toHaveLength(26);
+    expect(LIVE_CHANNELS.reduce((total, channel) => total + channel.streams.length, 0)).toBe(48);
   });
 
   it('uses unique stable identifiers', () => {

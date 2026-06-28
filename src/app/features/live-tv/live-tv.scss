@@ -149,19 +149,32 @@ $text-secondary: rgba(255, 255, 255, 0.68);
   padding: 28px;
 }
 
-.close-player {
+.player-control-btn {
   position: absolute;
   top: 12px;
-  right: 12px;
   width: 36px;
   height: 36px;
   display: grid;
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
   color: #fff;
   cursor: pointer;
+}
+
+.close-player {
+  right: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.retry-player {
+  right: 56px;
+  background: rgba(var(--accent-rgb, 229, 160, 13), 0.18);
+  color: var(--accent-primary, $accent);
+}
+
+.player-control-btn:hover {
+  filter: brightness(1.08);
 }
 
 .channel-identity {

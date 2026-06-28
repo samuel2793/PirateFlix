@@ -45,7 +45,10 @@
       </div>
 
       <div class="now-playing">
-        <button class="close-player" type="button" (click)="closePlayer()" [title]="'Close' | t">
+        <button class="player-control-btn retry-player" type="button" (click)="retry()" [title]="'Retry' | t" [attr.aria-label]="'Retry' | t">
+          <mat-icon>refresh</mat-icon>
+        </button>
+        <button class="player-control-btn close-player" type="button" (click)="closePlayer()" [title]="'Close' | t" [attr.aria-label]="'Close' | t">
           <mat-icon>close</mat-icon>
         </button>
         <div class="channel-identity">

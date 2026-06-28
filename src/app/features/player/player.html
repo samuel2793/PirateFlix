@@ -27,7 +27,7 @@
                   </span>
                 }
               </div>
-              
+
               <div class="transcode-progress-container">
                 <div class="transcode-percent-display">
                   @if (transcodePercent() !== null) {
@@ -37,12 +37,12 @@
                     <span class="percent-value">—</span>
                   }
                 </div>
-                
+
                 <div class="transcode-progress-info">
                   <div class="progress-bar" [class.indeterminate]="transcodePercent() === null">
                     <div class="progress-fill" [style.width.%]="transcodePercent() ?? 0"></div>
                   </div>
-                  
+
                   <div class="transcode-details">
                     @if (transcodeTimemark()) {
                       <span class="detail-item">⏱️ {{ transcodeTimemark() }}</span>
@@ -56,7 +56,7 @@
                   </div>
                 </div>
               </div>
-              
+
               <button class="skip-transcode-btn" (click)="skipTranscodeWait()" type="button">
                 <span class="translate-text">{{ 'Play without waiting (no seeking)' | t }}</span>
               </button>
@@ -128,30 +128,30 @@
         @if (nextEpisodeInfo()?.stillPath) {
           <div class="card-backdrop" [style.background-image]="'url(' + getEpisodeStillUrl(nextEpisodeInfo()?.stillPath ?? null) + ')'"></div>
         }
-        
+
         <div class="card-content">
           <div class="next-episode-header">
             <span class="next-label">{{ 'Next Episode' | t }}</span>
           </div>
-          
+
           <div class="next-episode-preview">
             @if (nextEpisodeInfo()?.stillPath) {
-              <img 
-                class="episode-thumbnail" 
-                [src]="getEpisodeStillUrl(nextEpisodeInfo()?.stillPath ?? null)" 
+              <img
+                class="episode-thumbnail"
+                [src]="getEpisodeStillUrl(nextEpisodeInfo()?.stillPath ?? null)"
                 alt="Next episode thumbnail">
             } @else {
               <div class="episode-thumbnail placeholder">
                 <span class="placeholder-icon">▶</span>
               </div>
             }
-            
+
             <div class="episode-details">
               <span class="episode-number">S{{ nextEpisodeInfo()?.season }} : E{{ nextEpisodeInfo()?.episode }}</span>
               <span class="episode-title">{{ nextEpisodeInfo()?.name }}</span>
             </div>
           </div>
-          
+
           <div class="next-episode-actions">
             <button class="action-btn secondary" (click)="cancelNextEpisodeCountdown()">
               <span class="btn-icon">✕</span>
@@ -163,7 +163,7 @@
               <div class="countdown-ring">
                 <svg viewBox="0 0 36 36">
                   <circle class="ring-bg" cx="18" cy="18" r="16"/>
-                  <circle class="ring-progress" cx="18" cy="18" r="16" 
+                  <circle class="ring-progress" cx="18" cy="18" r="16"
                     [style.stroke-dashoffset]="100.53 - (nextEpisodeProgress() / 100 * 100.53)"/>
                 </svg>
                 <span class="countdown-number">{{ nextEpisodeCountdown() }}</span>
@@ -187,7 +187,7 @@
             <h2 class="end-title">{{ 'End of series' | t }}</h2>
             <p class="end-description">{{ 'You have watched all available episodes' | t }}</p>
           </div>
-          
+
           <div class="next-episode-actions">
             <button class="action-btn secondary" (click)="closeEndOverlay()">
               <span>{{ 'Close' | t }}</span>
@@ -213,7 +213,7 @@
             <h2 class="end-title">{{ 'Error loading next episode' | t }}</h2>
             <p class="end-description">{{ nextEpisodeErrorMessage() }}</p>
           </div>
-          
+
           <div class="next-episode-actions">
             <button class="action-btn secondary" (click)="closeRetryOverlay()">
               <span>{{ 'Cancel' | t }}</span>
