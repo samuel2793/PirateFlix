@@ -6,6 +6,7 @@ import { PersonComponent } from './features/person/person';
 import { ProfileComponent } from './features/profile/profile';
 import { SettingsComponent } from './features/settings/settings';
 import { CollectionComponent } from './features/collection/collection';
+import { LiveTvComponent } from './features/live-tv/live-tv';
 
 export const routes: Routes = [
   { path: '', component: HomeComponent, data: { animation: 'home' } },
@@ -16,5 +17,7 @@ export const routes: Routes = [
   { path: 'profile', component: ProfileComponent, data: { animation: 'profile' } },
   { path: 'settings', component: SettingsComponent, data: { animation: 'settings' } },
   { path: 'collection/:id', component: CollectionComponent, data: { animation: 'collection' } },
+  { path: 'live', component: LiveTvComponent, data: { animation: 'live' } },
+  { path: 'live/:channelId', component: LiveTvComponent, data: { animation: 'live' } },
   { path: '**', redirectTo: '' },
 ];

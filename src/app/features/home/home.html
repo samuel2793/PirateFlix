@@ -33,6 +33,10 @@
           <mat-icon>tv</mat-icon>
           <span class="translate-text">{{ 'TV Shows' | t }}</span>
         </button>
+        <button class="nav-tab" (click)="navigateToLiveTv()">
+          <mat-icon>live_tv</mat-icon>
+          <span class="translate-text">{{ 'Live TV' | t }}</span>
+        </button>
         <button
           class="nav-tab"
           [class.active]="activeTab() === 'search'"

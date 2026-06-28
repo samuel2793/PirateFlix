@@ -1,0 +1,195 @@
+<main class="live-page">
+  <header class="live-hero">
+    <div class="hero-copy">
+      <span class="eyebrow"><mat-icon>live_tv</mat-icon>{{ 'Live TV' | t }}</span>
+      <h1>{{ 'Live channels' | t }}</h1>
+      <p>{{ 'Free live broadcasts from Spain and other countries.' | t }}</p>
+    </div>
+    <div class="channel-count">
+      <strong>{{ channels.length }}</strong>
+      <span>{{ 'channels' | t }}</span>
+    </div>
+  </header>
+
+  @if (selectedChannel(); as channel) {
+    <section class="player-section" aria-live="polite">
+      <div class="video-panel">
+        <video
+          #liveVideo
+          class="live-video"
+          controls
+          autoplay
+          playsinline
+          crossorigin="anonymous"
+          (playing)="onVideoPlaying()"
+          (waiting)="onVideoWaiting()"
+          (error)="onNativeVideoError()"
+        ></video>
+
+        @if (playerStatus() === 'loading') {
+          <div class="player-overlay loading-overlay">
+            <span class="spinner"></span>
+            <span>{{ playerMessage() | t }}</span>
+          </div>
+        }
+        @if (playerStatus() === 'error') {
+          <div class="player-overlay error-overlay">
+            <mat-icon>signal_wifi_bad</mat-icon>
+            <strong>{{ 'Broadcast unavailable' | t }}</strong>
+            <span>{{ playerMessage() | t }}</span>
+            <button type="button" (click)="retry()">
+              <mat-icon>refresh</mat-icon>{{ 'Retry' | t }}
+            </button>
+          </div>
+        }
+      </div>
+
+      <div class="now-playing">
+        <button class="close-player" type="button" (click)="closePlayer()" [title]="'Close' | t">
+          <mat-icon>close</mat-icon>
+        </button>
+        <div class="channel-identity">
+          @if (!failedLogos().has(channel.id)) {
+            <img [src]="channel.logoUrl" [alt]="channel.name" (error)="markLogoFailed(channel)" />
+          } @else {
+            <span class="logo-fallback">{{ channel.name.charAt(0) }}</span>
+          }
+          <div>
+            <div class="live-line"><span class="live-dot"></span>{{ 'LIVE' | t }}</div>
+            <h2>{{ channel.name }}</h2>
+            <span class="channel-meta">{{ categoryLabel(channel.category) | t }} · {{ channel.countryCode }}</span>
+          </div>
+        </div>
+
+        <div class="player-actions">
+          @if (channel.streams.length > 1) {
+            <label>
+              <span>{{ 'Broadcast' | t }}</span>
+              <select [ngModel]="selectedStreamIndex()" (ngModelChange)="switchStream($event)">
+                @for (stream of channel.streams; track $index; let index = $index) {
+                  <option [ngValue]="index">{{ stream.label }}</option>
+                }
+              </select>
+            </label>
+          }
+          @if (qualityLevels().length > 1) {
+            <label>
+              <span>{{ 'Quality' | t }}</span>
+              <select [ngModel]="selectedQuality()" (ngModelChange)="setQuality($event)">
+                <option [ngValue]="-1">{{ 'Auto' | t }}</option>
+                @for (quality of qualityLevels(); track quality.index) {
+                  <option [ngValue]="quality.index">{{ quality.label }}</option>
+                }
+              </select>
+            </label>
+          }
+          <button class="icon-action" type="button" (click)="toggleFavorite(channel)" [class.active]="isFavorite(channel)">
+            <mat-icon>{{ isFavorite(channel) ? 'favorite' : 'favorite_border' }}</mat-icon>
+            <span>{{ 'Favorite' | t }}</span>
+          </button>
+          <a class="icon-action" [href]="channel.websiteUrl" target="_blank" rel="noopener noreferrer">
+            <mat-icon>open_in_new</mat-icon><span>{{ 'Official site' | t }}</span>
+          </a>
+        </div>
+
+        @if (channel.geoRestricted) {
+          <div class="geo-notice">
+            <mat-icon>location_on</mat-icon>
+            {{ 'Some broadcasts may only be available in their country of origin.' | t }}
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <section class="catalog-section">
+    <div class="catalog-toolbar">
+      <div class="category-filter" role="group" [attr.aria-label]="'Categories' | t">
+        @for (category of categories; track category.value) {
+          <button
+            type="button"
+            [class.active]="activeCategory() === category.value"
+            (click)="setCategory(category.value)"
+          >
+            <mat-icon>{{ category.icon }}</mat-icon>
+            <span>{{ category.label | t }}</span>
+          </button>
+        }
+      </div>
+      <label class="search-box">
+        <mat-icon>search</mat-icon>
+        <input
+          type="search"
+          [ngModel]="query()"
+          (ngModelChange)="query.set($event)"
+          [placeholder]="'Search channels' | t"
+        />
+      </label>
+    </div>
+
+    @if (favoriteChannels().length) {
+      <div class="channel-group">
+        <h2><mat-icon>favorite</mat-icon>{{ 'Favorites' | t }}</h2>
+        <div class="channel-grid">
+          @for (channel of favoriteChannels(); track channel.id) {
+            <ng-container *ngTemplateOutlet="channelCard; context: { $implicit: channel }"></ng-container>
+          }
+        </div>
+      </div>
+    }
+
+    <div class="channel-group">
+      <h2><mat-icon>live_tv</mat-icon>{{ activeCategory() === 'all' ? ('All channels' | t) : (categoryLabel(activeCategory()) | t) }}</h2>
+      @if (regularChannels().length) {
+        <div class="channel-grid">
+          @for (channel of regularChannels(); track channel.id) {
+            <ng-container *ngTemplateOutlet="channelCard; context: { $implicit: channel }"></ng-container>
+          }
+        </div>
+      } @else if (!favoriteChannels().length) {
+        <div class="empty-state">
+          <mat-icon>search_off</mat-icon>
+          <p>{{ 'No channels match your search.' | t }}</p>
+        </div>
+      }
+    </div>
+  </section>
+</main>
+
+<ng-template #channelCard let-channel>
+  <article
+    class="channel-card"
+    [class.selected]="selectedChannel()?.id === channel.id"
+    tabindex="0"
+    role="button"
+    (click)="openChannel(channel)"
+    (keydown.enter)="openChannel(channel)"
+    (keydown.space)="openChannel(channel); $event.preventDefault()"
+  >
+    <div class="card-logo">
+      @if (!failedLogos().has(channel.id)) {
+        <img [src]="channel.logoUrl" [alt]="channel.name" loading="lazy" (error)="markLogoFailed(channel)" />
+      } @else {
+        <span class="logo-fallback">{{ channel.name.charAt(0) }}</span>
+      }
+      <span class="play-overlay"><mat-icon>play_arrow</mat-icon></span>
+      @if (channel.geoRestricted) {
+        <span class="geo-badge" [title]="'Geographically restricted' | t"><mat-icon>location_on</mat-icon></span>
+      }
+      <button
+        class="favorite-button"
+        type="button"
+        [class.active]="isFavorite(channel)"
+        (click)="toggleFavorite(channel, $event)"
+        [title]="'Favorite' | t"
+      >
+        <mat-icon>{{ isFavorite(channel) ? 'favorite' : 'favorite_border' }}</mat-icon>
+      </button>
+    </div>
+    <div class="card-copy">
+      <h3>{{ channel.name }}</h3>
+      <span>{{ categoryLabel(channel.category) | t }} · {{ channel.countryCode }}</span>
+    </div>
+    <span class="stream-count" *ngIf="channel.streams.length > 1">{{ channel.streams.length }} {{ 'broadcasts' | t }}</span>
+  </article>
+</ng-template>

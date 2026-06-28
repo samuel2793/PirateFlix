@@ -233,6 +233,10 @@ export class HomeComponent implements OnDestroy {
     this.router.navigate(['/settings']);
   }
 
+  navigateToLiveTv() {
+    this.router.navigate(['/live']);
+  }
+
   changeLang(lang: SupportedLang) {
     this.language.setLang(lang);
   }
