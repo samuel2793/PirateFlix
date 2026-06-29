@@ -30,6 +30,15 @@ type PlayerStatus = 'idle' | 'loading' | 'playing' | 'error';
   styleUrl: './live-tv.scss',
 })
 export class LiveTvComponent implements OnDestroy {
+  private readonly API_URL = (() => {
+    if (typeof window === 'undefined') {
+      return 'http://127.0.0.1:3001/api';
+    }
+    const hostname = window.location.hostname || 'localhost';
+    const isLocalhost =
+      hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    return isLocalhost ? 'http://localhost:3001/api' : `http://${hostname}:3001/api`;
+  })();
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly streamResolver = inject(LiveStreamResolverService);
@@ -228,7 +237,9 @@ export class LiveTvComponent implements OnDestroy {
       return;
     }
 
-    if (streamUrl.toLowerCase().endsWith('.mpd')) {
+    const streamKind = this.detectStreamKind(stream, streamUrl);
+
+    if (streamKind === 'dash') {
       if (typeof (dashjs.MediaPlayer as any).isSupported === 'function' && !(dashjs.MediaPlayer as any).isSupported()) {
         this.playerStatus.set('error');
         this.playerMessage.set('DASH playback is not supported on this device.');
@@ -288,6 +299,15 @@ export class LiveTvComponent implements OnDestroy {
       return;
     }
 
+    if (streamKind === 'mpegts') {
+      video.src = this.buildPlaybackUrl(channel, stream, streamUrl);
+      video.load();
+      void video.play().catch(() => {
+        this.playerMessage.set('Press play to start the broadcast.');
+      });
+      return;
+    }
+
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl;
       video.load();
@@ -312,7 +332,7 @@ export class LiveTvComponent implements OnDestroy {
     });
     this.hls = hls;
     hls.attachMedia(video);
-    hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(streamUrl));
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(this.buildPlaybackUrl(channel, stream, streamUrl)));
     hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
       const levels = data.levels.map((level, index) => ({
         index,
@@ -381,6 +401,42 @@ export class LiveTvComponent implements OnDestroy {
       this.videoElement.load();
     }
     this.qualityLevels.set([]);
+  }
+
+  private detectStreamKind(stream: LiveStream, streamUrl: string) {
+    if (stream.format) return stream.format;
+    const normalized = streamUrl.toLowerCase();
+    if (normalized.endsWith('.mpd')) return 'dash';
+    if (normalized.endsWith('.m3u8')) return 'hls';
+    try {
+      const url = new URL(streamUrl);
+      if (url.searchParams.get('extension')?.toLowerCase() === 'ts') return 'mpegts';
+      if (url.pathname.toLowerCase().endsWith('.ts')) return 'mpegts';
+    } catch {}
+    return 'hls';
+  }
+
+  private buildPlaybackUrl(channel: LiveChannel, stream: LiveStream, streamUrl: string) {
+    if (this.detectStreamKind(stream, streamUrl) !== 'mpegts') return streamUrl;
+
+    const params = new URLSearchParams();
+    params.set('url', streamUrl);
+    params.set(
+      'userAgent',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
+    );
+
+    try {
+      const websiteUrl = new URL(channel.websiteUrl);
+      params.set('referer', channel.websiteUrl);
+      params.set('origin', websiteUrl.origin);
+    } catch {}
+
+    for (const [key, value] of Object.entries(stream.requestHeaders ?? {})) {
+      params.append(`header_${key}`, value);
+    }
+
+    return `${this.API_URL}/live/remux?${params.toString()}`;
   }
 
   private getDrmConfig(stream: LiveStream) {

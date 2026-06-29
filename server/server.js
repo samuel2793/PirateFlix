@@ -2310,6 +2310,122 @@ app.get('/api/torrent/providers', (_req, res) => {
   });
 });
 
+app.get('/api/live/remux', (req, res) => {
+  const sourceUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+  const referer = typeof req.query.referer === 'string' ? req.query.referer.trim() : '';
+  const origin = typeof req.query.origin === 'string' ? req.query.origin.trim() : '';
+  const userAgent =
+    typeof req.query.userAgent === 'string' && req.query.userAgent.trim()
+      ? req.query.userAgent.trim()
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+  if (!sourceUrl) {
+    res.status(400).send('Missing live stream URL');
+    return;
+  }
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(sourceUrl);
+  } catch {
+    res.status(400).send('Invalid live stream URL');
+    return;
+  }
+
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    res.status(400).send('Unsupported live stream protocol');
+    return;
+  }
+
+  const rawHeaderEntries = Object.entries(req.query).filter(([key, value]) => {
+    return key.startsWith('header_') && typeof value === 'string' && value.trim() !== '';
+  });
+  const extraHeaders = rawHeaderEntries.map(([key, value]) => [
+    key.slice('header_'.length),
+    String(value).trim(),
+  ]);
+  const requestHeaders = [
+    ['User-Agent', userAgent],
+    ['Accept', '*/*'],
+    ...(referer ? [['Referer', referer]] : []),
+    ...(origin ? [['Origin', origin]] : []),
+    ...extraHeaders,
+  ];
+  const ffmpegHeaders = requestHeaders.map(([key, value]) => `${key}: ${value}`).join('\r\n');
+
+  res.writeHead(200, {
+    'Content-Type': 'video/mp4',
+    'Cache-Control': 'no-store',
+    'Pragma': 'no-cache',
+    'Connection': 'keep-alive',
+    'Transfer-Encoding': 'chunked',
+    'Accept-Ranges': 'none',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const ffmpegCommand = ffmpeg(sourceUrl)
+    .inputOptions([
+      '-fflags', '+genpts+nobuffer',
+      '-analyzeduration', '1000000',
+      '-probesize', '1000000',
+      '-user_agent', userAgent,
+      '-headers', `${ffmpegHeaders}\r\n`,
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '2',
+    ])
+    .videoCodec('libx264')
+    .outputOptions([
+      '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
+      '-pix_fmt', 'yuv420p',
+      '-profile:v', 'main',
+      '-g', '50',
+      '-keyint_min', '50',
+      '-sc_threshold', '0',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-muxdelay', '0',
+      '-muxpreload', '0',
+    ])
+    .audioCodec('aac')
+    .audioBitrate('128k')
+    .format('mp4')
+    .on('start', (cmdLine) => {
+      console.log('🎥 Live remux started:', parsedUrl.hostname);
+      console.log('📋 FFmpeg cmd:', cmdLine);
+    })
+    .on('error', (err) => {
+      const message = err?.message || String(err || '');
+      if (
+        message.includes('Output stream closed') ||
+        message.includes('ffmpeg was killed with signal SIGKILL')
+      ) {
+        console.log('ℹ️ Live remux stopped:', message);
+        return;
+      }
+      console.error('❌ Live remux error:', message);
+      if (!res.headersSent) {
+        res.status(502).send('Could not remux live stream');
+        return;
+      }
+      if (!res.destroyed) res.destroy(err);
+    })
+    .on('end', () => {
+      if (!res.destroyed) res.end();
+    });
+
+  const cleanup = () => {
+    try {
+      ffmpegCommand.kill('SIGKILL');
+    } catch (_) {
+      // ignore cleanup failures on already-closed ffmpeg processes
+    }
+  };
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  ffmpegCommand.pipe(res, { end: true });
+});
+
 app.get('/api/search-torrent', async (req, res) => {
   const { query, category = '207', provider: requestedProvider = '' } = req.query; // 207 = HD Movies
   if (!query) return res.status(400).json({ error: 'query es requerido' });

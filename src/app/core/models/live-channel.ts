@@ -3,6 +3,8 @@ export type LiveChannelCategory = 'national' | 'news' | 'sports' | 'kids';
 export interface LiveStream {
   label: string;
   url?: string;
+  format?: 'hls' | 'dash' | 'mpegts';
+  requestHeaders?: Record<string, string>;
   language?: string;
   geoRestricted?: boolean;
   drm?: {
