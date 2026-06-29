@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { NodeJS } from '@choreruiz/capacitor-node-js';
 import {
   Component,
   ElementRef,
@@ -41,6 +42,72 @@ export class LiveTvComponent implements OnDestroy {
       hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
     return isLocalhost ? 'http://localhost:3001/api' : `http://${hostname}:3001/api`;
   })();
+
+  private readonly BACKEND_BASE_URL = this.API_URL.replace(/\/api$/, '');
+  private backendReadyPromise: Promise<void> | null = null;
+
+  private async ensureBackendReady(): Promise<void> {
+    if (this.backendReadyPromise) {
+      return this.backendReadyPromise;
+    }
+
+    this.backendReadyPromise = this.startEmbeddedBackend();
+
+    try {
+      await this.backendReadyPromise;
+    } catch (error) {
+      this.backendReadyPromise = null;
+      throw error;
+    }
+  }
+
+  private async startEmbeddedBackend(): Promise<void> {
+    try {
+      const startPromise = NodeJS.start({ nodeDir: 'nodejs-project' });
+
+      await Promise.race([
+        startPromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? '');
+      if (!message.includes('already been started')) {
+        console.error('No se pudo iniciar NodeJS embebido desde Live TV:', error);
+        throw error;
+      }
+    }
+
+    await this.waitForBackendHealth();
+  }
+
+  private async waitForBackendHealth(timeoutMs = 12000): Promise<void> {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 1000);
+
+      try {
+        const response = await fetch(`${this.BACKEND_BASE_URL}/health`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
+        if (response.ok) {
+          return;
+        }
+      } catch {
+        // Backend aún no disponible.
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    throw new Error('Backend Node no disponible para Live TV');
+  }
+
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly streamResolver = inject(LiveStreamResolverService);
@@ -329,6 +396,7 @@ export class LiveTvComponent implements OnDestroy {
     }
 
     if (streamKind === 'mpegts') {
+      await this.ensureBackendReady();
       video.src = this.buildPlaybackUrl(channel, stream, streamUrl);
       video.load();
       void video.play().catch(() => {
@@ -492,6 +560,8 @@ export class LiveTvComponent implements OnDestroy {
   private async probeStreamAvailability(channel: LiveChannel, stream: LiveStream) {
     try {
       const streamUrl = await this.streamResolver.resolve(stream);
+      await this.ensureBackendReady();
+
       const probeUrl = new URL(`${this.API_URL}/live/probe`);
       probeUrl.searchParams.set('url', streamUrl);
       probeUrl.searchParams.set('format', this.detectStreamKind(stream, streamUrl));

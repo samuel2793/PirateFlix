@@ -20,6 +20,159 @@ const PORT = 3001;
 const IS_EMBEDDED_RUNTIME = Boolean(process.env.DATADIR);
 const HOST = process.env.PIRATEFLIX_BIND_HOST || (IS_EMBEDDED_RUNTIME ? '127.0.0.1' : '0.0.0.0');
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const IS_ANDROID_RUNTIME = IS_EMBEDDED_RUNTIME;
+const TRANSCODE_VIDEO_CODEC = IS_ANDROID_RUNTIME ? 'h264_mediacodec' : 'libx264';
+const TRANSCODE_VIDEO_BITRATE = process.env.TRANSCODE_VIDEO_BITRATE || (IS_ANDROID_RUNTIME ? '1500k' : '2500k');
+const TRANSCODE_AUDIO_BITRATE = process.env.TRANSCODE_AUDIO_BITRATE || '160k';
+
+function getVideoTranscodeOptions() {
+  if (IS_ANDROID_RUNTIME) {
+    return [
+      '-b:v', TRANSCODE_VIDEO_BITRATE,
+      '-pix_fmt', 'yuv420p',
+      '-g', '48',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-reset_timestamps', '1',
+    ];
+  }
+
+  return [
+    '-preset', 'ultrafast',
+    '-crf', '28',
+    '-movflags', '+faststart',
+  ];
+}
+
+
+function getLiveMpegTsOutputOptions() {
+  return [
+    '-map', '0:v:0?',
+    '-map', '0:a:0?',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-b:a', TRANSCODE_AUDIO_BITRATE,
+    '-ac', '2',
+    '-ar', '48000',
+    '-avoid_negative_ts', 'make_zero',
+    '-f', 'mp4',
+    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+    '-flush_packets', '1',
+    '-max_muxing_queue_size', '1024',
+  ];
+}
+
+function getLiveMpegTsInputOptions() {
+  return [
+    '-fflags', '+genpts+nobuffer',
+    '-flags', 'low_delay',
+    '-analyzeduration', '1000000',
+    '-probesize', '1000000',
+  ];
+}
+
+
+function getLowLatencyVideoTranscodeOptions() {
+  if (IS_ANDROID_RUNTIME) {
+    return [
+      '-b:v', TRANSCODE_VIDEO_BITRATE,
+      '-pix_fmt', 'yuv420p',
+      '-g', '48',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-reset_timestamps', '1',
+    ];
+  }
+
+  return [
+    '-preset', 'ultrafast',
+    '-tune', 'zerolatency',
+    '-crf', '28',
+    '-profile:v', 'main',
+    '-movflags', '+faststart',
+  ];
+}
+
+
+
+function findAndroidNativeLibDir() {
+  const packageName = 'com.samuel2793.pirateflix';
+
+  try {
+    const maps = fs.readFileSync('/proc/self/maps', 'utf8');
+    const match = maps.match(new RegExp(`(/data/app/[^\\s]+/${packageName}[^\\s]*/lib/arm64)`));
+    if (match?.[1]) return match[1];
+  } catch (err) {
+    console.warn('No se pudo leer /proc/self/maps:', err?.message || err);
+  }
+
+  try {
+    const dataAppEntries = fs.readdirSync('/data/app', { withFileTypes: true });
+
+    for (const entry of dataAppEntries) {
+      if (!entry.isDirectory()) continue;
+
+      const parent = path.join('/data/app', entry.name);
+      let children = [];
+
+      try {
+        children = fs.readdirSync(parent, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const child of children) {
+        if (!child.isDirectory()) continue;
+        if (!child.name.startsWith(packageName)) continue;
+
+        const libDir = path.join(parent, child.name, 'lib', 'arm64');
+        if (fs.existsSync(libDir)) return libDir;
+      }
+    }
+  } catch (err) {
+    console.warn('No se pudo inspeccionar /data/app:', err?.message || err);
+  }
+
+  return null;
+}
+
+const NATIVE_LIB_DIR = findAndroidNativeLibDir();
+const APPDATA_BIN_DIR = path.join(SERVER_DIR, 'bin');
+
+const NATIVE_FFMPEG_BIN = NATIVE_LIB_DIR ? path.join(NATIVE_LIB_DIR, 'libffmpeg.so') : null;
+const NATIVE_FFPROBE_BIN = NATIVE_LIB_DIR ? path.join(NATIVE_LIB_DIR, 'libffprobe.so') : null;
+
+const APPDATA_FFMPEG_BIN = path.join(APPDATA_BIN_DIR, 'ffmpeg');
+const APPDATA_FFPROBE_BIN = path.join(APPDATA_BIN_DIR, 'ffprobe');
+
+const FFMPEG_BIN =
+  NATIVE_FFMPEG_BIN && fs.existsSync(NATIVE_FFMPEG_BIN)
+    ? NATIVE_FFMPEG_BIN
+    : APPDATA_FFMPEG_BIN;
+
+const FFPROBE_BIN =
+  NATIVE_FFPROBE_BIN && fs.existsSync(NATIVE_FFPROBE_BIN)
+    ? NATIVE_FFPROBE_BIN
+    : APPDATA_FFPROBE_BIN;
+
+try {
+  console.log('Native lib dir:', NATIVE_LIB_DIR || 'no detectado');
+
+  if (fs.existsSync(FFMPEG_BIN)) {
+    ffmpeg.setFfmpegPath(FFMPEG_BIN);
+    console.log('FFmpeg configurado:', FFMPEG_BIN);
+  } else {
+    console.warn('FFmpeg no encontrado en:', FFMPEG_BIN);
+  }
+
+  if (fs.existsSync(FFPROBE_BIN)) {
+    ffmpeg.setFfprobePath(FFPROBE_BIN);
+    console.log('FFprobe configurado:', FFPROBE_BIN);
+  } else {
+    console.warn('FFprobe no encontrado en:', FFPROBE_BIN);
+  }
+} catch (err) {
+  console.warn('No se pudo configurar FFmpeg/FFprobe:', err?.message || err);
+}
+
 const APP_ROOT = path.resolve(SERVER_DIR, '..');
 
 // =====================
@@ -849,6 +1002,63 @@ let lastStoragePruneReport = null;
 const MP4_LIKE_EXT_RE = /\.(mp4|mov|m4v)$/i;
 const INCOMPATIBLE_VIDEO_HINT_RE = /\b(hevc|x265|h265|av1)\b/i;
 const H264_HINT_RE = /\b(x264|h\.?264|avc|web[-\s]?dl|web[-\s]?rip|hdtv)\b/i;
+
+const ANDROID_BAD_TORRENT_HINT_RE = /\b(x265|h265|h\.265|hevc|av1|10bit|10-bit|hdr|2160p|4k|uhd|dolby\s*vision|dv)\b/i;
+const ANDROID_GOOD_TORRENT_HINT_RE = /\b(x264|h264|h\.264|avc|mp4|aac|720p|yify|yts)\b/i;
+
+function getTorrentRuntimeName(torrent = {}) {
+  return String(
+    torrent.name ||
+    torrent.title ||
+    torrent.dn ||
+    torrent.magnetLink ||
+    ''
+  );
+}
+
+function isAndroidBadTorrent(torrent = {}) {
+  return ANDROID_BAD_TORRENT_HINT_RE.test(getTorrentRuntimeName(torrent));
+}
+
+function androidTorrentScore(torrent = {}) {
+  const name = getTorrentRuntimeName(torrent).toLowerCase();
+  let score = Number(torrent.score) || 0;
+
+  if (/\b720p\b/.test(name)) score += 500;
+  if (/\b1080p\b/.test(name)) score += 120;
+  if (/\b(x264|h264|h\.264|avc)\b/.test(name)) score += 700;
+  if (/\bmp4\b/.test(name)) score += 500;
+  if (/\baac\b/.test(name)) score += 150;
+  if (/\b(yify|yts)\b/.test(name)) score += 250;
+  if (/\b(web[-\s]?dl|web[-\s]?rip|brrip|bluray|brip)\b/.test(name)) score += 80;
+
+  if (/\bmkv\b/.test(name)) score -= 120;
+  if (/\b(1080p).*?(x265|h265|hevc)\b/.test(name)) score -= 900;
+  if (ANDROID_BAD_TORRENT_HINT_RE.test(name)) score -= 2000;
+
+  return score;
+}
+
+function preferAndroidCompatibleTorrents(torrents) {
+  if (!IS_ANDROID_RUNTIME || !Array.isArray(torrents)) return torrents;
+
+  const compatible = torrents.filter((torrent) => !isAndroidBadTorrent(torrent));
+  const selected = compatible.length > 0 ? compatible : torrents;
+
+  selected.sort((a, b) => androidTorrentScore(b) - androidTorrentScore(a));
+
+  torrents.splice(0, torrents.length, ...selected);
+
+  if (compatible.length > 0) {
+    console.log(`📱 Android torrent filter: ${compatible.length}/${compatible.length + (torrents.length - compatible.length)} compatibles conservados`);
+    console.log(`📱 Android mejor compatible: ${getTorrentRuntimeName(torrents[0])}`);
+  } else {
+    console.warn('📱 Android torrent filter: sin alternativas compatibles, usando lista original');
+  }
+
+  return torrents;
+}
+
 const INCOMPATIBLE_AUDIO_HINT_RE =
   /\b(atmos|truehd|ddp|dd\+|eac3|ac-?3|dts|dd5\.?1|dd5\+1|dd\s*5\.?1|dolby)\b/i;
 const COMPATIBLE_AUDIO_HINT_RE = /\b(aac|mp3)\b/i;
@@ -1414,7 +1624,7 @@ async function ffprobeWithRetry(filePath, retries = 2) {
     ];
 
     const attemptProbe = (attempt) => {
-      execFile('ffprobe', args, (err, stdout, stderr) => {
+      execFile(FFPROBE_BIN, args, (err, stdout, stderr) => {
         if (err) {
           if (attempt < retries) {
             // Si falla y tenemos reintentos, esperar progresivamente más
@@ -1894,13 +2104,12 @@ async function ensureTranscodedFile({
 
   if (mode === 'full') {
     ffmpegCommand
-      .videoCodec('libx264')
+      .videoCodec(TRANSCODE_VIDEO_CODEC)
       .audioCodec('aac')
       .audioBitrate('192k')
       .videoFilter('scale=-2:720')
       .outputOptions([
-        '-preset ultrafast',
-        '-crf 28',
+        ...getVideoTranscodeOptions(),
         '-threads 0',
         '-g 30',
         '-bf 0',
@@ -2093,13 +2302,12 @@ async function streamTranscodedFile({
 
   if (mode === 'full') {
     ffmpegCommand
-      .videoCodec('libx264')
+      .videoCodec(TRANSCODE_VIDEO_CODEC)
       .audioCodec('aac')
       .audioBitrate('192k')
       .videoFilter('scale=-2:720')
       .outputOptions([
-        '-preset ultrafast',
-        '-crf 28',
+        ...getVideoTranscodeOptions(),
         '-threads 0',
         '-g 30',
         '-bf 0',
@@ -2233,13 +2441,12 @@ async function streamSeekFromTime({
 
   if (mode === 'full') {
     ffmpegCommand
-      .videoCodec('libx264')
+      .videoCodec(TRANSCODE_VIDEO_CODEC)
       .audioCodec('aac')
       .audioBitrate('192k')
       .videoFilter('scale=-2:720')
       .outputOptions([
-        '-preset ultrafast',
-        '-crf 28',
+        ...getVideoTranscodeOptions(),
         '-threads 0',
         '-g 30',
         '-bf 0',
@@ -2463,38 +2670,26 @@ app.get('/api/live/remux', (req, res) => {
     'Accept-Ranges': 'none',
     'X-Accel-Buffering': 'no',
   });
-
-  const ffmpegCommand = ffmpeg(sourceUrl)
-    .inputOptions([
-      '-fflags', '+genpts+nobuffer',
-      '-analyzeduration', '1000000',
-      '-probesize', '1000000',
-      '-user_agent', userAgent,
-      '-headers', `${ffmpegHeaders}\r\n`,
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '2',
-    ])
-    .videoCodec('libx264')
-    .outputOptions([
-      '-preset', 'ultrafast',
-      '-tune', 'zerolatency',
-      '-pix_fmt', 'yuv420p',
-      '-profile:v', 'main',
-      '-g', '50',
-      '-keyint_min', '50',
-      '-sc_threshold', '0',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      '-muxdelay', '0',
-      '-muxpreload', '0',
-    ])
-    .audioCodec('aac')
-    .audioBitrate('128k')
-    .format('mp4')
+    const ffmpegCommand = ffmpeg(sourceUrl)
+      .inputOptions([
+        ...getLiveMpegTsInputOptions(),
+        '-user_agent', userAgent,
+        '-headers', ffmpegHeaders + '\r\n',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '2',
+      ])
+      .outputOptions(getLiveMpegTsOutputOptions())
+      .format('mp4')
     .on('start', (cmdLine) => {
       console.log('🎥 Live remux started:', parsedUrl.hostname);
       console.log('📋 FFmpeg cmd:', cmdLine);
     })
+      .on('stderr', (line) => {
+        if (/error|warning|codec|encoder|decoder|h264|hevc|mpeg|frame=|video:|Output|Invalid/i.test(line)) {
+          console.log('📺 Live FFmpeg:', line);
+        }
+      })
     .on('error', (err) => {
       const message = err?.message || String(err || '');
       if (
@@ -3532,7 +3727,11 @@ app.get('/api/search-torrent', async (req, res) => {
       console.log(`Magnet links encontrados (TPB): ${torrents.length}`);
     }
 
-    torrents.sort((a, b) => b.score - a.score);
+    if (IS_ANDROID_RUNTIME) {
+      preferAndroidCompatibleTorrents(torrents);
+    } else {
+      torrents.sort((a, b) => b.score - a.score);
+    }
 
     console.log(`Torrents parseados: ${torrents.length}`);
     if (torrents.length > 0) {
