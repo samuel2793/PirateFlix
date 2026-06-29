@@ -328,6 +328,7 @@
   "Reconnecting to the broadcast...": "Reconectando con la emisión...",
   "Recovering video playback...": "Recuperando la reproducción...",
   "Trying an alternative broadcast...": "Probando una emisión alternativa...",
+  "Unavailable": "No disponible",
   "Broadcast unavailable": "Emisión no disponible",
   "This broadcast could not be played.": "No se ha podido reproducir esta emisión.",
   "The broadcast is unavailable or blocked by its provider.": "La emisión no está disponible o está bloqueada por su proveedor.",

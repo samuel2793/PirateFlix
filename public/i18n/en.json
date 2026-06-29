@@ -327,6 +327,7 @@
   "Reconnecting to the broadcast...": "Reconnecting to the broadcast...",
   "Recovering video playback...": "Recovering video playback...",
   "Trying an alternative broadcast...": "Trying an alternative broadcast...",
+  "Unavailable": "Unavailable",
   "Broadcast unavailable": "Broadcast unavailable",
   "This broadcast could not be played.": "This broadcast could not be played.",
   "The broadcast is unavailable or blocked by its provider.": "The broadcast is unavailable or blocked by its provider.",

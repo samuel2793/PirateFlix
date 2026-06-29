@@ -69,8 +69,10 @@
             <label>
               <span>{{ 'Broadcast' | t }}</span>
               <select [ngModel]="selectedStreamIndex()" (ngModelChange)="switchStream($event)">
-                @for (stream of channel.streams; track $index; let index = $index) {
-                  <option [ngValue]="index">{{ stream.label }}</option>
+                @for (entry of orderedSelectedStreams(); track entry.index) {
+                  <option [ngValue]="entry.index" [disabled]="entry.unavailable">
+                    {{ entry.stream.label }}@if (entry.unavailable) { · {{ 'Unavailable' | t }} }
+                  </option>
                 }
               </select>
             </label>

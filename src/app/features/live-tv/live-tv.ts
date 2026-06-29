@@ -30,6 +30,8 @@ type PlayerStatus = 'idle' | 'loading' | 'playing' | 'error';
   styleUrl: './live-tv.scss',
 })
 export class LiveTvComponent implements OnDestroy {
+  private readonly LIVE_USER_AGENT =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
   private readonly API_URL = (() => {
     if (typeof window === 'undefined') {
       return 'http://127.0.0.1:3001/api';
@@ -50,7 +52,8 @@ export class LiveTvComponent implements OnDestroy {
   private networkRetries = 0;
   private mediaRetries = 0;
   private streamLoadToken = 0;
-  private failedStreamIndices = new Set<number>();
+  private probeToken = 0;
+  private failedStreamIndices = signal<Set<number>>(new Set());
 
   readonly channels = LIVE_CHANNELS;
   readonly categories: { value: 'all' | LiveChannelCategory; label: string; icon: string }[] = [
@@ -94,6 +97,23 @@ export class LiveTvComponent implements OnDestroy {
     return this.filteredChannels().filter((channel) => !favorites.has(channel.id));
   });
 
+  orderedSelectedStreams = computed(() => {
+    const channel = this.selectedChannel();
+    if (!channel) return [];
+
+    const failedIndices = this.failedStreamIndices();
+    const ordered = channel.streams.map((stream, index) => ({
+      index,
+      stream,
+      unavailable: failedIndices.has(index),
+    }));
+
+    return [
+      ...ordered.filter((entry) => !entry.unavailable),
+      ...ordered.filter((entry) => entry.unavailable),
+    ];
+  });
+
   @ViewChild('liveVideo')
   set liveVideo(ref: ElementRef<HTMLVideoElement> | undefined) {
     this.videoElement = ref?.nativeElement ?? null;
@@ -119,11 +139,13 @@ export class LiveTvComponent implements OnDestroy {
 
       if (this.selectedChannel()?.id !== channel?.id) {
         this.destroyPlayer();
-        this.failedStreamIndices.clear();
+        this.probeToken += 1;
+        this.clearFailedStreams();
         this.selectedStreamIndex.set(0);
         this.selectedChannel.set(channel);
         this.playerStatus.set(channel ? 'loading' : 'idle');
         this.playerMessage.set('');
+        if (channel) void this.probeStreamsInBackground(channel);
       }
     });
   }
@@ -141,16 +163,19 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   switchStream(index: number) {
+    if (this.isStreamUnavailable(index)) return;
     if (index === this.selectedStreamIndex() && this.playerStatus() !== 'error') return;
-    this.failedStreamIndices.clear();
     this.selectedStreamIndex.set(index);
     void this.loadCurrentStream();
   }
 
   retry() {
-    this.failedStreamIndices.clear();
+    this.probeToken += 1;
+    this.clearFailedStreams();
     const stream = this.selectedChannel()?.streams[this.selectedStreamIndex()];
     if (stream) this.streamResolver.invalidate(stream);
+    const channel = this.selectedChannel();
+    if (channel) void this.probeStreamsInBackground(channel);
     void this.loadCurrentStream();
   }
 
@@ -185,6 +210,10 @@ export class LiveTvComponent implements OnDestroy {
 
   categoryLabel(category: 'all' | LiveChannelCategory) {
     return this.categories.find((item) => item.value === category)?.label ?? category;
+  }
+
+  isStreamUnavailable(index: number) {
+    return this.failedStreamIndices().has(index);
   }
 
   onVideoPlaying() {
@@ -365,8 +394,8 @@ export class LiveTvComponent implements OnDestroy {
   private tryNextStream(reason: string) {
     const channel = this.selectedChannel();
     if (!channel) return;
-    this.failedStreamIndices.add(this.selectedStreamIndex());
-    const nextIndex = channel.streams.findIndex((_, index) => !this.failedStreamIndices.has(index));
+    this.markStreamUnavailable(this.selectedStreamIndex());
+    const nextIndex = channel.streams.findIndex((_, index) => !this.failedStreamIndices().has(index));
     if (nextIndex >= 0) {
       this.selectedStreamIndex.set(nextIndex);
       this.playerMessage.set('Trying an alternative broadcast...');
@@ -389,6 +418,7 @@ export class LiveTvComponent implements OnDestroy {
   private destroyPlayer() {
     this.attachToken += 1;
     this.streamLoadToken += 1;
+    this.probeToken += 1;
     try {
       this.dash?.destroy();
     } catch (error) {
@@ -421,10 +451,7 @@ export class LiveTvComponent implements OnDestroy {
 
     const params = new URLSearchParams();
     params.set('url', streamUrl);
-    params.set(
-      'userAgent',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
-    );
+    params.set('userAgent', this.LIVE_USER_AGENT);
 
     try {
       const websiteUrl = new URL(channel.websiteUrl);
@@ -437,6 +464,55 @@ export class LiveTvComponent implements OnDestroy {
     }
 
     return `${this.API_URL}/live/remux?${params.toString()}`;
+  }
+
+  private async probeStreamsInBackground(channel: LiveChannel) {
+    const token = ++this.probeToken;
+    for (const [index, stream] of channel.streams.entries()) {
+      if (token !== this.probeToken || this.selectedChannel()?.id !== channel.id) return;
+      if (index === this.selectedStreamIndex() || this.failedStreamIndices().has(index)) continue;
+      const isAvailable = await this.probeStreamAvailability(channel, stream);
+      if (token !== this.probeToken || this.selectedChannel()?.id !== channel.id) return;
+      if (!isAvailable) {
+        this.markStreamUnavailable(index);
+      }
+    }
+  }
+
+  private clearFailedStreams() {
+    this.failedStreamIndices.set(new Set());
+  }
+
+  private markStreamUnavailable(index: number) {
+    const failed = new Set(this.failedStreamIndices());
+    failed.add(index);
+    this.failedStreamIndices.set(failed);
+  }
+
+  private async probeStreamAvailability(channel: LiveChannel, stream: LiveStream) {
+    try {
+      const streamUrl = await this.streamResolver.resolve(stream);
+      const probeUrl = new URL(`${this.API_URL}/live/probe`);
+      probeUrl.searchParams.set('url', streamUrl);
+      probeUrl.searchParams.set('format', this.detectStreamKind(stream, streamUrl));
+      probeUrl.searchParams.set('userAgent', this.LIVE_USER_AGENT);
+
+      try {
+        const websiteUrl = new URL(channel.websiteUrl);
+        probeUrl.searchParams.set('referer', channel.websiteUrl);
+        probeUrl.searchParams.set('origin', websiteUrl.origin);
+      } catch {}
+
+      for (const [key, value] of Object.entries(stream.requestHeaders ?? {})) {
+        probeUrl.searchParams.append(`header_${key}`, value);
+      }
+
+      const response = await fetch(probeUrl.toString());
+      return response.ok;
+    } catch (error) {
+      console.warn('Background live probe failed.', error);
+      return false;
+    }
   }
 
   private getDrmConfig(stream: LiveStream) {

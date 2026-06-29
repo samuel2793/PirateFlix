@@ -2310,7 +2310,7 @@ app.get('/api/torrent/providers', (_req, res) => {
   });
 });
 
-app.get('/api/live/remux', (req, res) => {
+function parseLiveRequest(req) {
   const sourceUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
   const referer = typeof req.query.referer === 'string' ? req.query.referer.trim() : '';
   const origin = typeof req.query.origin === 'string' ? req.query.origin.trim() : '';
@@ -2318,22 +2318,22 @@ app.get('/api/live/remux', (req, res) => {
     typeof req.query.userAgent === 'string' && req.query.userAgent.trim()
       ? req.query.userAgent.trim()
       : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
-  if (!sourceUrl) {
-    res.status(400).send('Missing live stream URL');
-    return;
-  }
+  const format =
+    typeof req.query.format === 'string' && req.query.format.trim()
+      ? req.query.format.trim().toLowerCase()
+      : '';
+
+  if (!sourceUrl) return { error: 'Missing live stream URL' };
 
   let parsedUrl;
   try {
     parsedUrl = new URL(sourceUrl);
   } catch {
-    res.status(400).send('Invalid live stream URL');
-    return;
+    return { error: 'Invalid live stream URL' };
   }
 
   if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    res.status(400).send('Unsupported live stream protocol');
-    return;
+    return { error: 'Unsupported live stream protocol' };
   }
 
   const rawHeaderEntries = Object.entries(req.query).filter(([key, value]) => {
@@ -2351,6 +2351,108 @@ app.get('/api/live/remux', (req, res) => {
     ...extraHeaders,
   ];
   const ffmpegHeaders = requestHeaders.map(([key, value]) => `${key}: ${value}`).join('\r\n');
+  const requestHeadersObject = Object.fromEntries(requestHeaders);
+
+  return {
+    format,
+    parsedUrl,
+    requestHeaders,
+    requestHeadersObject,
+    ffmpegHeaders,
+    sourceUrl,
+    userAgent,
+  };
+}
+
+function inferLiveProbeFormat(format, sourceUrl) {
+  if (format === 'hls' || format === 'dash' || format === 'mpegts') return format;
+  const normalized = String(sourceUrl || '').toLowerCase();
+  if (normalized.includes('.mpd')) return 'dash';
+  if (normalized.includes('.m3u8')) return 'hls';
+  if (normalized.includes('.ts') || normalized.includes('extension=ts')) return 'mpegts';
+  return 'hls';
+}
+
+async function probeLiveStream({ format, requestHeadersObject, sourceUrl }) {
+  const probeFormat = inferLiveProbeFormat(format, sourceUrl);
+  const timeout = 8000;
+  if (probeFormat === 'mpegts') {
+    const response = await axios.get(sourceUrl, {
+      timeout,
+      responseType: 'stream',
+      headers: requestHeadersObject,
+      httpAgent: httpAgentGlobal,
+      httpsAgent: httpsAgentGlobal,
+      validateStatus: () => true,
+    });
+    if (response.status < 200 || response.status >= 300) {
+      response.data?.destroy?.();
+      throw new Error(`Upstream responded with ${response.status}`);
+    }
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const stream = response.data;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        try {
+          stream.destroy();
+        } catch (_) {}
+        callback(value);
+      };
+      stream.once('data', () => finish(resolve, true));
+      stream.once('error', (error) => finish(reject, error));
+      stream.once('end', () => finish(resolve, true));
+    });
+    return { format: probeFormat };
+  }
+
+  const response = await axios.get(sourceUrl, {
+    timeout,
+    responseType: 'text',
+    headers: requestHeadersObject,
+    httpAgent: httpAgentGlobal,
+    httpsAgent: httpsAgentGlobal,
+    validateStatus: () => true,
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Upstream responded with ${response.status}`);
+  }
+
+  const body = String(response.data || '').trimStart();
+  if (probeFormat === 'dash' && !body.startsWith('<MPD')) {
+    throw new Error('Upstream did not return a DASH manifest');
+  }
+  if (probeFormat === 'hls' && !body.startsWith('#EXTM3U')) {
+    throw new Error('Upstream did not return an HLS manifest');
+  }
+  return { format: probeFormat };
+}
+
+app.get('/api/live/probe', async (req, res) => {
+  const parsedRequest = parseLiveRequest(req);
+  if (parsedRequest.error) {
+    res.status(400).json({ ok: false, error: parsedRequest.error });
+    return;
+  }
+
+  try {
+    await probeLiveStream(parsedRequest);
+    res.json({ ok: true, format: inferLiveProbeFormat(parsedRequest.format, parsedRequest.sourceUrl) });
+  } catch (error) {
+    const message = error?.message || 'Unknown live probe error';
+    console.warn('⚠️ Live probe failed:', parsedRequest.parsedUrl.hostname, message);
+    res.status(502).json({ ok: false, error: message });
+  }
+});
+
+app.get('/api/live/remux', (req, res) => {
+  const parsedRequest = parseLiveRequest(req);
+  if (parsedRequest.error) {
+    res.status(400).send(parsedRequest.error);
+    return;
+  }
+  const { ffmpegHeaders, parsedUrl, sourceUrl, userAgent } = parsedRequest;
 
   res.writeHead(200, {
     'Content-Type': 'video/mp4',
