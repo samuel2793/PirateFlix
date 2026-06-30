@@ -29,7 +29,7 @@ $accent-gold: $accent-primary-light;
   background: var(--bg-primary, $bg-primary);
   color: var(--text-primary, $text-primary);
   min-height: 100vh;
-  padding-top: 64px; // Space for global navbar
+  padding-top: var(--app-nav-height, 64px);
   animation: detailsPageEnter 0.5s ease-out forwards;
 }
 
@@ -1462,6 +1462,48 @@ $accent-gold: $accent-primary-light;
   .info-row dt,
   .info-row dd {
     font-size: 14px;
+  }
+}
+
+@media (max-width: 560px) {
+  .hero {
+    padding: 24px var(--page-gutter, 16px) 24px;
+  }
+
+  .title-area {
+    margin-bottom: 18px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .btn-play,
+  .btn-trailer,
+  .btn-secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .playback-options {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .season-chip {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .netflix-episode-card {
+    width: min(82vw, 260px);
+  }
+
+  .cast-card {
+    width: 118px;
   }
 }
 

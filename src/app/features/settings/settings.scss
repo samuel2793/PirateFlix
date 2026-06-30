@@ -51,7 +51,7 @@ $transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   background: var(--bg-primary, $bg-page);
   color: var(--text-primary, $text-primary);
   min-height: 100vh;
-  padding-top: 64px;
+  padding-top: var(--app-nav-height, 64px);
   animation: settingsFadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 
   &.lang-transitioning {

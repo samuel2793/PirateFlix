@@ -24,7 +24,7 @@ $border-subtle: rgba(255, 255, 255, 0.1);
   background: var(--bg-primary, $bg-primary);
   color: var(--text-primary, $text-primary);
   min-height: 100vh;
-  padding-top: 64px;
+  padding-top: var(--app-nav-height, 64px);
   animation: fadeIn 0.4s ease-out;
 
   &.lang-transitioning {

@@ -117,7 +117,7 @@ $accent-primary: #e5a00d;
   background: var(--bg-secondary, $bg-secondary);
   border-bottom: 1px solid var(--border-default, rgba(255, 255, 255, 0.1));
   position: sticky;
-  top: 64px;
+  top: var(--app-nav-height, 64px);
   z-index: 50;
 }
 
@@ -606,7 +606,7 @@ $accent-primary: #e5a00d;
     flex-direction: column;
     align-items: flex-start;
     gap: 16px;
-    padding: 80px 16px 24px;
+    padding: calc(var(--app-nav-height, 64px) + 16px) 16px 24px;
   }
 
   .header-content {
@@ -639,7 +639,8 @@ $accent-primary: #e5a00d;
 
   .toolbar-right {
     order: 2;
-    justify-content: flex-end;
+    justify-content: space-between;
+    margin-left: 0;
   }
 
   .collection-content {

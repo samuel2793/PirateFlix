@@ -384,6 +384,8 @@ $accent-primary: #e5a00d;
 // ========================================
 @media (max-width: 600px) {
   .row-header {
+    flex-wrap: wrap;
+    gap: 10px;
     padding: 0 16px;
   }
 
@@ -401,6 +403,11 @@ $accent-primary: #e5a00d;
   }
 
   .view-all-btn span {
+    display: none;
+  }
+
+  .scroll-fade-left,
+  .scroll-fade-right {
     display: none;
   }
 }

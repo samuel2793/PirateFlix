@@ -12,7 +12,7 @@ $text-secondary: rgba(255, 255, 255, 0.68);
 
 .live-page {
   min-height: 100vh;
-  padding: 64px 0 72px;
+  padding: var(--app-nav-height, 64px) 0 72px;
   color: #fff;
 }
 
@@ -469,10 +469,12 @@ $text-secondary: rgba(255, 255, 255, 0.68);
 }
 
 @media (max-width: 600px) {
-  .live-hero { min-height: 220px; padding: 48px 5% 30px; }
+  .live-hero { min-height: 220px; padding: 36px var(--page-gutter, 16px) 24px; align-items: flex-start; }
+  .hero-copy h1 { font-size: clamp(30px, 10vw, 42px); }
   .channel-count { display: none; }
   .player-section { width: 100%; border-right: 0; border-left: 0; border-radius: 0; }
   .now-playing { padding: 20px; }
+  .channel-identity { align-items: flex-start; padding-right: 0; }
   .channel-identity img, .channel-identity .logo-fallback { width: 60px; height: 60px; flex-basis: 60px; }
   .channel-identity h2 { font-size: 21px; }
   .player-actions { grid-template-columns: 1fr; }

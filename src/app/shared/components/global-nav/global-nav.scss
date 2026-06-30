@@ -15,8 +15,8 @@ $text-secondary: rgba(255, 255, 255, 0.7);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4%;
-  height: 64px;
+  padding: 0 var(--page-gutter, 4%);
+  min-height: var(--app-nav-height, 64px);
   background: var(--bg-elevated, $bg-nav);
   border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
 }
@@ -203,6 +203,7 @@ $text-secondary: rgba(255, 255, 255, 0.7);
   top: calc(100% + 8px);
   right: 0;
   min-width: 220px;
+  max-width: min(320px, calc(100vw - 32px));
   background: var(--bg-secondary, $bg-nav);
   border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.15));
   border-radius: 8px;
@@ -333,5 +334,69 @@ $text-secondary: rgba(255, 255, 255, 0.7);
 
   &.selected {
     color: var(--text-primary, $text-primary);
+  }
+}
+
+@media (max-width: 768px) {
+  .global-nav {
+    align-items: flex-start;
+    gap: 12px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-bottom: 10px;
+  }
+
+  .nav-left {
+    flex: 1;
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .brand {
+    gap: 10px;
+
+    .brand-name {
+      display: inline;
+      font-size: 18px;
+    }
+  }
+
+  .back-btn {
+    padding: 8px 12px;
+  }
+
+  .profile-avatar {
+    padding-right: 4px;
+  }
+}
+
+@media (max-width: 520px) {
+  .global-nav {
+    align-items: stretch;
+  }
+
+  .nav-left {
+    flex-wrap: wrap;
+  }
+
+  .nav-center {
+    display: none;
+  }
+
+  .nav-right {
+    align-self: flex-start;
+  }
+
+  .brand .brand-name {
+    display: none;
+  }
+
+  .back-btn {
+    min-width: 40px;
+    justify-content: center;
+    padding-inline: 10px;
+  }
+
+  .profile-dropdown {
+    right: -8px;
   }
 }

@@ -20,7 +20,7 @@ $accent: $accent-primary;
   min-height: 100vh;
   background: var(--bg-primary, $bg-primary);
   color: var(--text-primary, $text-primary);
-  padding-top: 64px; // Space for global navbar
+  padding-top: var(--app-nav-height, 64px);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   animation: personPageEnter 0.5s ease-out forwards;
 }
@@ -465,9 +465,13 @@ $accent: $accent-primary;
   }
 
   .personal-info {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 16px;
     padding: 16px;
+  }
+
+  .info-item.wide {
+    grid-column: auto;
   }
 
   .section-title {
@@ -475,7 +479,7 @@ $accent: $accent-primary;
   }
 
   .credits-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
 
