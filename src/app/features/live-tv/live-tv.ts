@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { Capacitor } from '@capacitor/core';
 import { NodeJS } from '@choreruiz/capacitor-node-js';
 import {
   Component,
@@ -22,6 +23,7 @@ import { LiveStreamResolverService } from '../../core/services/live-stream-resol
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 
 type PlayerStatus = 'idle' | 'loading' | 'playing' | 'error';
+type ActivePlaybackKind = 'dash' | 'hls' | 'native-hls' | 'mpegts' | null;
 
 @Component({
   selector: 'app-live-tv',
@@ -33,6 +35,7 @@ type PlayerStatus = 'idle' | 'loading' | 'playing' | 'error';
 export class LiveTvComponent implements OnDestroy {
   private readonly LIVE_USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+  private readonly SETTINGS_STORAGE_KEY = 'pirateflix_settings';
   private readonly API_URL = (() => {
     if (typeof window === 'undefined') {
       return 'http://127.0.0.1:3001/api';
@@ -44,6 +47,7 @@ export class LiveTvComponent implements OnDestroy {
   })();
 
   private readonly BACKEND_BASE_URL = this.API_URL.replace(/\/api$/, '');
+  private readonly isNativePlatform = Capacitor.isNativePlatform();
   private backendReadyPromise: Promise<void> | null = null;
 
   private async ensureBackendReady(): Promise<void> {
@@ -51,7 +55,9 @@ export class LiveTvComponent implements OnDestroy {
       return this.backendReadyPromise;
     }
 
-    this.backendReadyPromise = this.startEmbeddedBackend();
+    this.backendReadyPromise = this.isNativePlatform
+      ? this.startEmbeddedBackend()
+      : this.waitForBackendHealth(1500);
 
     try {
       await this.backendReadyPromise;
@@ -120,6 +126,8 @@ export class LiveTvComponent implements OnDestroy {
   private mediaRetries = 0;
   private streamLoadToken = 0;
   private probeToken = 0;
+  private activePlaybackKind: ActivePlaybackKind = null;
+  private ignoreNativeVideoErrorsUntil = 0;
   private failedStreamIndices = signal<Set<number>>(new Set());
 
   readonly channels = LIVE_CHANNELS;
@@ -293,6 +301,8 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   onNativeVideoError() {
+    if (Date.now() < this.ignoreNativeVideoErrorsUntil) return;
+    if (this.activePlaybackKind === 'mpegts') return;
     if (!this.hls) this.tryNextStream('This broadcast could not be played.');
   }
 
@@ -310,6 +320,8 @@ export class LiveTvComponent implements OnDestroy {
     this.playerMessage.set('Connecting to live broadcast...');
     this.qualityLevels.set([]);
     this.selectedQuality.set(-1);
+    this.activePlaybackKind = null;
+    this.ignoreNativeVideoErrorsUntil = Date.now() + 1200;
 
     video.pause();
     video.removeAttribute('src');
@@ -336,6 +348,7 @@ export class LiveTvComponent implements OnDestroy {
     const streamKind = this.detectStreamKind(stream, streamUrl);
 
     if (streamKind === 'dash') {
+      this.activePlaybackKind = 'dash';
       if (typeof (dashjs.MediaPlayer as any).isSupported === 'function' && !(dashjs.MediaPlayer as any).isSupported()) {
         this.playerStatus.set('error');
         this.playerMessage.set('DASH playback is not supported on this device.');
@@ -397,6 +410,8 @@ export class LiveTvComponent implements OnDestroy {
 
     if (streamKind === 'mpegts') {
       await this.ensureBackendReady();
+      this.activePlaybackKind = 'mpegts';
+      this.ignoreNativeVideoErrorsUntil = Date.now() + 2500;
       video.src = this.buildPlaybackUrl(channel, stream, streamUrl);
       video.load();
       void video.play().catch(() => {
@@ -406,6 +421,8 @@ export class LiveTvComponent implements OnDestroy {
     }
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      this.activePlaybackKind = 'native-hls';
+      this.ignoreNativeVideoErrorsUntil = Date.now() + 1500;
       video.src = streamUrl;
       video.load();
       void video.play().catch(() => {
@@ -427,6 +444,7 @@ export class LiveTvComponent implements OnDestroy {
       liveMaxLatencyDurationCount: 10,
       backBufferLength: 30,
     });
+    this.activePlaybackKind = 'hls';
     this.hls = hls;
     hls.attachMedia(video);
     hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(this.buildPlaybackUrl(channel, stream, streamUrl)));
@@ -479,6 +497,7 @@ export class LiveTvComponent implements OnDestroy {
     // On stream switches we only detach the current player; full teardown happens
     // in destroyPlayer() to avoid closing EME sessions while a new load is starting.
     this.dash = null;
+    this.activePlaybackKind = null;
     this.hls?.destroy();
     this.hls = null;
   }
@@ -494,6 +513,7 @@ export class LiveTvComponent implements OnDestroy {
     }
     this.destroyHlsOnly();
     if (this.videoElement) {
+      this.ignoreNativeVideoErrorsUntil = Date.now() + 1200;
       this.videoElement.pause();
       this.videoElement.removeAttribute('src');
       this.videoElement.load();
@@ -535,6 +555,10 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   private async probeStreamsInBackground(channel: LiveChannel) {
+    if (!this.isBackgroundLiveProbeEnabled()) {
+      return;
+    }
+
     const token = ++this.probeToken;
     for (const [index, stream] of channel.streams.entries()) {
       if (token !== this.probeToken || this.selectedChannel()?.id !== channel.id) return;
@@ -560,8 +584,6 @@ export class LiveTvComponent implements OnDestroy {
   private async probeStreamAvailability(channel: LiveChannel, stream: LiveStream) {
     try {
       const streamUrl = await this.streamResolver.resolve(stream);
-      await this.ensureBackendReady();
-
       const probeUrl = new URL(`${this.API_URL}/live/probe`);
       probeUrl.searchParams.set('url', streamUrl);
       probeUrl.searchParams.set('format', this.detectStreamKind(stream, streamUrl));
@@ -699,6 +721,17 @@ export class LiveTvComponent implements OnDestroy {
       return new Set<string>(Array.isArray(parsed) ? parsed : []);
     } catch {
       return new Set<string>();
+    }
+  }
+
+  private isBackgroundLiveProbeEnabled() {
+    try {
+      const raw = localStorage.getItem(this.SETTINGS_STORAGE_KEY);
+      if (!raw) return false;
+      const settings = JSON.parse(raw) as { backgroundLiveProbe?: boolean };
+      return settings.backgroundLiveProbe === true;
+    } catch {
+      return false;
     }
   }
 

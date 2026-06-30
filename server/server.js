@@ -4,7 +4,7 @@ import WebTorrent from 'webtorrent';
 import pump from 'pump';
 import rangeParser from 'range-parser';
 import ffmpeg from 'fluent-ffmpeg';
-import { Readable } from 'stream';
+import { PassThrough, Readable } from 'stream';
 import path from 'path';
 import https from 'https';
 import http from 'http';
@@ -46,25 +46,22 @@ function getVideoTranscodeOptions() {
 
 function getLiveMpegTsOutputOptions() {
   return [
-    '-map', '0:v:0?',
-    '-map', '0:a:0?',
-    '-c:v', 'copy',
-    '-c:a', 'aac',
-    '-b:a', TRANSCODE_AUDIO_BITRATE,
-    '-ac', '2',
-    '-ar', '48000',
-    '-avoid_negative_ts', 'make_zero',
-    '-f', 'mp4',
+    '-preset', 'ultrafast',
+    '-tune', 'zerolatency',
+    '-pix_fmt', 'yuv420p',
+    '-profile:v', 'main',
+    '-g', '50',
+    '-keyint_min', '50',
+    '-sc_threshold', '0',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-    '-flush_packets', '1',
-    '-max_muxing_queue_size', '1024',
+    '-muxdelay', '0',
+    '-muxpreload', '0',
   ];
 }
 
 function getLiveMpegTsInputOptions() {
   return [
     '-fflags', '+genpts+nobuffer',
-    '-flags', 'low_delay',
     '-analyzeduration', '1000000',
     '-probesize', '1000000',
   ];
@@ -143,27 +140,47 @@ const NATIVE_FFPROBE_BIN = NATIVE_LIB_DIR ? path.join(NATIVE_LIB_DIR, 'libffprob
 const APPDATA_FFMPEG_BIN = path.join(APPDATA_BIN_DIR, 'ffmpeg');
 const APPDATA_FFPROBE_BIN = path.join(APPDATA_BIN_DIR, 'ffprobe');
 
-const FFMPEG_BIN =
-  NATIVE_FFMPEG_BIN && fs.existsSync(NATIVE_FFMPEG_BIN)
-    ? NATIVE_FFMPEG_BIN
-    : APPDATA_FFMPEG_BIN;
+function firstExistingPath(candidates) {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
-const FFPROBE_BIN =
-  NATIVE_FFPROBE_BIN && fs.existsSync(NATIVE_FFPROBE_BIN)
-    ? NATIVE_FFPROBE_BIN
-    : APPDATA_FFPROBE_BIN;
+const DESKTOP_FFMPEG_CANDIDATES = [
+  process.env.PIRATEFLIX_FFMPEG_BIN,
+  process.env.FFMPEG_BIN,
+  '/usr/bin/ffmpeg',
+  '/usr/local/bin/ffmpeg',
+];
+
+const DESKTOP_FFPROBE_CANDIDATES = [
+  process.env.PIRATEFLIX_FFPROBE_BIN,
+  process.env.FFPROBE_BIN,
+  '/usr/bin/ffprobe',
+  '/usr/local/bin/ffprobe',
+];
+
+const FFMPEG_BIN = IS_ANDROID_RUNTIME
+  ? firstExistingPath([NATIVE_FFMPEG_BIN, APPDATA_FFMPEG_BIN])
+  : firstExistingPath([...DESKTOP_FFMPEG_CANDIDATES, APPDATA_FFMPEG_BIN]);
+
+const FFPROBE_BIN = IS_ANDROID_RUNTIME
+  ? firstExistingPath([NATIVE_FFPROBE_BIN, APPDATA_FFPROBE_BIN])
+  : firstExistingPath([...DESKTOP_FFPROBE_CANDIDATES, APPDATA_FFPROBE_BIN]);
 
 try {
   console.log('Native lib dir:', NATIVE_LIB_DIR || 'no detectado');
 
-  if (fs.existsSync(FFMPEG_BIN)) {
+  if (FFMPEG_BIN && fs.existsSync(FFMPEG_BIN)) {
     ffmpeg.setFfmpegPath(FFMPEG_BIN);
     console.log('FFmpeg configurado:', FFMPEG_BIN);
   } else {
     console.warn('FFmpeg no encontrado en:', FFMPEG_BIN);
   }
 
-  if (fs.existsSync(FFPROBE_BIN)) {
+  if (FFPROBE_BIN && fs.existsSync(FFPROBE_BIN)) {
     ffmpeg.setFfprobePath(FFPROBE_BIN);
     console.log('FFprobe configurado:', FFPROBE_BIN);
   } else {
@@ -2653,64 +2670,132 @@ app.get('/api/live/probe', async (req, res) => {
   }
 });
 
-app.get('/api/live/remux', (req, res) => {
+app.get('/api/live/remux', async (req, res) => {
   const parsedRequest = parseLiveRequest(req);
   if (parsedRequest.error) {
     res.status(400).send(parsedRequest.error);
     return;
   }
   const { ffmpegHeaders, parsedUrl, sourceUrl, userAgent } = parsedRequest;
+  let clientClosed = false;
+  let responseStarted = false;
+  const outputStream = new PassThrough();
+  const stderrLines = [];
+  const rememberStderrLine = (line) => {
+    const normalized = String(line || '').trim();
+    if (!normalized) return;
+    stderrLines.push(normalized);
+    if (stderrLines.length > 40) stderrLines.shift();
+  };
 
-  res.writeHead(200, {
-    'Content-Type': 'video/mp4',
-    'Cache-Control': 'no-store',
-    'Pragma': 'no-cache',
-    'Connection': 'keep-alive',
-    'Transfer-Encoding': 'chunked',
-    'Accept-Ranges': 'none',
-    'X-Accel-Buffering': 'no',
+  try {
+    await probeLiveStream(parsedRequest);
+  } catch (error) {
+    const message = error?.message || 'Unknown live probe error';
+    console.warn('⚠️ Live remux preflight failed:', parsedUrl.hostname, message);
+    res.status(502).send(`Live source unavailable: ${message}`);
+    return;
+  }
+
+  const startResponse = () => {
+    if (responseStarted || res.destroyed) return;
+    responseStarted = true;
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Cache-Control': 'no-store',
+      'Pragma': 'no-cache',
+      'Connection': 'keep-alive',
+      'Transfer-Encoding': 'chunked',
+      'Accept-Ranges': 'none',
+      'X-Accel-Buffering': 'no',
+    });
+  };
+
+  outputStream.on('data', (chunk) => {
+    startResponse();
+    if (!res.destroyed) {
+      res.write(chunk);
+    }
   });
-    const ffmpegCommand = ffmpeg(sourceUrl)
+
+  outputStream.on('end', () => {
+    if (!responseStarted) {
+      res.status(502).send('Could not remux live stream');
+      return;
+    }
+    if (!res.destroyed) res.end();
+  });
+
+  outputStream.on('error', (error) => {
+    if (!res.headersSent) {
+      res.status(502).send('Could not remux live stream');
+      return;
+    }
+    if (!res.destroyed) res.destroy(error);
+  });
+
+  const ffmpegCommand = ffmpeg(sourceUrl)
       .inputOptions([
         ...getLiveMpegTsInputOptions(),
+        '-loglevel', 'info',
         '-user_agent', userAgent,
         '-headers', ffmpegHeaders + '\r\n',
         '-reconnect', '1',
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '2',
       ])
+      .videoCodec(TRANSCODE_VIDEO_CODEC)
       .outputOptions(getLiveMpegTsOutputOptions())
+      .audioCodec('aac')
+      .audioBitrate(TRANSCODE_AUDIO_BITRATE)
       .format('mp4')
     .on('start', (cmdLine) => {
       console.log('🎥 Live remux started:', parsedUrl.hostname);
       console.log('📋 FFmpeg cmd:', cmdLine);
     })
       .on('stderr', (line) => {
+        rememberStderrLine(line);
         if (/error|warning|codec|encoder|decoder|h264|hevc|mpeg|frame=|video:|Output|Invalid/i.test(line)) {
           console.log('📺 Live FFmpeg:', line);
         }
       })
-    .on('error', (err) => {
+    .on('error', (err, stdout, stderr) => {
       const message = err?.message || String(err || '');
+      const stderrText = String(stderr || '').trim();
+      const stdoutText = String(stdout || '').trim();
+      if (stderrText) {
+        for (const line of stderrText.split(/\r?\n/)) {
+          rememberStderrLine(line);
+        }
+      }
       if (
+        clientClosed ||
         message.includes('Output stream closed') ||
-        message.includes('ffmpeg was killed with signal SIGKILL')
+        message.includes('ffmpeg was killed with signal SIGKILL') ||
+        message.includes('Exiting normally, received signal 15') ||
+        message.includes('Broken pipe') ||
+        message.includes('Conversion failed!')
       ) {
         console.log('ℹ️ Live remux stopped:', message);
         return;
       }
       console.error('❌ Live remux error:', message);
-      if (!res.headersSent) {
+      if (stderrLines.length > 0) {
+        console.error('📺 Live remux stderr tail:\n' + stderrLines.join('\n'));
+      }
+      if (stdoutText) {
+        console.error('📺 Live remux stdout tail:\n' + stdoutText);
+      }
+      if (!responseStarted && !res.headersSent) {
         res.status(502).send('Could not remux live stream');
         return;
       }
       if (!res.destroyed) res.destroy(err);
     })
-    .on('end', () => {
-      if (!res.destroyed) res.end();
-    });
+    .on('end', () => {});
 
   const cleanup = () => {
+    clientClosed = true;
     try {
       ffmpegCommand.kill('SIGKILL');
     } catch (_) {
@@ -2718,9 +2803,9 @@ app.get('/api/live/remux', (req, res) => {
     }
   };
 
-  req.on('close', cleanup);
+  req.on('aborted', cleanup);
   res.on('close', cleanup);
-  ffmpegCommand.pipe(res, { end: true });
+  ffmpegCommand.pipe(outputStream, { end: true });
 });
 
 app.get('/api/search-torrent', async (req, res) => {

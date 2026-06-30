@@ -62,6 +62,7 @@ export class SettingsComponent implements OnInit {
   // Playback Settings
   autoplay = signal(true);
   autoplayNextEpisode = signal(true);
+  backgroundLiveProbe = signal(false);
   skipIntro = signal(true);
   skipCredits = signal(false);
   videoQuality = signal<'auto' | '4k' | '1080p' | '720p' | '480p'>('auto');
@@ -133,6 +134,7 @@ export class SettingsComponent implements OnInit {
         
         // Playback
         if (settings.autoplayNextEpisode !== undefined) this.autoplayNextEpisode.set(settings.autoplayNextEpisode);
+        if (settings.backgroundLiveProbe !== undefined) this.backgroundLiveProbe.set(settings.backgroundLiveProbe);
         
         // Audio & Subtitles
         if (settings.preferredAudioLang) this.preferredAudioLang.set(settings.preferredAudioLang);
@@ -190,6 +192,11 @@ export class SettingsComponent implements OnInit {
     this.saveSettings();
   }
 
+  toggleBackgroundLiveProbe(event: any) {
+    this.backgroundLiveProbe.set(event.checked);
+    this.saveSettings();
+  }
+
   // Audio setters
   setSubtitleSize(size: TextSize) {
     this.subtitleSize.set(size);
@@ -222,6 +229,7 @@ export class SettingsComponent implements OnInit {
   private saveSettings() {
     const settings = {
       autoplayNextEpisode: this.autoplayNextEpisode(),
+      backgroundLiveProbe: this.backgroundLiveProbe(),
       preferredAudioLang: this.preferredAudioLang(),
       preferredSubtitleLang: this.preferredSubtitleLang(),
       showSubtitles: this.showSubtitles(),
@@ -246,6 +254,7 @@ export class SettingsComponent implements OnInit {
     
     // Reset playback/audio settings
     this.autoplayNextEpisode.set(true);
+    this.backgroundLiveProbe.set(false);
     this.preferredAudioLang.set('original');
     this.preferredSubtitleLang.set('none');
     this.showSubtitles.set(false);
