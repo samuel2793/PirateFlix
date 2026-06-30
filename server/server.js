@@ -2597,7 +2597,162 @@ function inferLiveProbeFormat(format, sourceUrl) {
   return 'hls';
 }
 
-async function probeLiveStream({ format, requestHeadersObject, sourceUrl }) {
+const liveEdgeCache = new Map();
+const LIVE_EDGE_CACHE_TTL_MS = parseInt(process.env.PIRATEFLIX_LIVE_EDGE_CACHE_TTL_MS || '900000', 10);
+const LIVE_EDGE_RESOLVE_TIMEOUT_MS = parseInt(
+  process.env.PIRATEFLIX_LIVE_EDGE_RESOLVE_TIMEOUT_MS || '4000',
+  10
+);
+const LIVE_EDGE_DOH_TIMEOUT_MS = parseInt(
+  process.env.PIRATEFLIX_LIVE_EDGE_DOH_TIMEOUT_MS || '3500',
+  10
+);
+
+function createPinnedLookup(ipAddress) {
+  return (hostname, options, callback) => {
+    const family = options?.family === 6 ? 6 : 4;
+    callback(null, ipAddress, family);
+  };
+}
+
+function createPinnedAgents(ipAddress) {
+  const lookup = createPinnedLookup(ipAddress);
+  return {
+    httpAgent: new http.Agent({
+      keepAlive: true,
+      maxSockets: 10,
+      lookup,
+    }),
+    httpsAgent: new https.Agent({
+      keepAlive: true,
+      maxSockets: 10,
+      lookup,
+      servername: undefined,
+      rejectUnauthorized: !ALLOW_INSECURE_TLS,
+    }),
+  };
+}
+
+async function resolveLiveCandidateIps(hostname) {
+  const resolver = dns.promises;
+  const ips = await Promise.race([
+    resolver.resolve4(hostname),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('DNS resolution timeout')), LIVE_EDGE_RESOLVE_TIMEOUT_MS);
+    }),
+  ]);
+  return [...new Set(Array.isArray(ips) ? ips : [])];
+}
+
+async function resolveLiveCandidateIpsViaDoh(hostname) {
+  const dohTargets = [
+    {
+      label: 'google',
+      url: 'https://dns.google/resolve',
+      params: { name: hostname, type: 'A' },
+    },
+    {
+      label: 'cloudflare',
+      url: 'https://cloudflare-dns.com/dns-query',
+      params: { name: hostname, type: 'A' },
+      headers: { Accept: 'application/dns-json' },
+    },
+  ];
+
+  const settled = await Promise.allSettled(
+    dohTargets.map(async (target) => {
+      const response = await axios.get(target.url, {
+        timeout: LIVE_EDGE_DOH_TIMEOUT_MS,
+        params: target.params,
+        headers: {
+          Accept: 'application/json',
+          ...(target.headers || {}),
+        },
+        httpAgent: httpAgentGlobal,
+        httpsAgent: httpsAgentGlobal,
+      });
+
+      const answers = Array.isArray(response?.data?.Answer) ? response.data.Answer : [];
+      const ips = answers
+        .filter((answer) => Number(answer?.type) === 1 && typeof answer?.data === 'string')
+        .map((answer) => answer.data.trim())
+        .filter((ip) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip));
+
+      return {
+        label: target.label,
+        ips,
+      };
+    })
+  );
+
+  const ips = [];
+  for (const result of settled) {
+    if (result.status !== 'fulfilled') continue;
+    ips.push(...result.value.ips);
+  }
+  return [...new Set(ips)];
+}
+
+async function getLiveCandidateIps(hostname) {
+  const cached = liveEdgeCache.get(hostname);
+  if (cached && cached.expiresAt > Date.now()) {
+    const prioritized = cached.preferredIp
+      ? [cached.preferredIp, ...cached.ips.filter((ip) => ip !== cached.preferredIp)]
+      : cached.ips;
+    return [...new Set(prioritized)];
+  }
+
+  const localIps = await resolveLiveCandidateIps(hostname).catch(() => []);
+  const dohIps = await resolveLiveCandidateIpsViaDoh(hostname).catch(() => []);
+  const combinedIps = [...new Set([...localIps, ...dohIps])];
+
+  liveEdgeCache.set(hostname, {
+    ips: combinedIps,
+    preferredIp: null,
+    expiresAt: Date.now() + LIVE_EDGE_CACHE_TTL_MS,
+  });
+
+  if (combinedIps.length > 0) {
+    console.log(
+      '🌐 Live edge candidates:',
+      hostname,
+      `local=${localIps.join(',') || '-'}`,
+      `doh=${dohIps.join(',') || '-'}`,
+      `combined=${combinedIps.join(',')}`
+    );
+  }
+
+  return combinedIps;
+}
+
+function rememberLivePreferredIp(hostname, ips, preferredIp) {
+  liveEdgeCache.set(hostname, {
+    ips: [...new Set(Array.isArray(ips) ? ips : [])],
+    preferredIp: preferredIp || null,
+    expiresAt: Date.now() + LIVE_EDGE_CACHE_TTL_MS,
+  });
+}
+
+function buildPinnedLiveRequestHeaders(requestHeadersObject, parsedUrl) {
+  const hostHeader = parsedUrl.port ? `${parsedUrl.hostname}:${parsedUrl.port}` : parsedUrl.hostname;
+  return {
+    ...requestHeadersObject,
+    Host: hostHeader,
+  };
+}
+
+function buildPinnedLiveSourceUrl(sourceUrl, ipAddress) {
+  const url = new URL(sourceUrl);
+  url.hostname = ipAddress;
+  return url.toString();
+}
+
+async function probeLiveSourceCandidate({
+  format,
+  sourceUrl,
+  requestHeadersObject,
+  agents,
+}) {
   const probeFormat = inferLiveProbeFormat(format, sourceUrl);
   const timeout = 8000;
   if (probeFormat === 'mpegts') {
@@ -2605,8 +2760,8 @@ async function probeLiveStream({ format, requestHeadersObject, sourceUrl }) {
       timeout,
       responseType: 'stream',
       headers: requestHeadersObject,
-      httpAgent: httpAgentGlobal,
-      httpsAgent: httpsAgentGlobal,
+      httpAgent: agents?.httpAgent || httpAgentGlobal,
+      httpsAgent: agents?.httpsAgent || httpsAgentGlobal,
       validateStatus: () => true,
     });
     if (response.status < 200 || response.status >= 300) {
@@ -2635,8 +2790,8 @@ async function probeLiveStream({ format, requestHeadersObject, sourceUrl }) {
     timeout,
     responseType: 'text',
     headers: requestHeadersObject,
-    httpAgent: httpAgentGlobal,
-    httpsAgent: httpsAgentGlobal,
+    httpAgent: agents?.httpAgent || httpAgentGlobal,
+    httpsAgent: agents?.httpsAgent || httpsAgentGlobal,
     validateStatus: () => true,
   });
   if (response.status < 200 || response.status >= 300) {
@@ -2653,6 +2808,73 @@ async function probeLiveStream({ format, requestHeadersObject, sourceUrl }) {
   return { format: probeFormat };
 }
 
+async function probeLiveStream({ format, parsedUrl, requestHeadersObject, sourceUrl }) {
+  const candidateIps =
+    parsedUrl.protocol === 'http:'
+      ? await getLiveCandidateIps(parsedUrl.hostname).catch(() => [])
+      : [];
+  const pinnedHeaders =
+    candidateIps.length > 0 ? buildPinnedLiveRequestHeaders(requestHeadersObject, parsedUrl) : null;
+
+  const attempts = [];
+  if (candidateIps.length > 0) {
+    for (const ipAddress of candidateIps) {
+      attempts.push({
+        ipAddress,
+        sourceUrl: buildPinnedLiveSourceUrl(sourceUrl, ipAddress),
+        requestHeadersObject: pinnedHeaders,
+        agents: createPinnedAgents(ipAddress),
+      });
+    }
+  }
+  attempts.push({
+    ipAddress: null,
+    sourceUrl,
+    requestHeadersObject,
+    agents: null,
+  });
+
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const result = await probeLiveSourceCandidate({
+        format,
+        sourceUrl: attempt.sourceUrl,
+        requestHeadersObject: attempt.requestHeadersObject,
+        agents: attempt.agents,
+      });
+      if (attempt.ipAddress) {
+        rememberLivePreferredIp(parsedUrl.hostname, candidateIps, attempt.ipAddress);
+      }
+      return {
+        ...result,
+        sourceUrl: attempt.sourceUrl,
+        requestHeadersObject: attempt.requestHeadersObject,
+        ffmpegHeaders: attempt.requestHeadersObject
+          ? Object.entries(attempt.requestHeadersObject)
+              .map(([key, value]) => `${key}: ${value}`)
+              .join('\r\n')
+          : Object.entries(requestHeadersObject)
+              .map(([key, value]) => `${key}: ${value}`)
+              .join('\r\n'),
+        resolvedIp: attempt.ipAddress,
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt.ipAddress) {
+        console.warn(
+          '⚠️ Live probe edge failed:',
+          parsedUrl.hostname,
+          attempt.ipAddress,
+          error?.message || error
+        );
+      }
+    }
+  }
+
+  throw lastError || new Error('Unknown live probe error');
+}
+
 app.get('/api/live/probe', async (req, res) => {
   const parsedRequest = parseLiveRequest(req);
   if (parsedRequest.error) {
@@ -2661,8 +2883,8 @@ app.get('/api/live/probe', async (req, res) => {
   }
 
   try {
-    await probeLiveStream(parsedRequest);
-    res.json({ ok: true, format: inferLiveProbeFormat(parsedRequest.format, parsedRequest.sourceUrl) });
+    const probeResult = await probeLiveStream(parsedRequest);
+    res.json({ ok: true, format: probeResult.format, resolvedIp: probeResult.resolvedIp || null });
   } catch (error) {
     const message = error?.message || 'Unknown live probe error';
     console.warn('⚠️ Live probe failed:', parsedRequest.parsedUrl.hostname, message);
@@ -2676,7 +2898,7 @@ app.get('/api/live/remux', async (req, res) => {
     res.status(400).send(parsedRequest.error);
     return;
   }
-  const { ffmpegHeaders, parsedUrl, sourceUrl, userAgent } = parsedRequest;
+  const { parsedUrl, sourceUrl, userAgent } = parsedRequest;
   let clientClosed = false;
   let responseStarted = false;
   const outputStream = new PassThrough();
@@ -2688,14 +2910,18 @@ app.get('/api/live/remux', async (req, res) => {
     if (stderrLines.length > 40) stderrLines.shift();
   };
 
+  let probeResult;
   try {
-    await probeLiveStream(parsedRequest);
+    probeResult = await probeLiveStream(parsedRequest);
   } catch (error) {
     const message = error?.message || 'Unknown live probe error';
     console.warn('⚠️ Live remux preflight failed:', parsedUrl.hostname, message);
     res.status(502).send(`Live source unavailable: ${message}`);
     return;
   }
+
+  const liveSourceUrl = probeResult?.sourceUrl || sourceUrl;
+  const ffmpegHeaders = probeResult?.ffmpegHeaders || parsedRequest.ffmpegHeaders;
 
   const startResponse = () => {
     if (responseStarted || res.destroyed) return;
@@ -2734,7 +2960,7 @@ app.get('/api/live/remux', async (req, res) => {
     if (!res.destroyed) res.destroy(error);
   });
 
-  const ffmpegCommand = ffmpeg(sourceUrl)
+  const ffmpegCommand = ffmpeg(liveSourceUrl)
       .inputOptions([
         ...getLiveMpegTsInputOptions(),
         '-loglevel', 'info',
