@@ -4,3 +4,6 @@ project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/
 
 include ':choreruiz-capacitor-node-js'
 project(':choreruiz-capacitor-node-js').projectDir = new File('../node_modules/@choreruiz/capacitor-node-js/android')
+
+include ':strasberry-capacitor-cast'
+project(':strasberry-capacitor-cast').projectDir = new File('../node_modules/@strasberry/capacitor-cast/android')

@@ -333,5 +333,16 @@
   "This broadcast could not be played.": "No se ha podido reproducir esta emisión.",
   "The broadcast is unavailable or blocked by its provider.": "La emisión no está disponible o está bloqueada por su proveedor.",
   "HLS playback is not supported on this device.": "Este dispositivo no admite reproducción HLS.",
-  "Could not obtain a current broadcast URL.": "No se ha podido obtener una URL actual de la emisión."
+  "Could not obtain a current broadcast URL.": "No se ha podido obtener una URL actual de la emisión.",
+  "Cast to TV": "Enviar a TV",
+  "Casting is not available on this mobile device.": "El envío a TV no está disponible en este dispositivo móvil.",
+  "Could not start casting.": "No se ha podido iniciar el envío a TV.",
+  "AirPlay": "AirPlay",
+  "Chromecast": "Chromecast",
+  "Opening cast menu...": "Abriendo menú de envío...",
+  "Choose a device to continue casting.": "Elige un dispositivo para continuar con el envío.",
+  "This mobile app does not expose a cast dialog yet.": "Esta app móvil todavía no expone un diálogo de envío.",
+  "Chromecast is not available on this device.": "Chromecast no está disponible en este dispositivo.",
+  "This broadcast cannot be cast from the current mobile player.": "Esta emisión no se puede enviar desde el reproductor móvil actual.",
+  "Casting started on your TV.": "La reproducción se ha enviado a tu televisión."
 }

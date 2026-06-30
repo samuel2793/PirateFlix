@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Capacitor } from '@capacitor/core';
 import { NodeJS } from '@choreruiz/capacitor-node-js';
+import { Cast, type CastCapabilities, type LoadMediaRequest } from '@strasberry/capacitor-cast';
 import {
   Component,
   ElementRef,
@@ -24,6 +25,24 @@ import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 
 type PlayerStatus = 'idle' | 'loading' | 'playing' | 'error';
 type ActivePlaybackKind = 'dash' | 'hls' | 'native-hls' | 'mpegts' | null;
+type CastSupport = 'none' | 'remote-playback' | 'airplay' | 'capacitor-cast';
+
+interface AirPlayCapableVideoElement extends HTMLVideoElement {
+  webkitShowPlaybackTargetPicker?: () => void;
+}
+
+interface CastNotice {
+  message: string;
+  tone: 'info' | 'error';
+}
+
+interface CastMediaCandidate {
+  url: string;
+  contentType: string;
+  title: string;
+  subtitle: string;
+  posterUrl?: string;
+}
 
 @Component({
   selector: 'app-live-tv',
@@ -150,6 +169,13 @@ export class LiveTvComponent implements OnDestroy {
   private activePlaybackKind: ActivePlaybackKind = null;
   private ignoreNativeVideoErrorsUntil = 0;
   private failedStreamIndices = signal<Set<number>>(new Set());
+  private readonly mobileViewport = signal(false);
+  private readonly castSupport = signal<CastSupport>('none');
+  private castNoticeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private castInitialized = false;
+  private castListenersRegistered = false;
+  private activeCastMedia: CastMediaCandidate | null = null;
+  private castCapabilitiesCache: CastCapabilities | null = null;
 
   readonly channels = LIVE_CHANNELS;
   readonly categories: { value: 'all' | LiveChannelCategory; label: string; icon: string }[] = [
@@ -170,6 +196,8 @@ export class LiveTvComponent implements OnDestroy {
   selectedQuality = signal(-1);
   failedLogos = signal<Set<string>>(new Set());
   favoriteIds = signal<Set<string>>(this.loadFavorites());
+  castRequestInFlight = signal(false);
+  castNotice = signal<CastNotice | null>(null);
 
   filteredChannels = computed(() => {
     const query = this.normalize(this.query());
@@ -210,9 +238,16 @@ export class LiveTvComponent implements OnDestroy {
     ];
   });
 
+  canShowCastAction = computed(() => {
+    if (!this.mobileViewport()) return false;
+    if (!this.selectedChannel()) return false;
+    return this.activePlaybackKind !== 'mpegts';
+  });
+
   @ViewChild('liveVideo')
   set liveVideo(ref: ElementRef<HTMLVideoElement> | undefined) {
     this.videoElement = ref?.nativeElement ?? null;
+    this.refreshCastSupport();
     if (this.videoElement && this.selectedChannel()) {
       const token = ++this.attachToken;
       setTimeout(() => {
@@ -222,6 +257,7 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   constructor() {
+    this.observeMobileViewport();
     this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe((params) => {
       const channelId = params.get('channelId');
       const channel = channelId
@@ -252,6 +288,12 @@ export class LiveTvComponent implements OnDestroy {
 
   closePlayer() {
     void this.router.navigate(['/live']);
+  }
+
+  castButtonLabel() {
+    if (this.castSupport() === 'airplay') return 'AirPlay';
+    if (this.castSupport() === 'capacitor-cast') return 'Chromecast';
+    return 'Cast to TV';
   }
 
   setCategory(category: 'all' | LiveChannelCategory) {
@@ -333,6 +375,88 @@ export class LiveTvComponent implements OnDestroy {
     if (!this.hls) this.tryNextStream('This broadcast could not be played.');
   }
 
+  private async startNativeCastSession() {
+    const castMedia = this.activeCastMedia;
+    if (!castMedia) {
+      this.showCastNotice('This broadcast cannot be cast from the current mobile player.', 'error', 4200);
+      return;
+    }
+
+    await this.ensureNativeCastReady();
+
+    const capabilities = this.castCapabilitiesCache ?? (await Cast.getCapabilities());
+    this.castCapabilitiesCache = capabilities;
+
+    if (!capabilities.isSupported || !capabilities.canShowDevicePicker) {
+      this.showCastNotice('Chromecast is not available on this device.', 'error', 4200);
+      return;
+    }
+
+    this.showCastNotice('Opening cast menu...', 'info', 2400);
+    const session = await Cast.getSession();
+    if (!session.session) {
+      await Cast.showDevicePicker();
+    }
+
+    const request: LoadMediaRequest = {
+      url: castMedia.url,
+      contentType: castMedia.contentType,
+      title: castMedia.title,
+      subtitle: castMedia.subtitle,
+      posterUrl: castMedia.posterUrl,
+      autoplay: true,
+      streamType: 'LIVE',
+    };
+    await Cast.loadMedia(request);
+    this.showCastNotice('Casting started on your TV.', 'info', 4200);
+  }
+
+  async openCastPicker() {
+    if (!this.canShowCastAction() || this.castRequestInFlight()) return;
+    const video = this.videoElement as AirPlayCapableVideoElement | null;
+
+    this.castRequestInFlight.set(true);
+    try {
+      if (this.castSupport() === 'capacitor-cast') {
+        await this.startNativeCastSession();
+        return;
+      }
+
+      if (!video) {
+        this.showCastNotice('Could not start casting.', 'error', 4200);
+        return;
+      }
+
+      this.showCastNotice('Opening cast menu...', 'info', 2200);
+
+      if (this.castSupport() === 'airplay' && typeof video.webkitShowPlaybackTargetPicker === 'function') {
+        video.webkitShowPlaybackTargetPicker();
+        return;
+      }
+
+      if (
+        this.castSupport() === 'remote-playback' &&
+        'remote' in video &&
+        typeof video.remote?.prompt === 'function'
+      ) {
+        await video.remote.prompt();
+        this.showCastNotice('Choose a device to continue casting.', 'info', 3200);
+        return;
+      }
+
+      this.showCastNotice(
+        'Casting is not available on this mobile device.',
+        'error',
+        4200
+      );
+    } catch (error) {
+      console.warn('Could not open cast picker.', error);
+      this.showCastNotice('Could not start casting.', 'error', 4200);
+    } finally {
+      this.castRequestInFlight.set(false);
+    }
+  }
+
   private async loadCurrentStream() {
     const channel = this.selectedChannel();
     const video = this.videoElement;
@@ -349,6 +473,8 @@ export class LiveTvComponent implements OnDestroy {
     this.selectedQuality.set(-1);
     this.activePlaybackKind = null;
     this.ignoreNativeVideoErrorsUntil = Date.now() + 1200;
+    this.activeCastMedia = null;
+    this.refreshCastSupport();
 
     video.pause();
     video.removeAttribute('src');
@@ -383,6 +509,8 @@ export class LiveTvComponent implements OnDestroy {
 
     if (streamKind === 'dash') {
       this.activePlaybackKind = 'dash';
+      this.updateActiveCastMedia(streamUrl, this.activePlaybackKind, stream);
+      this.refreshCastSupport();
       if (typeof (dashjs.MediaPlayer as any).isSupported === 'function' && !(dashjs.MediaPlayer as any).isSupported()) {
         this.playerStatus.set('error');
         this.playerMessage.set('DASH playback is not supported on this device.');
@@ -453,6 +581,8 @@ export class LiveTvComponent implements OnDestroy {
         return;
       }
       this.activePlaybackKind = 'mpegts';
+      this.updateActiveCastMedia(null, this.activePlaybackKind, stream);
+      this.refreshCastSupport();
       this.ignoreNativeVideoErrorsUntil = Date.now() + 2500;
       const playbackUrl = this.buildPlaybackUrl(channel, stream, streamUrl);
       this.debugLive('mpegts.playbackUrl', { playbackUrl });
@@ -484,6 +614,8 @@ export class LiveTvComponent implements OnDestroy {
 
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       this.activePlaybackKind = 'native-hls';
+      this.updateActiveCastMedia(streamUrl, this.activePlaybackKind, stream);
+      this.refreshCastSupport();
       this.ignoreNativeVideoErrorsUntil = Date.now() + 1500;
       this.debugLive('nativeHls.assignVideoSrc', { streamUrl });
       video.src = streamUrl;
@@ -508,6 +640,8 @@ export class LiveTvComponent implements OnDestroy {
       backBufferLength: 30,
     });
     this.activePlaybackKind = 'hls';
+    this.updateActiveCastMedia(streamUrl, this.activePlaybackKind, stream);
+    this.refreshCastSupport();
     this.hls = hls;
     this.debugLive('hls.attachMedia', { streamUrl });
     hls.attachMedia(video);
@@ -562,6 +696,7 @@ export class LiveTvComponent implements OnDestroy {
     // in destroyPlayer() to avoid closing EME sessions while a new load is starting.
     this.dash = null;
     this.activePlaybackKind = null;
+    this.refreshCastSupport();
     this.hls?.destroy();
     this.hls = null;
   }
@@ -583,6 +718,121 @@ export class LiveTvComponent implements OnDestroy {
       this.videoElement.load();
     }
     this.qualityLevels.set([]);
+    this.castRequestInFlight.set(false);
+    this.activeCastMedia = null;
+    this.clearCastNotice();
+    this.refreshCastSupport();
+  }
+
+  private async ensureNativeCastReady() {
+    if (!this.isNativePlatform) return;
+
+    if (!this.castInitialized) {
+      await Cast.initialize();
+      this.castInitialized = true;
+    }
+
+    if (!this.castListenersRegistered) {
+      await Cast.addListener('castError', (event) => {
+        this.showCastNotice(event.message || 'Could not start casting.', 'error', 4200);
+      });
+      this.castListenersRegistered = true;
+    }
+  }
+
+  private showCastNotice(message: string, tone: 'info' | 'error', durationMs = 3200) {
+    this.castNotice.set({ message, tone });
+    if (this.castNoticeTimeoutId) clearTimeout(this.castNoticeTimeoutId);
+    this.castNoticeTimeoutId = setTimeout(() => {
+      this.castNotice.set(null);
+      this.castNoticeTimeoutId = null;
+    }, durationMs);
+  }
+
+  private clearCastNotice() {
+    if (this.castNoticeTimeoutId) {
+      clearTimeout(this.castNoticeTimeoutId);
+      this.castNoticeTimeoutId = null;
+    }
+    this.castNotice.set(null);
+  }
+
+  private observeMobileViewport() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia('(max-width: 900px), (pointer: coarse)');
+    const syncViewport = () => {
+      this.mobileViewport.set(mediaQuery.matches);
+      this.refreshCastSupport();
+    };
+
+    syncViewport();
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncViewport);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(syncViewport);
+    }
+  }
+
+  private refreshCastSupport() {
+    const video = this.videoElement as AirPlayCapableVideoElement | null;
+    if (!this.mobileViewport() || this.activePlaybackKind === 'mpegts') {
+      this.castSupport.set('none');
+      return;
+    }
+
+    if (this.isNativePlatform) {
+      this.castSupport.set('capacitor-cast');
+      return;
+    }
+
+    if (!video) {
+      this.castSupport.set('none');
+      return;
+    }
+
+    if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
+      this.castSupport.set('airplay');
+      return;
+    }
+
+    if ('remote' in video && typeof video.remote?.prompt === 'function') {
+      this.castSupport.set('remote-playback');
+      return;
+    }
+
+    this.castSupport.set('none');
+  }
+
+  private updateActiveCastMedia(streamUrl: string | null, streamKind: ActivePlaybackKind, stream?: LiveStream | null) {
+    const channel = this.selectedChannel();
+    if (!channel || !streamUrl || !stream) {
+      this.activeCastMedia = null;
+      return;
+    }
+
+    const contentType = this.getCastContentType(streamKind, streamUrl);
+    if (!contentType) {
+      this.activeCastMedia = null;
+      return;
+    }
+
+    this.activeCastMedia = {
+      url: streamUrl,
+      contentType,
+      title: channel.name,
+      subtitle: `${this.categoryLabel(channel.category)} · ${channel.countryCode}`,
+      posterUrl: channel.logoUrl,
+    };
+  }
+
+  private getCastContentType(streamKind: ActivePlaybackKind, streamUrl: string) {
+    if (streamKind === 'dash') return 'application/dash+xml';
+    if (streamKind === 'hls' || streamKind === 'native-hls') return 'application/x-mpegURL';
+    if (/\.mp4($|\?)/i.test(streamUrl)) return 'video/mp4';
+    return null;
   }
 
   private detectStreamKind(stream: LiveStream, streamUrl: string) {
@@ -829,6 +1079,7 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
+    this.clearCastNotice();
     this.destroy$.next();
     this.destroy$.complete();
     this.destroyPlayer();

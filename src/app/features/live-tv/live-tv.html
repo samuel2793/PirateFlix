@@ -20,6 +20,8 @@
           controls
           autoplay
           playsinline
+          x-webkit-airplay="allow"
+          airplay="allow"
           crossorigin="anonymous"
           (playing)="onVideoPlaying()"
           (waiting)="onVideoWaiting()"
@@ -92,10 +94,28 @@
             <mat-icon>{{ isFavorite(channel) ? 'favorite' : 'favorite_border' }}</mat-icon>
             <span>{{ 'Favorite' | t }}</span>
           </button>
+          @if (canShowCastAction()) {
+            <button
+              class="icon-action cast-action"
+              type="button"
+              (click)="openCastPicker()"
+              [disabled]="castRequestInFlight()"
+            >
+              <mat-icon>cast</mat-icon>
+              <span>{{ (castRequestInFlight() ? 'Opening cast menu...' : castButtonLabel()) | t }}</span>
+            </button>
+          }
           <a class="icon-action" [href]="channel.websiteUrl" target="_blank" rel="noopener noreferrer">
             <mat-icon>open_in_new</mat-icon><span>{{ 'Official site' | t }}</span>
           </a>
         </div>
+
+        @if (castNotice(); as notice) {
+          <div class="cast-notice" [class.error]="notice.tone === 'error'">
+            <mat-icon>{{ notice.tone === 'error' ? 'cast_off' : 'cast_connected' }}</mat-icon>
+            <span>{{ notice.message | t }}</span>
+          </div>
+        }
 
         @if (channel.geoRestricted) {
           <div class="geo-notice">

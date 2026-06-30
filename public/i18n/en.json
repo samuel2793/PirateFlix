@@ -332,5 +332,16 @@
   "This broadcast could not be played.": "This broadcast could not be played.",
   "The broadcast is unavailable or blocked by its provider.": "The broadcast is unavailable or blocked by its provider.",
   "HLS playback is not supported on this device.": "HLS playback is not supported on this device.",
-  "Could not obtain a current broadcast URL.": "Could not obtain a current broadcast URL."
+  "Could not obtain a current broadcast URL.": "Could not obtain a current broadcast URL.",
+  "Cast to TV": "Cast to TV",
+  "Casting is not available on this mobile device.": "Casting is not available on this mobile device.",
+  "Could not start casting.": "Could not start casting.",
+  "AirPlay": "AirPlay",
+  "Chromecast": "Chromecast",
+  "Opening cast menu...": "Opening cast menu...",
+  "Choose a device to continue casting.": "Choose a device to continue casting.",
+  "This mobile app does not expose a cast dialog yet.": "This mobile app does not expose a cast dialog yet.",
+  "Chromecast is not available on this device.": "Chromecast is not available on this device.",
+  "This broadcast cannot be cast from the current mobile player.": "This broadcast cannot be cast from the current mobile player.",
+  "Casting started on your TV.": "Casting started on your TV."
 }

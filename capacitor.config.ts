@@ -1,3 +1,5 @@
+/// <reference types="@strasberry/capacitor-cast" />
+
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
@@ -11,6 +13,11 @@ const config: CapacitorConfig = {
     allowMixedContent: true,
   },
   plugins: {
+    Cast: {
+      receiverApplicationId: 'CC1AD845',
+      uiMode: 'picker',
+      autoJoinPolicy: 'origin_scoped',
+    },
     CapacitorNodeJS: {
       nodeDir: 'nodejs-project',
       startMode: 'manual',

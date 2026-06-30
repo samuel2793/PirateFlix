@@ -265,6 +265,43 @@ $text-secondary: rgba(255, 255, 255, 0.68);
 
   mat-icon { width: 20px; height: 20px; font-size: 20px; }
   &:hover, &.active { color: var(--accent-primary, $accent); background: rgba(var(--accent-rgb, 229, 160, 13), 0.1); }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: wait;
+  }
+}
+
+.cast-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb, 229, 160, 13), 0.12);
+  color: #f5e6bb;
+  font-size: 12px;
+  line-height: 1.45;
+  border: 1px solid rgba(var(--accent-rgb, 229, 160, 13), 0.22);
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+    color: var(--accent-primary, $accent);
+    flex: 0 0 18px;
+    margin-top: 1px;
+  }
+
+  &.error {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.24);
+    color: #ffd1d1;
+
+    mat-icon {
+      color: #ff8b8b;
+    }
+  }
 }
 
 .geo-notice {
