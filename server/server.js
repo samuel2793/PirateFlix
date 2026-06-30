@@ -45,6 +45,18 @@ function getVideoTranscodeOptions() {
 
 
 function getLiveMpegTsOutputOptions() {
+  if (IS_ANDROID_RUNTIME) {
+    return [
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', TRANSCODE_AUDIO_BITRATE,
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-reset_timestamps', '1',
+      '-muxdelay', '0',
+      '-muxpreload', '0',
+    ];
+  }
+
   return [
     '-preset', 'ultrafast',
     '-tune', 'zerolatency',
@@ -65,6 +77,17 @@ function getLiveMpegTsInputOptions() {
     '-analyzeduration', '1000000',
     '-probesize', '1000000',
   ];
+}
+
+function configureLiveMpegTsCommand(command) {
+  if (IS_ANDROID_RUNTIME) {
+    return command;
+  }
+
+  return command
+    .videoCodec(TRANSCODE_VIDEO_CODEC)
+    .audioCodec('aac')
+    .audioBitrate(TRANSCODE_AUDIO_BITRATE);
 }
 
 
@@ -2810,7 +2833,7 @@ async function probeLiveSourceCandidate({
 
 async function probeLiveStream({ format, parsedUrl, requestHeadersObject, sourceUrl }) {
   const candidateIps =
-    parsedUrl.protocol === 'http:'
+    !IS_ANDROID_RUNTIME && parsedUrl.protocol === 'http:'
       ? await getLiveCandidateIps(parsedUrl.hostname).catch(() => [])
       : [];
   const pinnedHeaders =
@@ -2892,12 +2915,35 @@ app.get('/api/live/probe', async (req, res) => {
   }
 });
 
+app.head('/api/live/remux', async (req, res) => {
+  const parsedRequest = parseLiveRequest(req);
+  if (parsedRequest.error) {
+    res.status(400).end();
+    return;
+  }
+
+  console.log('🎥 Live remux HEAD requested:', parsedRequest.parsedUrl.hostname);
+  try {
+    await probeLiveStream(parsedRequest);
+    res.status(200).set({
+      'Cache-Control': 'no-store',
+      'Pragma': 'no-cache',
+      'Accept-Ranges': 'none',
+    }).end();
+  } catch (error) {
+    const message = error?.message || 'Unknown live probe error';
+    console.warn('⚠️ Live remux HEAD preflight failed:', parsedRequest.parsedUrl.hostname, message);
+    res.status(502).end();
+  }
+});
+
 app.get('/api/live/remux', async (req, res) => {
   const parsedRequest = parseLiveRequest(req);
   if (parsedRequest.error) {
     res.status(400).send(parsedRequest.error);
     return;
   }
+  console.log('🎥 Live remux GET requested:', parsedRequest.parsedUrl.hostname);
   const { parsedUrl, sourceUrl, userAgent } = parsedRequest;
   let clientClosed = false;
   let responseStarted = false;
@@ -2960,7 +3006,8 @@ app.get('/api/live/remux', async (req, res) => {
     if (!res.destroyed) res.destroy(error);
   });
 
-  const ffmpegCommand = ffmpeg(liveSourceUrl)
+  const ffmpegCommand = configureLiveMpegTsCommand(
+    ffmpeg(liveSourceUrl)
       .inputOptions([
         ...getLiveMpegTsInputOptions(),
         '-loglevel', 'info',
@@ -2970,11 +3017,9 @@ app.get('/api/live/remux', async (req, res) => {
         '-reconnect_streamed', '1',
         '-reconnect_delay_max', '2',
       ])
-      .videoCodec(TRANSCODE_VIDEO_CODEC)
       .outputOptions(getLiveMpegTsOutputOptions())
-      .audioCodec('aac')
-      .audioBitrate(TRANSCODE_AUDIO_BITRATE)
       .format('mp4')
+  )
     .on('start', (cmdLine) => {
       console.log('🎥 Live remux started:', parsedUrl.hostname);
       console.log('📋 FFmpeg cmd:', cmdLine);

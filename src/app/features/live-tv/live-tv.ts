@@ -36,7 +36,11 @@ export class LiveTvComponent implements OnDestroy {
   private readonly LIVE_USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
   private readonly SETTINGS_STORAGE_KEY = 'pirateflix_settings';
+  private readonly isNativePlatform = Capacitor.isNativePlatform();
   private readonly API_URL = (() => {
+    if (Capacitor.isNativePlatform()) {
+      return 'http://127.0.0.1:3001/api';
+    }
     if (typeof window === 'undefined') {
       return 'http://127.0.0.1:3001/api';
     }
@@ -47,8 +51,20 @@ export class LiveTvComponent implements OnDestroy {
   })();
 
   private readonly BACKEND_BASE_URL = this.API_URL.replace(/\/api$/, '');
-  private readonly isNativePlatform = Capacitor.isNativePlatform();
+  private readonly BACKEND_HEALTH_BASE_URLS = (() => {
+    const baseUrls = new Set<string>([this.BACKEND_BASE_URL]);
+    if (this.isNativePlatform) {
+      baseUrls.add('http://127.0.0.1:3001');
+      baseUrls.add('http://localhost:3001');
+    }
+    return Array.from(baseUrls);
+  })();
   private backendReadyPromise: Promise<void> | null = null;
+
+  private debugLive(message: string, details?: Record<string, unknown>) {
+    const suffix = details ? ` ${JSON.stringify(details)}` : '';
+    console.log(`[LiveTV] ${message}${suffix}`);
+  }
 
   private async ensureBackendReady(): Promise<void> {
     if (this.backendReadyPromise) {
@@ -68,6 +84,7 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   private async startEmbeddedBackend(): Promise<void> {
+    this.debugLive('startEmbeddedBackend.begin');
     try {
       const startPromise = NodeJS.start({ nodeDir: 'nodejs-project' });
 
@@ -84,28 +101,32 @@ export class LiveTvComponent implements OnDestroy {
     }
 
     await this.waitForBackendHealth();
+    this.debugLive('startEmbeddedBackend.ready');
   }
 
   private async waitForBackendHealth(timeoutMs = 12000): Promise<void> {
     const startedAt = Date.now();
 
     while (Date.now() - startedAt < timeoutMs) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1000);
+      for (const baseUrl of this.BACKEND_HEALTH_BASE_URLS) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 1000);
 
-      try {
-        const response = await fetch(`${this.BACKEND_BASE_URL}/health`, {
-          cache: 'no-store',
-          signal: controller.signal,
-        });
+        try {
+          const response = await fetch(`${baseUrl}/health`, {
+            cache: 'no-store',
+            signal: controller.signal,
+          });
 
-        if (response.ok) {
-          return;
+          if (response.ok) {
+            this.debugLive('backend.health.ok', { baseUrl, status: response.status });
+            return;
+          }
+        } catch {
+          // Backend aún no disponible.
+        } finally {
+          clearTimeout(timeout);
         }
-      } catch {
-        // Backend aún no disponible.
-      } finally {
-        clearTimeout(timeout);
       }
 
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -301,6 +322,12 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   onNativeVideoError() {
+    const mediaError = this.videoElement?.error;
+    this.debugLive('nativeVideo.error', {
+      code: mediaError?.code ?? null,
+      message: mediaError?.message ?? null,
+      activePlaybackKind: this.activePlaybackKind,
+    });
     if (Date.now() < this.ignoreNativeVideoErrorsUntil) return;
     if (this.activePlaybackKind === 'mpegts') return;
     if (!this.hls) this.tryNextStream('This broadcast could not be played.');
@@ -330,6 +357,7 @@ export class LiveTvComponent implements OnDestroy {
     let streamUrl: string;
     try {
       streamUrl = await this.streamResolver.resolve(stream);
+      this.debugLive('stream.resolved', { channelId: channel.id, index: this.selectedStreamIndex(), streamUrl });
     } catch (error) {
       console.error('Could not resolve live stream URL.', error);
       if (loadToken === this.streamLoadToken) {
@@ -346,6 +374,12 @@ export class LiveTvComponent implements OnDestroy {
     }
 
     const streamKind = this.detectStreamKind(stream, streamUrl);
+    this.debugLive('stream.kind', {
+      channelId: channel.id,
+      index: this.selectedStreamIndex(),
+      streamKind,
+      format: stream.format ?? null,
+    });
 
     if (streamKind === 'dash') {
       this.activePlaybackKind = 'dash';
@@ -410,9 +444,37 @@ export class LiveTvComponent implements OnDestroy {
 
     if (streamKind === 'mpegts') {
       await this.ensureBackendReady();
+      if (
+        loadToken !== this.streamLoadToken ||
+        video !== this.videoElement ||
+        channel.id !== this.selectedChannel()?.id
+      ) {
+        this.debugLive('mpegts.cancelled.afterBackendReady', { channelId: channel.id, index: this.selectedStreamIndex() });
+        return;
+      }
       this.activePlaybackKind = 'mpegts';
       this.ignoreNativeVideoErrorsUntil = Date.now() + 2500;
-      video.src = this.buildPlaybackUrl(channel, stream, streamUrl);
+      const playbackUrl = this.buildPlaybackUrl(channel, stream, streamUrl);
+      this.debugLive('mpegts.playbackUrl', { playbackUrl });
+      if (this.isNativePlatform) {
+        this.debugLive('mpegts.head.begin', { playbackUrl });
+        const isReachable = await this.verifyNativeRemuxUrl(playbackUrl);
+        if (
+          loadToken !== this.streamLoadToken ||
+          video !== this.videoElement ||
+          channel.id !== this.selectedChannel()?.id
+        ) {
+          this.debugLive('mpegts.cancelled.afterHead', { channelId: channel.id, index: this.selectedStreamIndex() });
+          return;
+        }
+        if (!isReachable) {
+          this.debugLive('mpegts.head.unreachable', { playbackUrl });
+          this.tryNextStream('The local playback bridge is unavailable on this device.');
+          return;
+        }
+      }
+      this.debugLive('mpegts.assignVideoSrc', { playbackUrl });
+      video.src = playbackUrl;
       video.load();
       void video.play().catch(() => {
         this.playerMessage.set('Press play to start the broadcast.');
@@ -423,6 +485,7 @@ export class LiveTvComponent implements OnDestroy {
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       this.activePlaybackKind = 'native-hls';
       this.ignoreNativeVideoErrorsUntil = Date.now() + 1500;
+      this.debugLive('nativeHls.assignVideoSrc', { streamUrl });
       video.src = streamUrl;
       video.load();
       void video.play().catch(() => {
@@ -446,6 +509,7 @@ export class LiveTvComponent implements OnDestroy {
     });
     this.activePlaybackKind = 'hls';
     this.hls = hls;
+    this.debugLive('hls.attachMedia', { streamUrl });
     hls.attachMedia(video);
     hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(this.buildPlaybackUrl(channel, stream, streamUrl)));
     hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
@@ -552,6 +616,31 @@ export class LiveTvComponent implements OnDestroy {
     }
 
     return `${this.API_URL}/live/remux?${params.toString()}`;
+  }
+
+  private async verifyNativeRemuxUrl(playbackUrl: string) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    try {
+      const response = await fetch(playbackUrl, {
+        method: 'HEAD',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      this.debugLive('mpegts.head.result', { playbackUrl, status: response.status });
+      return response.ok;
+    } catch (error) {
+      console.error(
+        `[LiveTV] mpegts.head.failed ${JSON.stringify({
+          playbackUrl,
+          error: error instanceof Error ? error.message : String(error),
+        })}`
+      );
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async probeStreamsInBackground(channel: LiveChannel) {
