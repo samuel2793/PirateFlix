@@ -112,6 +112,14 @@ export const LIVE_CHANNELS: readonly LiveChannel[] = [
     ],
   },
   {
+    id: 'cuatro', name: 'Cuatro', category: 'national', countryCode: 'ES', languages: ['es'],
+    logoUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Cuatro_%282019%29.svg/512px-Cuatro_%282019%29.svg.png',
+    websiteUrl: 'https://www.mitele.es/directo/cuatro/', epgId: 'Cuatro.TV',
+    streams: [
+      { label: 'Principal', url: 'https://adpnetworkhd-cmd.github.io/iptv/Cuatro.m3u8' },
+    ],
+  },
+  {
     id: 'trece', name: 'TRECE', category: 'national', countryCode: 'ES', languages: ['es'],
     logoUrl: 'https://graph.facebook.com/TRECEtves/picture?width=200&height=200',
     websiteUrl: 'https://www.cope.es/directos/trece', epgId: '13.TV',

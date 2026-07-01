@@ -304,6 +304,7 @@
   "Live TV": "Live TV",
   "Live channels": "Live channels",
   "Free live broadcasts from Spain and other countries.": "Free live broadcasts from Spain and other countries.",
+  "Public global IPTV playlist mirrored from the iptv-org project.": "Public global IPTV playlist mirrored from the iptv-org project.",
   "channels": "channels",
   "All channels": "All channels",
   "National": "National",
@@ -323,6 +324,8 @@
   "Geographically restricted": "Geographically restricted",
   "Some broadcasts may only be available in their country of origin.": "Some broadcasts may only be available in their country of origin.",
   "Connecting to live broadcast...": "Connecting to live broadcast...",
+  "Checking broadcast status...": "Checking broadcast status...",
+  "Trying compatibility mode for this broadcast...": "Trying compatibility mode for this broadcast...",
   "Press play to start the broadcast.": "Press play to start the broadcast.",
   "Reconnecting to the broadcast...": "Reconnecting to the broadcast...",
   "Recovering video playback...": "Recovering video playback...",
@@ -343,5 +346,15 @@
   "This mobile app does not expose a cast dialog yet.": "This mobile app does not expose a cast dialog yet.",
   "Chromecast is not available on this device.": "Chromecast is not available on this device.",
   "This broadcast cannot be cast from the current mobile player.": "This broadcast cannot be cast from the current mobile player.",
-  "Casting started on your TV.": "Casting started on your TV."
+  "Casting started on your TV.": "Casting started on your TV.",
+  "iptv-org channels": "iptv-org channels",
+  "iptv-org directory": "iptv-org directory",
+  "Public global IPTV playlist maintained by the iptv-org project.": "Public global IPTV playlist maintained by the iptv-org project.",
+  "Refresh list": "Refresh list",
+  "More live directories": "More live directories",
+  "Global public directory": "Global public directory",
+  "Open catalog": "Open catalog",
+  "Loading IPTV-org channels...": "Loading IPTV-org channels...",
+  "Could not load the IPTV-org catalog.": "Could not load the IPTV-org catalog.",
+  "Load more channels": "Load more channels"
 }

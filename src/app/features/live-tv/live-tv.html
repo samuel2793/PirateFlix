@@ -2,11 +2,11 @@
   <header class="live-hero">
     <div class="hero-copy">
       <span class="eyebrow"><mat-icon>live_tv</mat-icon>{{ 'Live TV' | t }}</span>
-      <h1>{{ 'Live channels' | t }}</h1>
-      <p>{{ 'Free live broadcasts from Spain and other countries.' | t }}</p>
+      <h1>{{ heroTitle() | t }}</h1>
+      <p>{{ heroDescription() | t }}</p>
     </div>
     <div class="channel-count">
-      <strong>{{ channels.length }}</strong>
+      <strong>{{ channels().length }}</strong>
       <span>{{ 'channels' | t }}</span>
     </div>
   </header>
@@ -54,7 +54,7 @@
           <mat-icon>close</mat-icon>
         </button>
         <div class="channel-identity">
-          @if (!failedLogos().has(channel.id)) {
+          @if (channel.logoUrl && !failedLogos().has(channel.id)) {
             <img [src]="channel.logoUrl" [alt]="channel.name" (error)="markLogoFailed(channel)" />
           } @else {
             <span class="logo-fallback">{{ channel.name.charAt(0) }}</span>
@@ -62,7 +62,7 @@
           <div>
             <div class="live-line"><span class="live-dot"></span>{{ 'LIVE' | t }}</div>
             <h2>{{ channel.name }}</h2>
-            <span class="channel-meta">{{ categoryLabel(channel.category) | t }} · {{ channel.countryCode }}</span>
+            <span class="channel-meta">{{ channelMetaLabel(channel) | t }} · {{ channelOriginLabel(channel, channel.streams[selectedStreamIndex()] ?? null) | t }}</span>
           </div>
         </div>
 
@@ -105,9 +105,11 @@
               <span>{{ (castRequestInFlight() ? 'Opening cast menu...' : castButtonLabel()) | t }}</span>
             </button>
           }
-          <a class="icon-action" [href]="channel.websiteUrl" target="_blank" rel="noopener noreferrer">
-            <mat-icon>open_in_new</mat-icon><span>{{ 'Official site' | t }}</span>
-          </a>
+          @if (channel.websiteUrl) {
+            <a class="icon-action" [href]="channel.websiteUrl" target="_blank" rel="noopener noreferrer">
+              <mat-icon>open_in_new</mat-icon><span>{{ 'Official site' | t }}</span>
+            </a>
+          }
         </div>
 
         @if (castNotice(); as notice) {
@@ -129,28 +131,75 @@
 
   <section class="catalog-section">
     <div class="catalog-toolbar">
-      <div class="category-filter" role="group" [attr.aria-label]="'Categories' | t">
-        @for (category of categories; track category.value) {
-          <button
-            type="button"
-            [class.active]="activeCategory() === category.value"
-            (click)="setCategory(category.value)"
-          >
-            <mat-icon>{{ category.icon }}</mat-icon>
-            <span>{{ category.label | t }}</span>
+      @if (!isSourceMode()) {
+        <div class="category-filter" role="group" [attr.aria-label]="'Categories' | t">
+          @for (category of categories; track category.value) {
+            <button
+              type="button"
+              [class.active]="activeCategory() === category.value"
+              (click)="setCategory(category.value)"
+            >
+              <mat-icon>{{ category.icon }}</mat-icon>
+              <span>{{ category.label | t }}</span>
+            </button>
+          }
+        </div>
+      } @else {
+        <div class="source-toolbar">
+          <div class="source-copy">
+            <strong>{{ 'iptv-org directory' | t }}</strong>
+            <span>{{ 'Public global IPTV playlist maintained by the iptv-org project.' | t }}</span>
+          </div>
+          <button type="button" class="source-refresh" (click)="reloadSourceCatalog()" [disabled]="catalogLoading()">
+            <mat-icon>refresh</mat-icon>
+            <span>{{ catalogLoading() ? ('Loading...' | t) : ('Refresh list' | t) }}</span>
           </button>
-        }
-      </div>
+        </div>
+      }
       <label class="search-box">
         <mat-icon>search</mat-icon>
         <input
           type="search"
           [ngModel]="query()"
-          (ngModelChange)="query.set($event)"
+          (ngModelChange)="updateQuery($event)"
           [placeholder]="'Search channels' | t"
         />
       </label>
     </div>
+
+    @if (!isSourceMode()) {
+      <div class="channel-group">
+        <h2><mat-icon>travel_explore</mat-icon>{{ 'More live directories' | t }}</h2>
+        <div class="channel-grid">
+          @for (source of sourceCards; track source.id) {
+            <article
+              class="channel-card source-card"
+              tabindex="0"
+              role="button"
+              (click)="openSourceCatalog(source.id)"
+              (keydown.enter)="openSourceCatalog(source.id)"
+              (keydown.space)="openSourceCatalog(source.id); $event.preventDefault()"
+            >
+              <div class="card-logo source-logo">
+                <span class="source-monogram">IPTV</span>
+                <span class="play-overlay"><mat-icon>arrow_forward</mat-icon></span>
+              </div>
+              <div class="card-copy">
+                <h3>{{ source.name }}</h3>
+                <span>{{ 'Global public directory' | t }}</span>
+              </div>
+              <span class="stream-count">
+                @if (sourceCardChannelCount(source.id)) {
+                  {{ sourceCardChannelCount(source.id) }} {{ 'channels' | t }}
+                } @else {
+                  {{ 'Open catalog' | t }}
+                }
+              </span>
+            </article>
+          }
+        </div>
+      </div>
+    }
 
     @if (favoriteChannels().length) {
       <div class="channel-group">
@@ -164,13 +213,36 @@
     }
 
     <div class="channel-group">
-      <h2><mat-icon>live_tv</mat-icon>{{ activeCategory() === 'all' ? ('All channels' | t) : (categoryLabel(activeCategory()) | t) }}</h2>
-      @if (regularChannels().length) {
+      <h2><mat-icon>live_tv</mat-icon>{{ channelGroupTitle() | t }}</h2>
+      @if (catalogLoading()) {
+        <div class="empty-state">
+          <span class="spinner"></span>
+          <p>{{ 'Loading IPTV-org channels...' | t }}</p>
+        </div>
+      } @else if (catalogError()) {
+        <div class="empty-state empty-state-error">
+          <mat-icon>cloud_off</mat-icon>
+          <p>{{ catalogError() | t }}</p>
+          <button type="button" (click)="reloadSourceCatalog()">
+            <mat-icon>refresh</mat-icon>
+            <span>{{ 'Retry' | t }}</span>
+          </button>
+        </div>
+      } @else if (displayedRegularChannels().length) {
         <div class="channel-grid">
-          @for (channel of regularChannels(); track channel.id) {
+          @for (channel of displayedRegularChannels(); track channel.id) {
             <ng-container *ngTemplateOutlet="channelCard; context: { $implicit: channel }"></ng-container>
           }
         </div>
+        @if (canLoadMoreRegularChannels()) {
+          <div class="catalog-pagination">
+            <span>{{ displayedRegularChannels().length }} / {{ regularChannels().length }} {{ 'channels' | t }}</span>
+            <button type="button" (click)="loadMoreChannels()">
+              <mat-icon>expand_more</mat-icon>
+              <span>{{ 'Load more channels' | t }}</span>
+            </button>
+          </div>
+        }
       } @else if (!favoriteChannels().length) {
         <div class="empty-state">
           <mat-icon>search_off</mat-icon>
@@ -192,7 +264,7 @@
     (keydown.space)="openChannel(channel); $event.preventDefault()"
   >
     <div class="card-logo">
-      @if (!failedLogos().has(channel.id)) {
+      @if (channel.logoUrl && !failedLogos().has(channel.id)) {
         <img [src]="channel.logoUrl" [alt]="channel.name" loading="lazy" (error)="markLogoFailed(channel)" />
       } @else {
         <span class="logo-fallback">{{ channel.name.charAt(0) }}</span>
@@ -213,7 +285,7 @@
     </div>
     <div class="card-copy">
       <h3>{{ channel.name }}</h3>
-      <span>{{ categoryLabel(channel.category) | t }} · {{ channel.countryCode }}</span>
+      <span>{{ channelMetaLabel(channel) | t }} · {{ channelOriginLabel(channel) | t }}</span>
     </div>
     <span class="stream-count" *ngIf="channel.streams.length > 1">{{ channel.streams.length }} {{ 'broadcasts' | t }}</span>
   </article>

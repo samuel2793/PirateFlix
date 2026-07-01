@@ -2,8 +2,8 @@ import { LIVE_CHANNELS } from './live-channels';
 
 describe('LIVE_CHANNELS', () => {
   it('contains the expected live channel catalog', () => {
-    expect(LIVE_CHANNELS).toHaveLength(26);
-    expect(LIVE_CHANNELS.reduce((total, channel) => total + channel.streams.length, 0)).toBe(48);
+    expect(LIVE_CHANNELS).toHaveLength(34);
+    expect(LIVE_CHANNELS.reduce((total, channel) => total + channel.streams.length, 0)).toBe(91);
   });
 
   it('uses unique stable identifiers', () => {

@@ -305,6 +305,7 @@
   "Live TV": "En directo",
   "Live channels": "Canales en directo",
   "Free live broadcasts from Spain and other countries.": "Emisiones gratuitas en directo de España y otros países.",
+  "Public global IPTV playlist mirrored from the iptv-org project.": "Playlist IPTV global pública espejada desde el proyecto iptv-org.",
   "channels": "canales",
   "All channels": "Todos los canales",
   "National": "Nacionales",
@@ -324,6 +325,8 @@
   "Geographically restricted": "Con restricción geográfica",
   "Some broadcasts may only be available in their country of origin.": "Algunas emisiones pueden estar disponibles solo en su país de origen.",
   "Connecting to live broadcast...": "Conectando con la emisión en directo...",
+  "Checking broadcast status...": "Comprobando el estado de la emisión...",
+  "Trying compatibility mode for this broadcast...": "Probando modo de compatibilidad para esta emisión...",
   "Press play to start the broadcast.": "Pulsa reproducir para iniciar la emisión.",
   "Reconnecting to the broadcast...": "Reconectando con la emisión...",
   "Recovering video playback...": "Recuperando la reproducción...",
@@ -344,5 +347,15 @@
   "This mobile app does not expose a cast dialog yet.": "Esta app móvil todavía no expone un diálogo de envío.",
   "Chromecast is not available on this device.": "Chromecast no está disponible en este dispositivo.",
   "This broadcast cannot be cast from the current mobile player.": "Esta emisión no se puede enviar desde el reproductor móvil actual.",
-  "Casting started on your TV.": "La reproducción se ha enviado a tu televisión."
+  "Casting started on your TV.": "La reproducción se ha enviado a tu televisión.",
+  "iptv-org channels": "Canales de iptv-org",
+  "iptv-org directory": "Directorio de iptv-org",
+  "Public global IPTV playlist maintained by the iptv-org project.": "Playlist IPTV global pública mantenida por el proyecto iptv-org.",
+  "Refresh list": "Actualizar lista",
+  "More live directories": "Más directorios en directo",
+  "Global public directory": "Directorio público global",
+  "Open catalog": "Abrir catálogo",
+  "Loading IPTV-org channels...": "Cargando canales de IPTV-org...",
+  "Could not load the IPTV-org catalog.": "No se ha podido cargar el catálogo de IPTV-org.",
+  "Load more channels": "Cargar más canales"
 }

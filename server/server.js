@@ -71,12 +71,22 @@ function getLiveMpegTsOutputOptions() {
   ];
 }
 
-function getLiveMpegTsInputOptions() {
-  return [
+function getLiveMpegTsInputOptions(format) {
+  const options = [
     '-fflags', '+genpts+nobuffer',
     '-analyzeduration', '1000000',
     '-probesize', '1000000',
   ];
+
+  if (format === 'hls') {
+    options.push(
+      '-allowed_extensions', 'ALL',
+      '-extension_picky', '0',
+      '-protocol_whitelist', 'file,http,https,tcp,tls,crypto,data'
+    );
+  }
+
+  return options;
 }
 
 function configureLiveMpegTsCommand(command) {
@@ -114,6 +124,10 @@ function getLowLatencyVideoTranscodeOptions() {
 
 
 function findAndroidNativeLibDir() {
+  if (!IS_ANDROID_RUNTIME) {
+    return null;
+  }
+
   const packageName = 'com.samuel2793.pirateflix';
 
   try {
@@ -1034,7 +1048,19 @@ const transcodedCache = new Map();
 
 const activeFFmpegProcesses = new Map();
 const transcodeJobs = new Map();
+const activeLiveRemuxSessions = new Map();
 const transcodeStatusByKey = new Map();
+const IPTV_ORG_PLAYLIST_URL = 'https://iptv-org.github.io/iptv/index.m3u';
+const IPTV_ORG_STREAMS_API_URL = 'https://iptv-org.github.io/api/streams.json';
+const IPTV_ORG_CACHE_TTL_MS = parseInt(
+  process.env.PIRATEFLIX_IPTV_ORG_CACHE_MS || String(15 * 60 * 1000),
+  10
+);
+const iptvOrgCatalogCache = {
+  channels: null,
+  fetchedAt: 0,
+  pending: null,
+};
 let storagePruneInProgress = false;
 let storageSweepTimer = null;
 let lastStoragePruneReport = null;
@@ -2620,6 +2646,30 @@ function inferLiveProbeFormat(format, sourceUrl) {
   return 'hls';
 }
 
+function canBypassLiveProbeFailure(parsedRequest, error) {
+  const probeFormat = inferLiveProbeFormat(parsedRequest?.format, parsedRequest?.sourceUrl || '');
+  if (probeFormat !== 'hls') return false;
+
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('414');
+}
+
+function parseLivePlaybackId(value) {
+  const playbackId = String(value || '').trim();
+  return playbackId ? playbackId.slice(0, 128) : '';
+}
+
+function stopLiveRemuxSession(playbackId, reason = 'manual-stop') {
+  const session = activeLiveRemuxSessions.get(playbackId);
+  if (!session) return false;
+  try {
+    session.stop(reason);
+  } catch (error) {
+    console.warn('⚠️ Live remux stop failed:', playbackId, error?.message || error);
+  }
+  return true;
+}
+
 const liveEdgeCache = new Map();
 const LIVE_EDGE_CACHE_TTL_MS = parseInt(process.env.PIRATEFLIX_LIVE_EDGE_CACHE_TTL_MS || '900000', 10);
 const LIVE_EDGE_RESOLVE_TIMEOUT_MS = parseInt(
@@ -2770,6 +2820,150 @@ function buildPinnedLiveSourceUrl(sourceUrl, ipAddress) {
   return url.toString();
 }
 
+function parseHlsPlaylistEntries(playlistBody) {
+  return String(playlistBody || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function resolveHlsReferenceUrl(baseUrl, reference) {
+  try {
+    return new URL(reference, baseUrl).toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchLiveProbeText(url, { timeout, headers, agents }) {
+  const response = await axios.get(url, {
+    timeout,
+    responseType: 'text',
+    headers,
+    httpAgent: agents?.httpAgent || httpAgentGlobal,
+    httpsAgent: agents?.httpsAgent || httpsAgentGlobal,
+    validateStatus: () => true,
+  });
+
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Upstream responded with ${response.status}`);
+  }
+
+  return String(response.data || '');
+}
+
+async function validateHlsPlaylistReachability({
+  sourceUrl,
+  playlistBody,
+  requestHeadersObject,
+  agents,
+  timeout,
+  depth = 0,
+}) {
+  if (depth > 2) {
+    throw new Error('HLS manifest nesting is too deep');
+  }
+
+  const entries = parseHlsPlaylistEntries(playlistBody);
+  const variantReferences = [];
+  const segmentReferences = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (!entry.startsWith('#')) {
+      segmentReferences.push(entry);
+      continue;
+    }
+
+    if (entry.startsWith('#EXT-X-STREAM-INF')) {
+      const reference = entries[index + 1];
+      if (reference && !reference.startsWith('#')) {
+        variantReferences.push(reference);
+      }
+    }
+  }
+
+  if (variantReferences.length > 0) {
+    let lastError = null;
+    for (const reference of variantReferences.slice(0, 3)) {
+      const variantUrl = resolveHlsReferenceUrl(sourceUrl, reference);
+      if (!variantUrl) continue;
+
+      try {
+        const variantBody = await fetchLiveProbeText(variantUrl, {
+          timeout,
+          headers: requestHeadersObject,
+          agents,
+        });
+        if (!variantBody.trimStart().startsWith('#EXTM3U')) {
+          throw new Error('Upstream returned an invalid nested HLS manifest');
+        }
+        await validateHlsPlaylistReachability({
+          sourceUrl: variantUrl,
+          playlistBody: variantBody,
+          requestHeadersObject,
+          agents,
+          timeout,
+          depth: depth + 1,
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error('HLS master playlist has no reachable variants');
+  }
+
+  const playableSegments = segmentReferences
+    .map((reference) => resolveHlsReferenceUrl(sourceUrl, reference))
+    .filter(Boolean);
+
+  if (playableSegments.length === 0) {
+    return;
+  }
+
+  const segmentCandidates = playableSegments.slice(-2);
+  let lastError = null;
+  for (const segmentUrl of segmentCandidates) {
+    try {
+      const response = await axios.get(segmentUrl, {
+        timeout,
+        responseType: 'stream',
+        headers: requestHeadersObject,
+        httpAgent: agents?.httpAgent || httpAgentGlobal,
+        httpsAgent: agents?.httpsAgent || httpsAgentGlobal,
+        validateStatus: () => true,
+      });
+      if (response.status < 200 || response.status >= 300) {
+        response.data?.destroy?.();
+        throw new Error(`HLS segment responded with ${response.status}`);
+      }
+
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const stream = response.data;
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          try {
+            stream.destroy();
+          } catch (_) {}
+          callback(value);
+        };
+        stream.once('data', () => finish(resolve, true));
+        stream.once('error', (error) => finish(reject, error));
+        stream.once('end', () => finish(resolve, true));
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('HLS playlist has no reachable segments');
+}
+
 async function probeLiveSourceCandidate({
   format,
   sourceUrl,
@@ -2809,24 +3003,25 @@ async function probeLiveSourceCandidate({
     return { format: probeFormat };
   }
 
-  const response = await axios.get(sourceUrl, {
+  const body = (await fetchLiveProbeText(sourceUrl, {
     timeout,
-    responseType: 'text',
     headers: requestHeadersObject,
-    httpAgent: agents?.httpAgent || httpAgentGlobal,
-    httpsAgent: agents?.httpsAgent || httpsAgentGlobal,
-    validateStatus: () => true,
-  });
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Upstream responded with ${response.status}`);
-  }
-
-  const body = String(response.data || '').trimStart();
+    agents,
+  })).trimStart();
   if (probeFormat === 'dash' && !body.startsWith('<MPD')) {
     throw new Error('Upstream did not return a DASH manifest');
   }
   if (probeFormat === 'hls' && !body.startsWith('#EXTM3U')) {
     throw new Error('Upstream did not return an HLS manifest');
+  }
+  if (probeFormat === 'hls') {
+    await validateHlsPlaylistReachability({
+      sourceUrl,
+      playlistBody: body,
+      requestHeadersObject,
+      agents,
+      timeout,
+    });
   }
   return { format: probeFormat };
 }
@@ -2898,6 +3093,370 @@ async function probeLiveStream({ format, parsedUrl, requestHeadersObject, source
   throw lastError || new Error('Unknown live probe error');
 }
 
+function parseM3uAttributes(value) {
+  const attributes = {};
+  const matcher = /([A-Za-z0-9_-]+)="([^"]*)"/g;
+  let match = matcher.exec(value);
+
+  while (match) {
+    attributes[match[1]] = match[2];
+    match = matcher.exec(value);
+  }
+
+  return attributes;
+}
+
+function splitPlaylistMetadata(value, fallback = []) {
+  if (!value || typeof value !== 'string') return fallback;
+  const parts = value
+    .split(/[;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : fallback;
+}
+
+function createStableCatalogId(seed) {
+  let hash = 5381;
+  for (const char of String(seed || '')) {
+    hash = ((hash << 5) + hash) ^ char.charCodeAt(0);
+  }
+  return `iptv-org-${(hash >>> 0).toString(36)}`;
+}
+
+function inferCatalogStreamFormat(sourceUrl) {
+  try {
+    const url = new URL(sourceUrl);
+    const normalizedPath = url.pathname.toLowerCase();
+    if (normalizedPath.endsWith('.mpd')) return 'dash';
+    if (normalizedPath.endsWith('.m3u8')) return 'hls';
+    if (
+      normalizedPath.endsWith('.ts') ||
+      url.searchParams.get('extension')?.toLowerCase() === 'ts'
+    ) {
+      return 'mpegts';
+    }
+  } catch (_) {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function mapPlaylistGroupToCategory(groupTitle) {
+  const normalized = String(groupTitle || '').trim().toLowerCase();
+  if (!normalized) return 'national';
+  if (/(sport|futbol|football|basket|tennis|golf|racing|fight)/i.test(normalized)) {
+    return 'sports';
+  }
+  if (/(news|noticias|informaci|info|weather)/i.test(normalized)) {
+    return 'news';
+  }
+  if (/(kids|children|cartoon|infantil|anime)/i.test(normalized)) {
+    return 'kids';
+  }
+  return 'national';
+}
+
+function buildPlaylistStreamLabel(name, title, groupTitle) {
+  const normalizedTitle = String(title || '').trim();
+  if (normalizedTitle && normalizedTitle !== name) return normalizedTitle;
+  if (groupTitle) return groupTitle;
+  return 'Live';
+}
+
+function normalizeIptvOrgChannelKey(value) {
+  return String(value || '').trim();
+}
+
+function inferCountryCodeFromIptvOrgChannelKey(channelKey) {
+  const normalized = normalizeIptvOrgChannelKey(channelKey);
+  const match = normalized.match(/\.([A-Za-z]{2,3})$/);
+  return match?.[1] ? match[1].toUpperCase() : '';
+}
+
+function isWeakIptvOrgFeedLabel(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!normalized) return true;
+  return /^(SD|HD|FHD|UHD|4K|720P|1080P|2160P|\d+P)$/.test(normalized);
+}
+
+function normalizeIptvOrgOriginLabel(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+
+  const compact = normalized.replace(/\s+/g, ' ');
+  const upper = compact.toUpperCase();
+  const regionNames = {
+    UK: 'United Kingdom',
+    US: 'United States',
+    UAE: 'United Arab Emirates',
+  };
+
+  if (/^[A-Z]{2,3}$/.test(upper)) {
+    if (regionNames[upper]) return regionNames[upper];
+    try {
+      return new Intl.DisplayNames(['en'], { type: 'region' }).of(upper) || compact;
+    } catch (_) {
+      return compact;
+    }
+  }
+
+  return compact;
+}
+
+function buildIptvOrgOriginLabel(channelKey, feedLabel) {
+  const normalizedFeed = String(feedLabel || '').trim();
+  if (normalizedFeed && !isWeakIptvOrgFeedLabel(normalizedFeed)) {
+    return normalizeIptvOrgOriginLabel(normalizedFeed);
+  }
+
+  const inferredCountryCode = inferCountryCodeFromIptvOrgChannelKey(channelKey);
+  if (inferredCountryCode) {
+    return normalizeIptvOrgOriginLabel(inferredCountryCode);
+  }
+
+  return '';
+}
+
+function buildIptvOrgStreamsIndex(streamEntries) {
+  const byUrl = new Map();
+  const byChannel = new Map();
+
+  for (const entry of Array.isArray(streamEntries) ? streamEntries : []) {
+    const channelKey = normalizeIptvOrgChannelKey(entry?.channel);
+    const streamUrl = String(entry?.url || '').trim();
+    if (!channelKey || !streamUrl) continue;
+
+    const originLabel = buildIptvOrgOriginLabel(channelKey, entry?.feed || '');
+    const requestHeaders = {};
+    if (entry?.user_agent) requestHeaders['User-Agent'] = String(entry.user_agent).trim();
+    if (entry?.referrer) requestHeaders['Referer'] = String(entry.referrer).trim();
+    if (entry?.referrer) {
+      try {
+        requestHeaders['Origin'] = new URL(String(entry.referrer).trim()).origin;
+      } catch (_) {}
+    }
+
+    const metadata = {
+      channelKey,
+      inferredCountryCode: inferCountryCodeFromIptvOrgChannelKey(channelKey),
+      originLabel,
+      title: String(entry?.title || '').trim(),
+      requestHeaders: Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined,
+      geoRestricted: /geo[-\s]?blocked/i.test(String(entry?.label || '')),
+    };
+
+    byUrl.set(streamUrl, metadata);
+
+    const channelEntries = byChannel.get(channelKey) || [];
+    channelEntries.push(metadata);
+    byChannel.set(channelKey, channelEntries);
+  }
+
+  return { byUrl, byChannel };
+}
+
+function parseIptvOrgPlaylist(playlistText, streamsIndex = { byUrl: new Map(), byChannel: new Map() }) {
+  const groupedChannels = new Map();
+  const lines = String(playlistText || '').split(/\r?\n/);
+  let pendingEntry = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line.startsWith('#EXTINF')) {
+      const commaIndex = line.indexOf(',');
+      const metadataPart = commaIndex >= 0 ? line.slice(0, commaIndex) : line;
+      const title = commaIndex >= 0 ? line.slice(commaIndex + 1).trim() : '';
+      pendingEntry = {
+        title,
+        attributes: parseM3uAttributes(metadataPart),
+      };
+      continue;
+    }
+
+    if (line.startsWith('#')) continue;
+    if (!pendingEntry) continue;
+
+    let sourceUrl;
+    try {
+      sourceUrl = new URL(line).toString();
+    } catch (_) {
+      pendingEntry = null;
+      continue;
+    }
+
+    if (!/^https?:/i.test(sourceUrl)) {
+      pendingEntry = null;
+      continue;
+    }
+
+    const attributes = pendingEntry.attributes;
+    const title = pendingEntry.title;
+    const name =
+      attributes['tvg-name']?.trim() ||
+      attributes['channel-name']?.trim() ||
+      title ||
+      'Unknown channel';
+    const groupTitle = attributes['group-title']?.trim() || undefined;
+    const countries = splitPlaylistMetadata(attributes['tvg-country'], ['INT']);
+    const languages = splitPlaylistMetadata(attributes['tvg-language'], ['und']).map((language) =>
+      language.toLowerCase()
+    );
+    const playlistCountryCode = (countries[0] || 'INT').slice(0, 3).toUpperCase();
+    const epgId = attributes['tvg-id']?.trim() || undefined;
+    const streamMetadata =
+      streamsIndex.byUrl.get(sourceUrl) ||
+      (epgId ? (streamsIndex.byChannel.get(epgId) || [])[0] : null) ||
+      null;
+    const canonicalChannelKey = normalizeIptvOrgChannelKey(streamMetadata?.channelKey || epgId || '');
+    const countryCode =
+      (playlistCountryCode && playlistCountryCode !== 'INT'
+        ? playlistCountryCode
+        : streamMetadata?.inferredCountryCode || playlistCountryCode || 'INT');
+    const idSeed = canonicalChannelKey || [
+      epgId || '',
+      name,
+      groupTitle || '',
+      countryCode,
+      languages.join(','),
+    ].join('|');
+    const channelId = createStableCatalogId(idSeed);
+    const stream = {
+      label: buildPlaylistStreamLabel(name, title, groupTitle),
+      url: sourceUrl,
+      format: inferCatalogStreamFormat(sourceUrl),
+      requestHeaders: streamMetadata?.requestHeaders,
+      originLabel: streamMetadata?.originLabel || undefined,
+      geoRestricted: streamMetadata?.geoRestricted || false,
+    };
+
+    const existing = groupedChannels.get(channelId);
+    if (existing) {
+      const duplicate = existing.streams.some((candidate) => candidate.url === stream.url);
+      if (!duplicate) {
+        existing.streams.push(stream);
+        if (!existing.originLabel && stream.originLabel) {
+          existing.originLabel = stream.originLabel;
+        }
+        if (!existing.geoRestricted && stream.geoRestricted) {
+          existing.geoRestricted = true;
+        }
+      }
+      pendingEntry = null;
+      continue;
+    }
+
+    groupedChannels.set(channelId, {
+      id: channelId,
+      name,
+      category: mapPlaylistGroupToCategory(groupTitle),
+      countryCode,
+      languages,
+      originLabel: streamMetadata?.originLabel || undefined,
+      logoUrl: attributes['tvg-logo']?.trim() || '',
+      epgId: canonicalChannelKey || epgId,
+      groupTitle,
+      sourceId: 'iptv-org',
+      sourceLabel: 'iptv-org',
+      geoRestricted: streamMetadata?.geoRestricted || false,
+      streams: [stream],
+    });
+
+    pendingEntry = null;
+  }
+
+  return [...groupedChannels.values()].sort((left, right) => {
+    const nameCompare = left.name.localeCompare(right.name, 'en', { sensitivity: 'base' });
+    if (nameCompare !== 0) return nameCompare;
+    return left.countryCode.localeCompare(right.countryCode, 'en', { sensitivity: 'base' });
+  });
+}
+
+async function fetchIptvOrgCatalog(forceRefresh = false) {
+  if (
+    !forceRefresh &&
+    Array.isArray(iptvOrgCatalogCache.channels) &&
+    Date.now() - iptvOrgCatalogCache.fetchedAt < IPTV_ORG_CACHE_TTL_MS
+  ) {
+    return {
+      channels: iptvOrgCatalogCache.channels,
+      fetchedAt: iptvOrgCatalogCache.fetchedAt,
+      cached: true,
+    };
+  }
+
+  if (!forceRefresh && iptvOrgCatalogCache.pending) {
+    return iptvOrgCatalogCache.pending;
+  }
+
+  iptvOrgCatalogCache.pending = (async () => {
+    const commonRequest = {
+      timeout: 20000,
+      headers: {
+        Accept: 'application/json,application/x-mpegURL,text/plain;q=0.9,*/*;q=0.8',
+        'User-Agent': 'PirateFlix/1.0 (+https://github.com/iptv-org/iptv)',
+      },
+      httpAgent: httpAgentGlobal,
+      httpsAgent: httpsAgentGlobal,
+      validateStatus: (status) => status >= 200 && status < 300,
+    };
+    const [playlistResponse, streamsResponse] = await Promise.all([
+      axios.get(IPTV_ORG_PLAYLIST_URL, {
+        ...commonRequest,
+        responseType: 'text',
+      }),
+      axios.get(IPTV_ORG_STREAMS_API_URL, {
+        ...commonRequest,
+        responseType: 'json',
+      }).catch((error) => {
+        console.warn('⚠️ IPTV-org streams metadata fetch failed:', error?.message || error);
+        return { data: [] };
+      }),
+    ]);
+
+    const streamsIndex = buildIptvOrgStreamsIndex(streamsResponse.data);
+    const channels = parseIptvOrgPlaylist(playlistResponse.data, streamsIndex);
+    iptvOrgCatalogCache.channels = channels;
+    iptvOrgCatalogCache.fetchedAt = Date.now();
+
+    return {
+      channels,
+      fetchedAt: iptvOrgCatalogCache.fetchedAt,
+      cached: false,
+    };
+  })();
+
+  try {
+    return await iptvOrgCatalogCache.pending;
+  } finally {
+    iptvOrgCatalogCache.pending = null;
+  }
+}
+
+app.get('/api/live/iptv-org/channels', async (req, res) => {
+  const forceRefresh = String(req.query.refresh || '').toLowerCase() === 'true';
+
+  try {
+    const payload = await fetchIptvOrgCatalog(forceRefresh);
+    res.json({
+      ok: true,
+      source: 'iptv-org',
+      playlistUrl: IPTV_ORG_PLAYLIST_URL,
+      fetchedAt: payload.fetchedAt,
+      cached: payload.cached,
+      channels: payload.channels,
+    });
+  } catch (error) {
+    console.error('❌ IPTV-org catalog fetch failed:', error?.message || error);
+    res.status(502).json({
+      ok: false,
+      error: error?.message || 'Could not load IPTV-org playlist',
+    });
+  }
+});
+
 app.get('/api/live/probe', async (req, res) => {
   const parsedRequest = parseLiveRequest(req);
   if (parsedRequest.error) {
@@ -2937,6 +3496,17 @@ app.head('/api/live/remux', async (req, res) => {
   }
 });
 
+app.post('/api/live/remux/stop', (req, res) => {
+  const playbackId = parseLivePlaybackId(req.query.playbackId || req.body?.playbackId);
+  if (!playbackId) {
+    res.status(400).json({ ok: false, error: 'playbackId is required' });
+    return;
+  }
+
+  const stopped = stopLiveRemuxSession(playbackId, 'frontend-stop');
+  res.json({ ok: true, stopped });
+});
+
 app.get('/api/live/remux', async (req, res) => {
   const parsedRequest = parseLiveRequest(req);
   if (parsedRequest.error) {
@@ -2945,7 +3515,9 @@ app.get('/api/live/remux', async (req, res) => {
   }
   console.log('🎥 Live remux GET requested:', parsedRequest.parsedUrl.hostname);
   const { parsedUrl, sourceUrl, userAgent } = parsedRequest;
+  const playbackId = parseLivePlaybackId(req.query.playbackId);
   let clientClosed = false;
+  let cleanedUp = false;
   let responseStarted = false;
   const outputStream = new PassThrough();
   const stderrLines = [];
@@ -2961,13 +3533,23 @@ app.get('/api/live/remux', async (req, res) => {
     probeResult = await probeLiveStream(parsedRequest);
   } catch (error) {
     const message = error?.message || 'Unknown live probe error';
-    console.warn('⚠️ Live remux preflight failed:', parsedUrl.hostname, message);
-    res.status(502).send(`Live source unavailable: ${message}`);
-    return;
+    if (canBypassLiveProbeFailure(parsedRequest, error)) {
+      console.warn(
+        '⚠️ Live remux preflight bypassed:',
+        parsedUrl.hostname,
+        message,
+        '(FFmpeg will attempt the source directly)'
+      );
+    } else {
+      console.warn('⚠️ Live remux preflight failed:', parsedUrl.hostname, message);
+      res.status(502).send(`Live source unavailable: ${message}`);
+      return;
+    }
   }
 
   const liveSourceUrl = probeResult?.sourceUrl || sourceUrl;
   const ffmpegHeaders = probeResult?.ffmpegHeaders || parsedRequest.ffmpegHeaders;
+  const liveSourceFormat = inferLiveProbeFormat(parsedRequest.format, liveSourceUrl);
 
   const startResponse = () => {
     if (responseStarted || res.destroyed) return;
@@ -3009,7 +3591,7 @@ app.get('/api/live/remux', async (req, res) => {
   const ffmpegCommand = configureLiveMpegTsCommand(
     ffmpeg(liveSourceUrl)
       .inputOptions([
-        ...getLiveMpegTsInputOptions(),
+        ...getLiveMpegTsInputOptions(liveSourceFormat),
         '-loglevel', 'info',
         '-user_agent', userAgent,
         '-headers', ffmpegHeaders + '\r\n',
@@ -3065,8 +3647,25 @@ app.get('/api/live/remux', async (req, res) => {
     })
     .on('end', () => {});
 
-  const cleanup = () => {
+  const cleanup = (reason = 'client-close') => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     clientClosed = true;
+    if (playbackId) {
+      activeLiveRemuxSessions.delete(playbackId);
+    }
+    try {
+      outputStream.destroy();
+    } catch (_) {
+      // ignore cleanup failures on already-closed streams
+    }
+    if (reason === 'frontend-stop' && !res.destroyed) {
+      try {
+        res.destroy();
+      } catch (_) {
+        // ignore cleanup failures on already-closed responses
+      }
+    }
     try {
       ffmpegCommand.kill('SIGKILL');
     } catch (_) {
@@ -3074,8 +3673,17 @@ app.get('/api/live/remux', async (req, res) => {
     }
   };
 
-  req.on('aborted', cleanup);
-  res.on('close', cleanup);
+  if (playbackId) {
+    stopLiveRemuxSession(playbackId, 'playback-replaced');
+    activeLiveRemuxSessions.set(playbackId, {
+      stop: cleanup,
+      startedAt: Date.now(),
+      sourceUrl: liveSourceUrl,
+    });
+  }
+
+  req.on('aborted', () => cleanup('request-aborted'));
+  res.on('close', () => cleanup('response-closed'));
   ffmpegCommand.pipe(outputStream, { end: true });
 });
 

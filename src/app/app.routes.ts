@@ -18,6 +18,8 @@ export const routes: Routes = [
   { path: 'settings', component: SettingsComponent, data: { animation: 'settings' } },
   { path: 'collection/:id', component: CollectionComponent, data: { animation: 'collection' } },
   { path: 'live', component: LiveTvComponent, data: { animation: 'live' } },
+  { path: 'live/source/:sourceId/:channelId', component: LiveTvComponent, data: { animation: 'live' } },
+  { path: 'live/source/:sourceId', component: LiveTvComponent, data: { animation: 'live' } },
   { path: 'live/:channelId', component: LiveTvComponent, data: { animation: 'live' } },
   { path: '**', redirectTo: '' },
 ];

@@ -24,8 +24,9 @@ import { LiveStreamResolverService } from '../../core/services/live-stream-resol
 import { TranslatePipe } from '../../shared/pipes/translate.pipe';
 
 type PlayerStatus = 'idle' | 'loading' | 'playing' | 'error';
-type ActivePlaybackKind = 'dash' | 'hls' | 'native-hls' | 'mpegts' | null;
+type ActivePlaybackKind = 'dash' | 'hls' | 'native-hls' | 'mpegts' | 'remux' | null;
 type CastSupport = 'none' | 'remote-playback' | 'airplay' | 'capacitor-cast';
+type LiveCatalogSourceId = 'iptv-org';
 
 interface AirPlayCapableVideoElement extends HTMLVideoElement {
   webkitShowPlaybackTargetPicker?: () => void;
@@ -44,6 +45,23 @@ interface CastMediaCandidate {
   posterUrl?: string;
 }
 
+interface LiveCatalogSourceCard {
+  id: LiveCatalogSourceId;
+  name: string;
+  description: string;
+  icon: string;
+}
+
+interface IptvOrgCatalogResponse {
+  ok: boolean;
+  source: LiveCatalogSourceId;
+  playlistUrl: string;
+  fetchedAt: number;
+  cached: boolean;
+  channels: LiveChannel[];
+  error?: string;
+}
+
 @Component({
   selector: 'app-live-tv',
   standalone: true,
@@ -54,6 +72,7 @@ interface CastMediaCandidate {
 export class LiveTvComponent implements OnDestroy {
   private readonly LIVE_USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+  private readonly IPTV_ORG_VISIBLE_BATCH_SIZE = 120;
   private readonly SETTINGS_STORAGE_KEY = 'pirateflix_settings';
   private readonly isNativePlatform = Capacitor.isNativePlatform();
   private readonly API_URL = (() => {
@@ -158,26 +177,41 @@ export class LiveTvComponent implements OnDestroy {
   private readonly router = inject(Router);
   private readonly streamResolver = inject(LiveStreamResolverService);
   private readonly destroy$ = new Subject<void>();
+  private readonly builtinChannels = LIVE_CHANNELS;
+  private readonly remuxFallbackStreamKeys = new Set<string>();
   private dash: any = null;
   private hls: Hls | null = null;
   private videoElement: HTMLVideoElement | null = null;
+  private activeBackendPlaybackId: string | null = null;
   private attachToken = 0;
   private networkRetries = 0;
   private mediaRetries = 0;
   private streamLoadToken = 0;
   private probeToken = 0;
+  private routeStateToken = 0;
+  private iptvOrgFetchToken = 0;
   private activePlaybackKind: ActivePlaybackKind = null;
   private ignoreNativeVideoErrorsUntil = 0;
   private failedStreamIndices = signal<Set<number>>(new Set());
   private readonly mobileViewport = signal(false);
   private readonly castSupport = signal<CastSupport>('none');
   private castNoticeTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  private readonly pageHideListener = () => {
+    this.stopActiveBackendPlayback(true);
+  };
   private castInitialized = false;
   private castListenersRegistered = false;
   private activeCastMedia: CastMediaCandidate | null = null;
   private castCapabilitiesCache: CastCapabilities | null = null;
 
-  readonly channels = LIVE_CHANNELS;
+  readonly sourceCards: readonly LiveCatalogSourceCard[] = [
+    {
+      id: 'iptv-org',
+      name: 'iptv-org',
+      description: 'Open the public global IPTV directory maintained by iptv-org.',
+      icon: 'travel_explore',
+    },
+  ];
   readonly categories: { value: 'all' | LiveChannelCategory; label: string; icon: string }[] = [
     { value: 'all', label: 'All channels', icon: 'apps' },
     { value: 'national', label: 'National', icon: 'public' },
@@ -188,6 +222,11 @@ export class LiveTvComponent implements OnDestroy {
 
   query = signal('');
   activeCategory = signal<'all' | LiveChannelCategory>('all');
+  activeSource = signal<LiveCatalogSourceId | null>(null);
+  iptvOrgChannels = signal<LiveChannel[]>([]);
+  catalogLoading = signal(false);
+  catalogError = signal('');
+  catalogFetchedAt = signal<number | null>(null);
   selectedChannel = signal<LiveChannel | null>(null);
   selectedStreamIndex = signal(0);
   playerStatus = signal<PlayerStatus>('idle');
@@ -198,15 +237,39 @@ export class LiveTvComponent implements OnDestroy {
   favoriteIds = signal<Set<string>>(this.loadFavorites());
   castRequestInFlight = signal(false);
   castNotice = signal<CastNotice | null>(null);
+  visibleRegularChannelCount = signal(this.IPTV_ORG_VISIBLE_BATCH_SIZE);
+
+  channels = computed(() =>
+    this.activeSource() === 'iptv-org' ? this.iptvOrgChannels() : this.builtinChannels
+  );
+
+  isSourceMode = computed(() => this.activeSource() !== null);
+
+  heroTitle = computed(() =>
+    this.isSourceMode() ? 'iptv-org' : 'Live channels'
+  );
+
+  heroDescription = computed(() =>
+    this.isSourceMode()
+      ? 'Public global IPTV playlist mirrored from the iptv-org project.'
+      : 'Free live broadcasts from Spain and other countries.'
+  );
+
+  channelGroupTitle = computed(() => {
+    if (this.isSourceMode()) return 'iptv-org channels';
+    return this.activeCategory() === 'all'
+      ? 'All channels'
+      : this.categoryLabel(this.activeCategory());
+  });
 
   filteredChannels = computed(() => {
     const query = this.normalize(this.query());
     const category = this.activeCategory();
-    return this.channels.filter((channel) => {
-      if (category !== 'all' && channel.category !== category) return false;
+    return this.channels().filter((channel) => {
+      if (!this.isSourceMode() && category !== 'all' && channel.category !== category) return false;
       if (!query) return true;
       return this.normalize(
-        `${channel.name} ${channel.countryCode} ${channel.languages.join(' ')} ${channel.epgId ?? ''}`
+        `${channel.name} ${channel.countryCode} ${channel.languages.join(' ')} ${channel.epgId ?? ''} ${channel.groupTitle ?? ''} ${channel.sourceLabel ?? ''}`
       ).includes(query);
     });
   });
@@ -220,6 +283,14 @@ export class LiveTvComponent implements OnDestroy {
     const favorites = this.favoriteIds();
     return this.filteredChannels().filter((channel) => !favorites.has(channel.id));
   });
+
+  displayedRegularChannels = computed(() =>
+    this.regularChannels().slice(0, this.visibleRegularChannelCount())
+  );
+
+  canLoadMoreRegularChannels = computed(
+    () => this.displayedRegularChannels().length < this.regularChannels().length
+  );
 
   orderedSelectedStreams = computed(() => {
     const channel = this.selectedChannel();
@@ -241,14 +312,16 @@ export class LiveTvComponent implements OnDestroy {
   canShowCastAction = computed(() => {
     if (!this.mobileViewport()) return false;
     if (!this.selectedChannel()) return false;
-    return this.activePlaybackKind !== 'mpegts';
+    return this.activePlaybackKind !== 'mpegts' && this.activePlaybackKind !== 'remux';
   });
 
   @ViewChild('liveVideo')
   set liveVideo(ref: ElementRef<HTMLVideoElement> | undefined) {
-    this.videoElement = ref?.nativeElement ?? null;
+    const nextVideoElement = ref?.nativeElement ?? null;
+    const videoElementChanged = this.videoElement !== nextVideoElement;
+    this.videoElement = nextVideoElement;
     this.refreshCastSupport();
-    if (this.videoElement && this.selectedChannel()) {
+    if (videoElementChanged && this.videoElement && this.selectedChannel()) {
       const token = ++this.attachToken;
       setTimeout(() => {
         if (token === this.attachToken) void this.loadCurrentStream();
@@ -258,36 +331,31 @@ export class LiveTvComponent implements OnDestroy {
 
   constructor() {
     this.observeMobileViewport();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', this.pageHideListener);
+      window.addEventListener('beforeunload', this.pageHideListener);
+    }
     this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe((params) => {
-      const channelId = params.get('channelId');
-      const channel = channelId
-        ? this.channels.find((candidate) => candidate.id === channelId) ?? null
-        : null;
-
-      if (channelId && !channel) {
-        void this.router.navigate(['/live'], { replaceUrl: true });
-        return;
-      }
-
-      if (this.selectedChannel()?.id !== channel?.id) {
-        this.destroyPlayer();
-        this.probeToken += 1;
-        this.clearFailedStreams();
-        this.selectedStreamIndex.set(0);
-        this.selectedChannel.set(channel);
-        this.playerStatus.set(channel ? 'loading' : 'idle');
-        this.playerMessage.set('');
-        if (channel) void this.probeStreamsInBackground(channel);
-      }
+      void this.syncRouteState(params.get('sourceId'), params.get('channelId'));
     });
   }
 
   openChannel(channel: LiveChannel) {
-    void this.router.navigate(['/live', channel.id]);
+    void this.router.navigate(this.channelRoute(channel.id));
+  }
+
+  openSourceCatalog(sourceId: LiveCatalogSourceId) {
+    void this.router.navigate(['/live/source', sourceId]);
   }
 
   closePlayer() {
-    void this.router.navigate(['/live']);
+    this.destroyPlayer();
+    void this.router.navigate(this.baseRoute());
+  }
+
+  async reloadSourceCatalog() {
+    if (this.activeSource() !== 'iptv-org') return;
+    await this.fetchIptvOrgCatalog(true);
   }
 
   castButtonLabel() {
@@ -298,6 +366,61 @@ export class LiveTvComponent implements OnDestroy {
 
   setCategory(category: 'all' | LiveChannelCategory) {
     this.activeCategory.set(category);
+    this.resetVisibleChannels();
+  }
+
+  updateQuery(value: string) {
+    this.query.set(value);
+    this.resetVisibleChannels();
+  }
+
+  sourceCardChannelCount(sourceId: LiveCatalogSourceId) {
+    if (sourceId !== 'iptv-org') return 0;
+    return this.iptvOrgChannels().length;
+  }
+
+  loadMoreChannels() {
+    this.visibleRegularChannelCount.update((current) => current + this.IPTV_ORG_VISIBLE_BATCH_SIZE);
+  }
+
+  channelMetaLabel(channel: LiveChannel) {
+    return channel.groupTitle || this.categoryLabel(channel.category);
+  }
+
+  channelOriginLabel(channel: LiveChannel, stream?: LiveStream | null) {
+    const streamOriginLabel = String(stream?.originLabel || '').trim();
+    if (streamOriginLabel) {
+      return streamOriginLabel;
+    }
+
+    const channelOriginLabel = String(channel.originLabel || '').trim();
+    if (channelOriginLabel) {
+      return channelOriginLabel;
+    }
+
+    if (channel.sourceId !== 'iptv-org') {
+      return channel.countryCode;
+    }
+
+    const countryCode = String(channel.countryCode || '').trim().toUpperCase();
+    if (countryCode && countryCode !== 'INT' && countryCode !== 'UND') {
+      try {
+        return new Intl.DisplayNames(['en'], { type: 'region' }).of(countryCode) || countryCode;
+      } catch {
+        return countryCode;
+      }
+    }
+
+    const languageCode = String(channel.languages[0] || '').trim().toLowerCase();
+    if (languageCode && languageCode !== 'und') {
+      try {
+        return new Intl.DisplayNames(['en'], { type: 'language' }).of(languageCode) || languageCode;
+      } catch {
+        return languageCode;
+      }
+    }
+
+    return 'International';
   }
 
   switchStream(index: number) {
@@ -311,7 +434,10 @@ export class LiveTvComponent implements OnDestroy {
     this.probeToken += 1;
     this.clearFailedStreams();
     const stream = this.selectedChannel()?.streams[this.selectedStreamIndex()];
-    if (stream) this.streamResolver.invalidate(stream);
+    if (stream) {
+      this.streamResolver.invalidate(stream);
+      this.remuxFallbackStreamKeys.delete(this.streamPlaybackKey(stream, this.selectedChannel()?.id));
+    }
     const channel = this.selectedChannel();
     if (channel) void this.probeStreamsInBackground(channel);
     void this.loadCurrentStream();
@@ -373,6 +499,111 @@ export class LiveTvComponent implements OnDestroy {
     if (Date.now() < this.ignoreNativeVideoErrorsUntil) return;
     if (this.activePlaybackKind === 'mpegts') return;
     if (!this.hls) this.tryNextStream('This broadcast could not be played.');
+  }
+
+  private async syncRouteState(sourceIdParam: string | null, channelId: string | null) {
+    const routeToken = ++this.routeStateToken;
+    const sourceId = sourceIdParam === 'iptv-org' ? sourceIdParam : null;
+
+    if (sourceIdParam && !sourceId) {
+      void this.router.navigate(['/live'], { replaceUrl: true });
+      return;
+    }
+
+    this.activeSource.set(sourceId);
+    this.resetVisibleChannels();
+    if (sourceId) {
+      this.activeCategory.set('all');
+      const loaded = await this.fetchIptvOrgCatalog(false);
+      if (routeToken !== this.routeStateToken) return;
+      if (!loaded) {
+        this.applyRouteSelection(null);
+        return;
+      }
+    } else {
+      this.catalogError.set('');
+      this.catalogLoading.set(false);
+    }
+
+    const channel = channelId
+      ? this.channels().find((candidate) => candidate.id === channelId) ?? null
+      : null;
+
+    if (channelId && !channel) {
+      void this.router.navigate(this.baseRoute(sourceId), { replaceUrl: true });
+      return;
+    }
+
+    this.applyRouteSelection(channel);
+  }
+
+  private async fetchIptvOrgCatalog(forceRefresh: boolean) {
+    if (!forceRefresh && this.iptvOrgChannels().length > 0) {
+      this.catalogError.set('');
+      return true;
+    }
+
+    const fetchToken = ++this.iptvOrgFetchToken;
+    this.catalogLoading.set(true);
+    this.catalogError.set('');
+
+    try {
+      await this.ensureBackendReady();
+      const response = await fetch(
+        `${this.API_URL}/live/iptv-org/channels${forceRefresh ? '?refresh=true' : ''}`,
+        { cache: 'no-store' }
+      );
+      const payload = (await response.json().catch(() => null)) as IptvOrgCatalogResponse | null;
+      if (!response.ok || !payload?.ok || !Array.isArray(payload.channels)) {
+        throw new Error(payload?.error || 'Could not load the IPTV-org catalog.');
+      }
+      if (fetchToken !== this.iptvOrgFetchToken) return false;
+
+      this.iptvOrgChannels.set(payload.channels);
+      this.catalogFetchedAt.set(Number.isFinite(payload.fetchedAt) ? payload.fetchedAt : Date.now());
+      this.resetVisibleChannels();
+      return true;
+    } catch (error) {
+      console.error('Could not load IPTV-org catalog.', error);
+      if (fetchToken === this.iptvOrgFetchToken) {
+        this.catalogError.set('Could not load the IPTV-org catalog.');
+      }
+      return false;
+    } finally {
+      if (fetchToken === this.iptvOrgFetchToken) {
+        this.catalogLoading.set(false);
+      }
+    }
+  }
+
+  private applyRouteSelection(channel: LiveChannel | null) {
+    if (this.selectedChannel()?.id === channel?.id) return;
+    this.destroyPlayer();
+    this.probeToken += 1;
+    this.remuxFallbackStreamKeys.clear();
+    this.clearFailedStreams();
+    this.selectedStreamIndex.set(0);
+    this.selectedChannel.set(channel);
+    this.playerStatus.set(channel ? 'loading' : 'idle');
+    this.playerMessage.set('');
+    if (channel) void this.probeStreamsInBackground(channel);
+  }
+
+  private baseRoute(sourceId = this.activeSource()) {
+    return sourceId ? ['/live/source', sourceId] : ['/live'];
+  }
+
+  private channelRoute(channelId: string, sourceId = this.activeSource()) {
+    return sourceId ? ['/live/source', sourceId, channelId] : ['/live', channelId];
+  }
+
+  private resetVisibleChannels() {
+    if (this.activeSource() !== 'iptv-org') {
+      this.visibleRegularChannelCount.set(this.builtinChannels.length);
+      return;
+    }
+
+    this.visibleRegularChannelCount.set(this.IPTV_ORG_VISIBLE_BATCH_SIZE);
   }
 
   private async startNativeCastSession() {
@@ -464,6 +695,7 @@ export class LiveTvComponent implements OnDestroy {
     if (!channel || !video || !stream) return;
     const loadToken = ++this.streamLoadToken;
 
+    this.stopActiveBackendPlayback();
     this.destroyHlsOnly();
     this.networkRetries = 0;
     this.mediaRetries = 0;
@@ -506,6 +738,23 @@ export class LiveTvComponent implements OnDestroy {
       streamKind,
       format: stream.format ?? null,
     });
+
+    if (this.shouldPreflightPlayback(channel, streamKind)) {
+      this.playerMessage.set('Checking broadcast status...');
+      const isAvailable = await this.probeStreamAvailability(channel, stream, streamUrl, streamKind);
+      if (
+        loadToken !== this.streamLoadToken ||
+        video !== this.videoElement ||
+        channel.id !== this.selectedChannel()?.id
+      ) {
+        return;
+      }
+      if (!isAvailable) {
+        this.tryNextStream('The broadcast is unavailable or blocked by its provider.');
+        return;
+      }
+      this.playerMessage.set('Connecting to live broadcast...');
+    }
 
     if (streamKind === 'dash') {
       this.activePlaybackKind = 'dash';
@@ -584,7 +833,8 @@ export class LiveTvComponent implements OnDestroy {
       this.updateActiveCastMedia(null, this.activePlaybackKind, stream);
       this.refreshCastSupport();
       this.ignoreNativeVideoErrorsUntil = Date.now() + 2500;
-      const playbackUrl = this.buildPlaybackUrl(channel, stream, streamUrl);
+      const playbackId = this.createBackendPlaybackId(channel, stream);
+      const playbackUrl = this.buildPlaybackUrl(channel, stream, streamUrl, false, playbackId);
       this.debugLive('mpegts.playbackUrl', { playbackUrl });
       if (this.isNativePlatform) {
         this.debugLive('mpegts.head.begin', { playbackUrl });
@@ -603,6 +853,7 @@ export class LiveTvComponent implements OnDestroy {
           return;
         }
       }
+      this.activeBackendPlaybackId = playbackId;
       this.debugLive('mpegts.assignVideoSrc', { playbackUrl });
       video.src = playbackUrl;
       video.load();
@@ -612,7 +863,39 @@ export class LiveTvComponent implements OnDestroy {
       return;
     }
 
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    const canUseNativeHls = this.shouldUseNativeHls(video, channel);
+    if (
+      streamKind === 'hls' &&
+      this.shouldUseServerRemux(channel, canUseNativeHls, stream)
+    ) {
+      await this.ensureBackendReady();
+      if (
+        loadToken !== this.streamLoadToken ||
+        video !== this.videoElement ||
+        channel.id !== this.selectedChannel()?.id
+      ) {
+        return;
+      }
+
+      this.activePlaybackKind = 'remux';
+      this.updateActiveCastMedia(null, this.activePlaybackKind, stream);
+      this.refreshCastSupport();
+      this.ignoreNativeVideoErrorsUntil = Date.now() + 2500;
+      const playbackId = this.createBackendPlaybackId(channel, stream);
+      const playbackUrl = this.buildPlaybackUrl(channel, stream, streamUrl, true, playbackId);
+      this.activeBackendPlaybackId = playbackId;
+      this.debugLive('remux.assignVideoSrc', {
+        playbackUrl,
+        fallback: this.shouldUseRemuxFallback(channel, stream),
+      });
+      video.src = playbackUrl;
+      video.load();
+      void video.play().catch(() => {
+        this.playerMessage.set('Press play to start the broadcast.');
+      });
+      return;
+    }
+    if (canUseNativeHls) {
       this.activePlaybackKind = 'native-hls';
       this.updateActiveCastMedia(streamUrl, this.activePlaybackKind, stream);
       this.refreshCastSupport();
@@ -658,6 +941,13 @@ export class LiveTvComponent implements OnDestroy {
       });
     });
     hls.on(Hls.Events.ERROR, (_event, data) => {
+      this.debugLive('hls.error', {
+        channelId: channel.id,
+        fatal: data.fatal,
+        type: data.type,
+        details: data.details,
+        error: data.error instanceof Error ? data.error.message : String(data.error ?? ''),
+      });
       if (!data.fatal) return;
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.networkRetries < 2) {
         this.networkRetries += 1;
@@ -669,6 +959,9 @@ export class LiveTvComponent implements OnDestroy {
         this.mediaRetries += 1;
         this.playerMessage.set('Recovering video playback...');
         hls.recoverMediaError();
+        return;
+      }
+      if (this.tryBackendRemuxFallback(channel, stream, data)) {
         return;
       }
       this.tryNextStream('The broadcast is unavailable or blocked by its provider.');
@@ -705,6 +998,7 @@ export class LiveTvComponent implements OnDestroy {
     this.attachToken += 1;
     this.streamLoadToken += 1;
     this.probeToken += 1;
+    this.stopActiveBackendPlayback();
     try {
       this.dash?.destroy();
     } catch (error) {
@@ -714,6 +1008,8 @@ export class LiveTvComponent implements OnDestroy {
     if (this.videoElement) {
       this.ignoreNativeVideoErrorsUntil = Date.now() + 1200;
       this.videoElement.pause();
+      (this.videoElement as HTMLVideoElement & { srcObject?: unknown }).srcObject = null;
+      this.videoElement.src = '';
       this.videoElement.removeAttribute('src');
       this.videoElement.load();
     }
@@ -778,7 +1074,11 @@ export class LiveTvComponent implements OnDestroy {
 
   private refreshCastSupport() {
     const video = this.videoElement as AirPlayCapableVideoElement | null;
-    if (!this.mobileViewport() || this.activePlaybackKind === 'mpegts') {
+    if (
+      !this.mobileViewport() ||
+      this.activePlaybackKind === 'mpegts' ||
+      this.activePlaybackKind === 'remux'
+    ) {
       this.castSupport.set('none');
       return;
     }
@@ -823,7 +1123,7 @@ export class LiveTvComponent implements OnDestroy {
       url: streamUrl,
       contentType,
       title: channel.name,
-      subtitle: `${this.categoryLabel(channel.category)} · ${channel.countryCode}`,
+      subtitle: `${this.categoryLabel(channel.category)} · ${this.channelOriginLabel(channel, stream)}`,
       posterUrl: channel.logoUrl,
     };
   }
@@ -833,6 +1133,63 @@ export class LiveTvComponent implements OnDestroy {
     if (streamKind === 'hls' || streamKind === 'native-hls') return 'application/x-mpegURL';
     if (/\.mp4($|\?)/i.test(streamUrl)) return 'video/mp4';
     return null;
+  }
+
+  private shouldUseRemuxFallback(channel: LiveChannel, stream: LiveStream) {
+    return this.remuxFallbackStreamKeys.has(this.streamPlaybackKey(stream, channel.id));
+  }
+
+  private shouldUseServerRemux(
+    channel: LiveChannel,
+    canUseNativeHls: boolean,
+    stream: LiveStream
+  ) {
+    if (this.shouldUseRemuxFallback(channel, stream)) return true;
+    return channel.sourceId === 'iptv-org' && !canUseNativeHls;
+  }
+
+  private tryBackendRemuxFallback(channel: LiveChannel, stream: LiveStream, errorData?: unknown) {
+    if (channel.sourceId !== 'iptv-org') return false;
+    const key = this.streamPlaybackKey(stream, channel.id);
+    if (this.remuxFallbackStreamKeys.has(key)) return false;
+
+    this.remuxFallbackStreamKeys.add(key);
+    this.playerMessage.set('Trying compatibility mode for this broadcast...');
+    this.debugLive('remuxFallback.enabled', {
+      channelId: channel.id,
+      streamLabel: stream.label,
+      errorData,
+    });
+    void this.loadCurrentStream();
+    return true;
+  }
+
+  private streamPlaybackKey(stream: LiveStream, channelId?: string | null) {
+    return `${channelId ?? this.selectedChannel()?.id ?? 'unknown'}::${stream.label}::${stream.url ?? stream.resolver?.pagePath ?? 'resolver'}`;
+  }
+
+  private shouldUseNativeHls(video: HTMLVideoElement, channel: LiveChannel) {
+    if (!video.canPlayType('application/vnd.apple.mpegurl')) return false;
+
+    if (channel.sourceId !== 'iptv-org') {
+      return true;
+    }
+
+    if (typeof navigator === 'undefined') return true;
+    const userAgent = navigator.userAgent;
+    const isAppleDevice = /iPad|iPhone|iPod|Macintosh/i.test(userAgent);
+    const isSafari =
+      /Safari/i.test(userAgent) &&
+      !/Chrome|Chromium|Android|CriOS|Edg|OPR|Firefox|FxiOS/i.test(userAgent);
+    return isAppleDevice || isSafari;
+  }
+
+  private shouldPreflightPlayback(channel: LiveChannel, streamKind: ActivePlaybackKind) {
+    if (!streamKind) return false;
+    if (channel.sourceId !== 'iptv-org') return false;
+    if (streamKind === 'dash') return true;
+    if (streamKind === 'native-hls') return true;
+    return false;
   }
 
   private detectStreamKind(stream: LiveStream, streamUrl: string) {
@@ -848,18 +1205,70 @@ export class LiveTvComponent implements OnDestroy {
     return 'hls';
   }
 
-  private buildPlaybackUrl(channel: LiveChannel, stream: LiveStream, streamUrl: string) {
-    if (this.detectStreamKind(stream, streamUrl) !== 'mpegts') return streamUrl;
+  private createBackendPlaybackId(channel: LiveChannel, stream: LiveStream) {
+    return [
+      'live',
+      channel.id,
+      this.selectedStreamIndex(),
+      Date.now().toString(36),
+      Math.random().toString(36).slice(2, 10),
+      stream.label.replace(/[^a-z0-9]+/gi, '-').toLowerCase(),
+    ].join('-');
+  }
+
+  private stopActiveBackendPlayback(preferBeacon = false) {
+    const playbackId = this.activeBackendPlaybackId;
+    if (!playbackId) return;
+
+    this.activeBackendPlaybackId = null;
+    const stopUrl = `${this.API_URL}/live/remux/stop?playbackId=${encodeURIComponent(playbackId)}`;
+
+    if (preferBeacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      try {
+        navigator.sendBeacon(stopUrl);
+        return;
+      } catch {
+        // Fall back to fetch when sendBeacon is unavailable for this URL.
+      }
+    }
+
+    void fetch(stopUrl, {
+      method: 'POST',
+      cache: 'no-store',
+      keepalive: preferBeacon,
+    }).catch(() => {
+      // Best-effort cleanup only.
+    });
+  }
+
+  private buildPlaybackUrl(
+    channel: LiveChannel,
+    stream: LiveStream,
+    streamUrl: string,
+    forceRemux = false,
+    playbackId?: string
+  ) {
+    if (!forceRemux && this.detectStreamKind(stream, streamUrl) !== 'mpegts') return streamUrl;
 
     const params = new URLSearchParams();
     params.set('url', streamUrl);
     params.set('userAgent', this.LIVE_USER_AGENT);
+    if (stream.format) {
+      params.set('format', stream.format);
+    } else if (forceRemux) {
+      params.set('format', this.detectStreamKind(stream, streamUrl));
+    }
+    if (playbackId) {
+      params.set('playbackId', playbackId);
+    }
 
-    try {
-      const websiteUrl = new URL(channel.websiteUrl);
-      params.set('referer', channel.websiteUrl);
-      params.set('origin', websiteUrl.origin);
-    } catch {}
+    if (channel.websiteUrl) {
+      try {
+        const websiteUrl = new URL(channel.websiteUrl);
+        params.set('referer', channel.websiteUrl);
+        params.set('origin', websiteUrl.origin);
+      } catch {}
+    }
 
     for (const [key, value] of Object.entries(stream.requestHeaders ?? {})) {
       params.append(`header_${key}`, value);
@@ -920,19 +1329,29 @@ export class LiveTvComponent implements OnDestroy {
     this.failedStreamIndices.set(failed);
   }
 
-  private async probeStreamAvailability(channel: LiveChannel, stream: LiveStream) {
+  private async probeStreamAvailability(
+    channel: LiveChannel,
+    stream: LiveStream,
+    resolvedStreamUrl?: string,
+    streamKindOverride?: ActivePlaybackKind
+  ) {
     try {
-      const streamUrl = await this.streamResolver.resolve(stream);
+      const streamUrl = resolvedStreamUrl ?? (await this.streamResolver.resolve(stream));
       const probeUrl = new URL(`${this.API_URL}/live/probe`);
       probeUrl.searchParams.set('url', streamUrl);
-      probeUrl.searchParams.set('format', this.detectStreamKind(stream, streamUrl));
+      probeUrl.searchParams.set(
+        'format',
+        streamKindOverride ?? this.detectStreamKind(stream, streamUrl)
+      );
       probeUrl.searchParams.set('userAgent', this.LIVE_USER_AGENT);
 
-      try {
-        const websiteUrl = new URL(channel.websiteUrl);
-        probeUrl.searchParams.set('referer', channel.websiteUrl);
-        probeUrl.searchParams.set('origin', websiteUrl.origin);
-      } catch {}
+      if (channel.websiteUrl) {
+        try {
+          const websiteUrl = new URL(channel.websiteUrl);
+          probeUrl.searchParams.set('referer', channel.websiteUrl);
+          probeUrl.searchParams.set('origin', websiteUrl.origin);
+        } catch {}
+      }
 
       for (const [key, value] of Object.entries(stream.requestHeaders ?? {})) {
         probeUrl.searchParams.append(`header_${key}`, value);
@@ -1079,6 +1498,11 @@ export class LiveTvComponent implements OnDestroy {
   }
 
   ngOnDestroy() {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('pagehide', this.pageHideListener);
+      window.removeEventListener('beforeunload', this.pageHideListener);
+    }
+    this.stopActiveBackendPlayback(true);
     this.clearCastNotice();
     this.destroy$.next();
     this.destroy$.complete();
