@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">pirateflix</string>
-    <string name="title_activity_main">pirateflix</string>
+    <string name="app_name">PirateFlix</string>
+    <string name="title_activity_main">PirateFlix</string>
     <string name="package_name">com.samuel2793.pirateflix</string>
     <string name="custom_url_scheme">com.samuel2793.pirateflix</string>
 </resources>

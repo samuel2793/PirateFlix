@@ -4,7 +4,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.samuel2793.pirateflix',
-  appName: 'pirateflix',
+  appName: 'PirateFlix',
   webDir: 'dist/pirateflix/browser',
   server: {
     cleartext: true,
